@@ -1,0 +1,25 @@
+{
+  "interests": [
+    "AI applied to SRE",
+    "AIOps",
+    "AI agents and multi-agent systems",
+    "Incident management",
+    "Observability",
+    "Infrastructure automation",
+    "LLMs for debugging and root-cause analysis",
+    "AI-assisted software engineering"
+  ],
+  "positive_signals": [
+    "practical applicability",
+    "real-world examples",
+    "clear operational relevance",
+    "debugging or root-cause analysis workflows",
+    "incident response and reliability engineering use cases"
+  ],
+  "negative_signals": [
+    "overly theoretical",
+    "weak connection to engineering practice"
+  ],
+  "notes": "Initial profile. Update this with natural-language feedback after each run.",
+  "feedback_history": []
+}

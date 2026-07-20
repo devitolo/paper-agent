@@ -1,0 +1,7 @@
+services:
+  paper-agents:
+    build: .
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./data:/app/data
+    command: ["profile"]
