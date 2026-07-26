@@ -1,16 +1,85 @@
-# Personal Paper Agents
+# Project Paper
 
-A tiny three-agent prototype for research-paper discovery and curation.
+Project Paper is a system for discovering, downloading, filtering, scoring, and recommending research papers based on a user's evolving interests and feedback.
 
-## What it does
+The repository currently contains a small Python prototype called `paper_agents`. The prototype searches arXiv, uses OpenAI to score and curate candidates, and stores a human-editable preference profile in JSON. The broader Project Paper architecture described here is the target direction, not the current implementation.
 
-1. `ResearchScout` searches arXiv for recent papers that match your interests, then asks OpenAI to score and explain the candidates.
-2. `ResearchCurator` reviews the Scout's candidates and picks the best 2-3 papers to spend time on.
-3. `FeedbackAgent` reads your natural-language feedback and updates `data/profile.json`.
+## Overview
 
-The next run uses the updated profile.
+Project Paper is intended to become a provider-agnostic, hybrid local/cloud paper discovery and curation platform. The full runtime environment is planned to live on a late-2012 Mac mini running Ubuntu.
 
-## Setup
+The first production-oriented implementation should favor simple Python, SQLite, explicit workflow stages, and systemd timers over a heavy agent framework.
+
+## Architecture Summary
+
+- The Mac mini is the runtime host.
+- Scheduled workflows run locally on Ubuntu.
+- Cloud AI providers are used selectively for paper scouting and higher-value reasoning.
+- Local models handle high-volume filtering, scoring, summarization, and extraction where benchmarks show they are effective.
+- The workflow should support switching between ChatGPT and Gemini without rewriting downstream processing.
+- Previously seen, accepted, declined, and highly rated papers are stored and reused in future filtering.
+- Open-access PDFs should be downloaded automatically when available.
+- Deterministic code should handle downloading, parsing, filtering, and storage; LLMs should make judgments rather than perform file transfer.
+
+See [docs/architecture.md](docs/architecture.md) and [docs/ai-stack.md](docs/ai-stack.md) for the target design.
+
+## Current Project Status
+
+Implemented today:
+
+- `ResearchScout` queries arXiv for recent papers based on `data/profile.json`.
+- OpenAI scores candidate titles and abstracts.
+- `ResearchCurator` selects a short reading list from the scout output.
+- `FeedbackAgent` updates `data/profile.json` from natural-language feedback.
+- Docker can run the CLI with a mounted `.env` and `data/` directory.
+
+Not implemented yet:
+
+- SQLite registry or feedback database.
+- Gemini or other provider adapters.
+- Automatic open-access PDF download.
+- PDF text or section extraction.
+- Local model inference.
+- Duplicate/history filtering beyond the preference profile.
+- systemd service and timer.
+- Benchmark recording and generated run reports.
+
+## Planned Workflow
+
+1. A systemd timer starts the workflow on the Mac mini.
+2. The workflow loads configuration, paper history, and preference data.
+3. A configured cloud scout provider finds candidate papers.
+4. Candidate records are normalized into a provider-independent schema.
+5. Local filters remove duplicates and papers already seen, accepted, declined, or recently reviewed.
+6. Open-access PDFs are downloaded when available.
+7. Downloaded files are hashed and registered.
+8. PDF text and useful sections are extracted.
+9. A benchmark-selected local model scores and summarizes selected content.
+10. Strong or difficult candidates may be escalated to a cloud model.
+11. A report is generated for user review.
+12. User feedback is written locally and reused in future runs.
+
+The current prototype implements only a thin arXiv plus OpenAI version of the scout, curator, and feedback loop.
+
+## Requirements
+
+Current prototype:
+
+- Python 3.12 or Docker
+- OpenAI API key
+- Network access to arXiv and the OpenAI API
+
+Target runtime:
+
+- Mac mini Late 2012, Intel Core i7, 8 GB RAM, running Ubuntu
+- Python
+- SQLite
+- systemd
+- PDF download and extraction tooling
+- A small local model runtime selected through benchmarking
+- Cloud provider access for ChatGPT/Codex, Gemini, or future providers
+
+## Run The Current Prototype
 
 Add your API key to `.env`:
 
@@ -19,18 +88,11 @@ OPENAI_API_KEY=your_api_key
 OPENAI_MODEL=gpt-5.1
 ```
 
-### Docker setup
-
 Build the container:
 
 ```bash
 docker compose build
 ```
-
-The `.env` file is mounted read-only into the container at runtime. It is not copied
-into the Docker image.
-
-## Run
 
 Discover and curate papers:
 
@@ -50,20 +112,59 @@ Inspect the stored preference profile:
 docker compose run --rm paper-agents profile
 ```
 
-You can still run locally with Python if you want:
+You can still run locally with Python:
 
 ```bash
 python3 -m paper_agents.cli run
 ```
 
-## Project structure
+## Repository Layout
 
-- `paper_agents/cli.py`: command-line entry point.
-- `paper_agents/scout.py`: Research Scout agent and arXiv discovery.
-- `paper_agents/curator.py`: Research Curator agent.
-- `paper_agents/feedback.py`: Feedback Agent.
-- `paper_agents/openai_helpers.py`: small OpenAI Responses API wrapper.
-- `paper_agents/store.py`: JSON profile loading and saving.
-- `data/profile.json`: editable preference profile and feedback history.
+```text
+.
+|-- data/
+|   `-- profile.json
+|-- deploy/
+|   `-- mini.sh
+|-- docs/
+|   |-- ai-stack.md
+|   |-- architecture.md
+|   |-- benchmarking.md
+|   |-- decision-log.md
+|   |-- roadmap.md
+|   `-- workflow.md
+|-- paper_agents/
+|   |-- cli.py
+|   |-- curator.py
+|   |-- feedback.py
+|   |-- openai_helpers.py
+|   |-- scout.py
+|   `-- store.py
+|-- Dockerfile
+|-- docker-compose.yml
+|-- README.md
+`-- requirements.txt
+```
 
-This version intentionally avoids a UI, scheduler, database, vector store, and full-paper ingestion.
+## Development Roadmap
+
+The next work should move from the prototype toward explicit data models and persistence:
+
+1. Define common paper, provider, run, and feedback records.
+2. Add SQLite persistence for paper history, user feedback, and telemetry.
+3. Add a manual-input proof of concept for paper links and PDFs.
+4. Benchmark local model candidates on Project Paper tasks.
+5. Add provider adapters for ChatGPT/Codex and Gemini behind one interface.
+6. Add open-access PDF resolution, download, hashing, and extraction.
+7. Add systemd scheduling, logs, and run reports.
+
+See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
+
+## Design Documents
+
+- [Architecture](docs/architecture.md)
+- [AI stack](docs/ai-stack.md)
+- [Workflow](docs/workflow.md)
+- [Benchmarking](docs/benchmarking.md)
+- [Roadmap](docs/roadmap.md)
+- [Decision log](docs/decision-log.md)
