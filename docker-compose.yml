@@ -1,6 +1,6 @@
 services:
   paper-agents:
-    image: ghcr.io/devitolo/paper-agent:${PAPER_AGENT_IMAGE_TAG:-main}
+    build: .
     volumes:
       - ./.env:/app/.env:ro
       - ./data:/app/data

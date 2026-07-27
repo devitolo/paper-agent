@@ -140,6 +140,8 @@ python3 -m paper_agents.cli run
 |   |-- openai_helpers.py
 |   |-- scout.py
 |   `-- store.py
+|-- scripts/
+|   `-- paper_extract_ollama.py
 |-- Dockerfile
 |-- docker-compose.yml
 |-- README.md
