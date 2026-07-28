@@ -12,11 +12,10 @@ from typing import Any
 DEFAULT_MODEL = "qwen2.5:1.5b-instruct"
 DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
 REQUIRED_KEYS = [
-    "problem",
-    "why_hard",
-    "proposed_use_of_llms",
-    "dataset_or_scale",
-    "evaluation_method",
+    "paper_date",
+    "research_problem",
+    "why_it_matters",
+    "approach",
 ]
 
 
@@ -126,9 +125,9 @@ def build_synthesis_prompt(chunk_extractions: list[dict[str, str | None]]) -> st
         "You are merging chunk-level paper metadata extractions. Output exactly "
         f"one JSON object matching this schema: {schema_text()}. "
         "Values must be strings or null. Use only the chunk extractions. Prefer "
-        "paper-level facts over example-specific incident details. Keep dataset "
-        "or scale facts in dataset_or_scale, not evaluation_method. Do not include "
-        "markdown, extra keys, arrays, findings, or line breaks inside values.\n\n"
+        "paper-level facts over example-specific details. For paper_date, use the "
+        "most specific explicitly stated date. Do not include markdown, extra keys, "
+        "arrays, findings, or line breaks inside values.\n\n"
         "Chunk extractions:\n"
         f"{json.dumps(chunk_extractions, indent=2, ensure_ascii=False)}"
     )
@@ -136,11 +135,10 @@ def build_synthesis_prompt(chunk_extractions: list[dict[str, str | None]]) -> st
 
 def schema_text() -> str:
     schema = {
-        "problem": "string|null",
-        "why_hard": "string|null",
-        "proposed_use_of_llms": "string|null",
-        "dataset_or_scale": "string|null",
-        "evaluation_method": "string|null",
+        "paper_date": "string|null",
+        "research_problem": "string|null",
+        "why_it_matters": "string|null",
+        "approach": "string|null",
     }
     return json.dumps(schema, separators=(",", ":"))
 

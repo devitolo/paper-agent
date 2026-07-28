@@ -114,7 +114,7 @@ Benchmark paper:
 Task:
 
 - Extract structured paper metadata from a paper excerpt.
-- Return JSON with `problem`, `why_hard`, `proposed_use_of_llms`, `dataset_or_scale`, and `evaluation_method`.
+- Initial benchmark returned JSON with `problem`, `why_hard`, `proposed_use_of_llms`, `dataset_or_scale`, and `evaluation_method`.
 - Prefer grounded extraction over fluent summarization.
 
 | Model | Size Class | Short Excerpt Result | Long Excerpt Result | Runtime Observed | Strengths | Failure Modes | Recommendation |
@@ -128,6 +128,19 @@ Task:
 Current choice:
 
 Use `qwen2.5:1.5b-instruct` as the default local extractor on the Mac mini.
+
+Current triage schema:
+
+```json
+{
+  "paper_date": null,
+  "research_problem": null,
+  "why_it_matters": null,
+  "approach": null
+}
+```
+
+This schema is intentionally simpler than the initial benchmark schema. It supports the first review decision: whether the paper is interesting enough to inspect further.
 
 It is not perfect, but it was the most stable model on longer excerpts and the easiest to wrap with validation and retry logic. Treat it as a cheap local first pass, not a final judge.
 
