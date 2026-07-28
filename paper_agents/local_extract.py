@@ -45,14 +45,22 @@ def extract_paper(
             workers=max(1, workers),
         )
 
-        merged = synthesize_extractions(ollama_url, model, chunk_results, timeout)
+        synthesis = synthesize_extractions(ollama_url, model, chunk_results, timeout)
+        fallback = deterministic_merge(chunk_results)
+        merged = synthesis["extraction"]
+        merge_strategy = "synthesis"
+        if populated_field_count(merged) < populated_field_count(fallback):
+            merged = fallback
+            merge_strategy = "deterministic_fallback"
+
         return {
             "source": str(source_path),
             "text_source": str(text_path),
             "model": model,
             "chunk_count": len(chunk_results),
-            "merged": merged["extraction"],
-            "synthesis": merged,
+            "merged": merged,
+            "merge_strategy": merge_strategy,
+            "synthesis": synthesis,
             "chunks": chunk_results,
         }
     finally:
@@ -172,7 +180,7 @@ def normalize_extraction(value: Any) -> dict[str, str | None]:
         if item is None:
             normalized[key] = None
         elif isinstance(item, str):
-            normalized[key] = " ".join(item.split())
+            normalized[key] = " ".join(item.split()) or None
         else:
             normalized[key] = json.dumps(item, ensure_ascii=False)
     return normalized
@@ -241,7 +249,11 @@ def synthesize_extractions(
     chunks: list[dict[str, Any]],
     timeout: int,
 ) -> dict[str, Any]:
-    extractions = [chunk["extraction"] for chunk in chunks]
+    extractions = [
+        chunk["extraction"]
+        for chunk in chunks
+        if populated_field_count(chunk["extraction"]) > 0
+    ]
     return run_extraction_call(
         url,
         model,
@@ -249,6 +261,21 @@ def synthesize_extractions(
         timeout,
         {"chunk_index": None, "chars": 0, "kind": "synthesis"},
     )
+
+
+def deterministic_merge(chunks: list[dict[str, Any]]) -> dict[str, str | None]:
+    merged: dict[str, str | None] = {key: None for key in REQUIRED_KEYS}
+    for key in REQUIRED_KEYS:
+        for chunk in chunks:
+            value = chunk["extraction"].get(key)
+            if value:
+                merged[key] = value
+                break
+    return merged
+
+
+def populated_field_count(extraction: dict[str, str | None]) -> int:
+    return sum(1 for key in REQUIRED_KEYS if extraction.get(key))
 
 
 def run_extraction_call(
