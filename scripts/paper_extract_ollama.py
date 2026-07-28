@@ -35,6 +35,7 @@ def main() -> int:
     parser.add_argument("--max-chars", type=int, default=7000)
     parser.add_argument("--limit-chunks", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--output", help="Output JSON path")
     args = parser.parse_args()
 
@@ -46,6 +47,7 @@ def main() -> int:
         max_chars=args.max_chars,
         limit_chunks=args.limit_chunks,
         timeout=args.timeout,
+        workers=args.workers,
     )
 
     output_path = Path(args.output) if args.output else output_path_for(source_path, args.model)

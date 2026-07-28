@@ -46,6 +46,7 @@ def main() -> None:
     extract_parser.add_argument("--max-chars", type=int, default=7000)
     extract_parser.add_argument("--limit-chunks", type=int, default=3)
     extract_parser.add_argument("--timeout", type=int, default=600)
+    extract_parser.add_argument("--workers", type=int, default=1)
     extract_parser.add_argument("--output", type=Path, help="Output JSON path")
 
     subparsers.add_parser("profile", help="Print the current preference profile")
@@ -88,6 +89,7 @@ def main() -> None:
                 max_chars=args.max_chars,
                 limit_chunks=args.limit_chunks,
                 timeout=args.timeout,
+                workers=args.workers,
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error

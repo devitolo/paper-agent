@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import subprocess
 import tempfile
@@ -27,6 +28,7 @@ def extract_paper(
     max_chars: int = 7000,
     limit_chunks: int = 3,
     timeout: int = 600,
+    workers: int = 1,
 ) -> dict[str, Any]:
     text_path, cleanup_dir = prepare_text_source(source_path)
     try:
@@ -35,12 +37,13 @@ def extract_paper(
         if limit_chunks > 0:
             chunks = chunks[:limit_chunks]
 
-        chunk_results = []
-        for index, chunk in enumerate(chunks):
-            print(f"extracting chunk {index + 1}/{len(chunks)} ({len(chunk)} chars)")
-            chunk_results.append(
-                extract_chunk(ollama_url, model, chunk, index, timeout)
-            )
+        chunk_results = extract_chunks(
+            ollama_url,
+            model,
+            chunks,
+            timeout,
+            workers=max(1, workers),
+        )
 
         merged = synthesize_extractions(ollama_url, model, chunk_results, timeout)
         return {
@@ -183,6 +186,37 @@ def parse_model_json(response_text: str) -> dict[str, str | None]:
             cleaned = cleaned[4:].strip()
     parsed = json.loads(cleaned)
     return normalize_extraction(parsed)
+
+
+def extract_chunks(
+    url: str,
+    model: str,
+    chunks: list[str],
+    timeout: int,
+    *,
+    workers: int,
+) -> list[dict[str, Any]]:
+    if workers == 1 or len(chunks) <= 1:
+        results = []
+        for index, chunk in enumerate(chunks):
+            print(f"extracting chunk {index + 1}/{len(chunks)} ({len(chunk)} chars)")
+            results.append(extract_chunk(url, model, chunk, index, timeout))
+        return results
+
+    results: list[dict[str, Any] | None] = [None] * len(chunks)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for index, chunk in enumerate(chunks):
+            print(f"queueing chunk {index + 1}/{len(chunks)} ({len(chunk)} chars)")
+            future = executor.submit(extract_chunk, url, model, chunk, index, timeout)
+            futures[future] = index
+
+        for future in concurrent.futures.as_completed(futures):
+            index = futures[future]
+            results[index] = future.result()
+            print(f"finished chunk {index + 1}/{len(chunks)}")
+
+    return [result for result in results if result is not None]
 
 
 def extract_chunk(
