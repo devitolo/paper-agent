@@ -53,6 +53,8 @@ This roadmap is phased so the project can remain useful while moving from the cu
 
 - Build compact preference profiles.
 - Retrieve positive and negative examples.
+- Move Scout retrieval topics, positive keywords, domain context terms, and negative keywords into an inspectable preference file.
+- Add Feedback Loop v2: convert natural-language paper feedback into proposed preference updates for review before applying them.
 - Improve ranking based on user feedback.
 
 ## Phase 7: Optimization

@@ -324,12 +324,17 @@ def rank_candidates(candidates: list[ScoutCandidate], topics: list[str]) -> list
     weighted_keywords = scout_keywords(topics)
     for candidate in candidates:
         score, matches = keyword_score(candidate, weighted_keywords)
+        score, adjustments = adjust_domain_score(candidate, score, matches)
         candidate.score = round(score, 2)
         candidate.matched_keywords = matches
+        reason_parts = []
         if matches:
-            candidate.ranking_reason = "Matched " + ", ".join(matches[:8])
+            reason_parts.append("Matched " + ", ".join(matches[:8]))
         else:
-            candidate.ranking_reason = "No configured keywords matched."
+            reason_parts.append("No configured keywords matched")
+        if adjustments:
+            reason_parts.append("; ".join(adjustments))
+        candidate.ranking_reason = ". ".join(reason_parts) + "."
     return sorted(
         candidates,
         key=lambda candidate: (candidate.score, candidate.published, candidate.title.lower()),
@@ -390,6 +395,57 @@ def keyword_score(candidate: ScoutCandidate, keywords: dict[str, float]) -> tupl
             matches.append(keyword)
 
     return score, matches
+
+
+DOMAIN_CONTEXT_TERMS = [
+    "incident",
+    "microservice",
+    "service",
+    "production",
+    "operations",
+    "observability",
+    "cloud",
+    "debugging",
+    "sre",
+    "site reliability",
+    "aiops",
+]
+
+OFF_DOMAIN_TERMS = [
+    "pre-silicon",
+    "side-channel",
+    "processor",
+    "hardware",
+    "circuit",
+    "chip",
+    "semiconductor",
+    "fpga",
+    "verilog",
+]
+
+
+def adjust_domain_score(
+    candidate: ScoutCandidate, score: float, matches: list[str]
+) -> tuple[float, list[str]]:
+    text = normalize_text(" ".join([candidate.title, candidate.abstract, " ".join(candidate.categories)]))
+    adjustments: list[str] = []
+
+    context_hits = [term for term in DOMAIN_CONTEXT_TERMS if count_phrase(text, term)]
+    off_domain_hits = [term for term in OFF_DOMAIN_TERMS if count_phrase(text, term)]
+
+    has_root_cause = "root cause" in matches or "root-cause" in matches
+    if has_root_cause and context_hits:
+        score += min(len(context_hits), 4) * 2.0
+        adjustments.append("boosted for root-cause plus ops context")
+    elif has_root_cause:
+        score -= 10.0
+        adjustments.append("penalized for root-cause without ops context")
+
+    if off_domain_hits:
+        score -= min(len(off_domain_hits), 4) * 8.0
+        adjustments.append("penalized off-domain terms: " + ", ".join(off_domain_hits[:4]))
+
+    return max(score, 0.0), adjustments
 
 
 def write_candidates_jsonl(candidates: list[ScoutCandidate], output_path: Path) -> None:
