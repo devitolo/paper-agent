@@ -118,6 +118,12 @@ You can still run locally with Python:
 python3 -m paper_agents.cli run
 ```
 
+Extract structured paper metadata locally with Ollama:
+
+```bash
+python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
+```
+
 ## Repository Layout
 
 ```text
