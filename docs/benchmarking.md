@@ -153,3 +153,48 @@ Recommended local extraction loop:
 5. Retry once with a repair prompt when JSON is invalid or required fields are missing.
 6. Save raw chunk outputs plus merged paper-level output.
 7. Use a stronger cloud model only for final synthesis or difficult papers.
+
+## Mac Mini Worker Concurrency Results
+
+Test host:
+
+- Mac mini Late 2012
+- Intel Core i7, 8 GB RAM
+- Xubuntu 24.04 LTS
+- Ollama with `qwen2.5:1.5b-instruct`
+
+Benchmark command shape:
+
+```bash
+time python3 -m paper_agents.cli extract ~/qwen-paper-test/incident-llm.pdf \
+  --model qwen2.5:1.5b-instruct \
+  --limit-chunks 0 \
+  --workers WORKER_COUNT \
+  --output /tmp/incident-workersN-fixed.json
+```
+
+Benchmark paper:
+
+- arXiv: 2301.03797
+- Full PDF extraction
+- 13 chunks
+- Triage schema: `paper_date`, `research_problem`, `why_it_matters`, `approach`
+
+| Workers | Runtime | Merge Strategy | Output Quality | System Notes |
+|---:|---:|---|---|---|
+| 1 | 26m22s | Initial run predates fallback merge fix | Poor final merge in initial run: blank strings for main fields | Usable but extremely slow |
+| 2 | 4m05s | `synthesis` | Best result: concise, grounded, captured service health and developer productivity | RAM about 2.52 GB / 7.66 GB, swap nearly unused, SSH/VNC remained usable |
+| 3 | 4m18s | `synthesis` | Acceptable but slightly more generic than workers 2 | Higher load, no speed benefit over workers 2 |
+
+Best observed settings:
+
+```bash
+time python3 -m paper_agents.cli extract ~/qwen-paper-test/incident-llm.pdf \
+  --model qwen2.5:1.5b-instruct \
+  --limit-chunks 0 \
+  --workers 2 \
+  --output /tmp/incident.json
+```
+
+Workers 2 is the current default recommendation for the Mac mini. It delivered roughly a 6.4x wall-clock improvement over the single-worker baseline on this paper, while preserving better output quality than workers 3 and keeping the machine responsive.
+
