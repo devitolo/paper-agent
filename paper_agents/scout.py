@@ -19,17 +19,11 @@ from paper_agents.openai_helpers import call_openai_json
 
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
 DEFAULT_SCOUT_TOPICS = [
-    "AI applied to SRE",
     "AIOps",
-    "incident response",
     "incident management",
-    "observability",
     "root cause analysis",
-    "debugging",
-    "software reliability",
-    "software operations",
-    "engineering workflows",
-    "LLM agents for software engineering",
+    "production operations",
+    "developer productivity",
 ]
 DEFAULT_FETCH_LIMIT = 50
 DEFAULT_KEEP_LIMIT = 5
@@ -355,12 +349,13 @@ def scout_keywords(topics: list[str]) -> dict[str, float]:
         "root-cause": 4.5,
         "observability": 4.0,
         "debugging": 4.0,
-        "fault localization": 4.0,
+        "engineering productivity": 4.0,
+        "developer productivity": 4.0,
+        "efficiency": 3.5,
         "anomaly detection": 3.5,
         "reliability": 3.0,
         "software operation": 3.0,
         "software engineering": 2.5,
-        "developer productivity": 3.0,
         "llm": 2.5,
         "large language model": 2.5,
         "agent": 2.0,
