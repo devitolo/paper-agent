@@ -125,7 +125,13 @@ Run the deterministic arXiv Scout MVP:
 python3 -m paper_agents.cli scout-daily
 ```
 
-The first Scout implementation uses arXiv only, stores all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`, ranks candidates with deterministic keywords, keeps the top 5, and downloads PDFs for the selected papers into `data/papers/arxiv/`.
+The first Scout implementation uses arXiv only, stores all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`, ranks candidates with deterministic keywords, keeps the top 5, and downloads PDFs for the selected papers into `data/papers/arxiv/`. The default Scout run fetches up to 50 candidates across the default topic set.
+
+Stable local output folders:
+
+- Scout metadata: `data/scout/YYYY-MM-DD.jsonl`
+- Downloaded PDFs: `data/papers/SOURCE/`
+- Local extraction summaries: `data/extractions/SOURCE/`
 
 Extract structured paper metadata locally with Ollama:
 

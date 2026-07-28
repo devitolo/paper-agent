@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import re
 import subprocess
 import tempfile
 import time
+import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_MODEL = "qwen2.5:1.5b-instruct"
 DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
+DEFAULT_EXTRACTION_DIR = Path("data/extractions")
+ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
 REQUIRED_KEYS = [
     "paper_date",
     "research_problem",
@@ -53,9 +58,14 @@ def extract_paper(
             merged = fallback
             merge_strategy = "deterministic_fallback"
 
+        source_metadata = lookup_source_metadata(source_path)
+        if source_metadata.get("paper_date"):
+            merged["paper_date"] = source_metadata["paper_date"]
+
         return {
             "source": str(source_path),
             "text_source": str(text_path),
+            "source_metadata": source_metadata,
             "model": model,
             "chunk_count": len(chunk_results),
             "merged": merged,
@@ -309,6 +319,77 @@ def run_extraction_call(
     }
 
 
+def lookup_source_metadata(source_path: Path) -> dict[str, Any]:
+    arxiv_id = arxiv_id_from_source(source_path)
+    if not arxiv_id:
+        return {}
+
+    metadata: dict[str, Any] = {"source": "arxiv", "arxiv_id": arxiv_id}
+    try:
+        metadata.update(fetch_arxiv_metadata(arxiv_id))
+    except OSError as exc:
+        metadata["metadata_error"] = str(exc)
+    return metadata
+
+
+def fetch_arxiv_metadata(arxiv_id: str, timeout: int = 30) -> dict[str, Any]:
+    clean_id = arxiv_id.replace("_", "/")
+    params = urllib.parse.urlencode({"id_list": clean_id})
+    request = urllib.request.Request(
+        f"https://export.arxiv.org/api/query?{params}",
+        headers={"User-Agent": "paper-agent/0.1"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        root = ET.fromstring(response.read())
+
+    entry = root.find("atom:entry", ARXIV_NS)
+    if entry is None:
+        return {}
+
+    return {
+        "paper_date": entry.findtext("atom:published", default="", namespaces=ARXIV_NS)[:10] or None,
+        "updated": entry.findtext("atom:updated", default="", namespaces=ARXIV_NS)[:10] or None,
+        "title": " ".join(entry.findtext("atom:title", default="", namespaces=ARXIV_NS).split()) or None,
+        "url": arxiv_abs_url(clean_id),
+    }
+
+
+def arxiv_id_from_source(source_path: Path) -> str | None:
+    parts = source_path.parts
+    if "arxiv" in parts:
+        candidate = source_path.stem
+        if is_arxiv_id(candidate):
+            return candidate
+
+    text = str(source_path)
+    match = re.search(r"(?:arxiv(?:\.org)?/(?:abs|pdf)/|arxiv[_-])([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)", text)
+    if match:
+        return match.group(1)
+
+    stem_match = re.search(r"([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)", source_path.stem)
+    if stem_match:
+        return stem_match.group(1)
+    return None
+
+
+def is_arxiv_id(value: str) -> bool:
+    return bool(re.fullmatch(r"[0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?", value))
+
+
+def arxiv_abs_url(arxiv_id: str) -> str:
+    return f"https://arxiv.org/abs/{arxiv_id}"
+
+
 def output_path_for(source_path: Path, model: str) -> Path:
     model_slug = model.replace(":", "-").replace("/", "-")
-    return source_path.with_suffix(f".{model_slug}.summary.json")
+    arxiv_id = arxiv_id_from_source(source_path)
+    if arxiv_id:
+        return DEFAULT_EXTRACTION_DIR / "arxiv" / f"{arxiv_id}.{model_slug}.summary.json"
+
+    source_slug = safe_output_slug(source_path.stem)
+    return DEFAULT_EXTRACTION_DIR / "manual" / f"{source_slug}.{model_slug}.summary.json"
+
+
+def safe_output_slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-._")
+    return slug[:120] if slug else "paper"

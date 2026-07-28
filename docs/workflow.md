@@ -73,3 +73,14 @@ Instead:
 4. Include only that compact profile in the scouting or ranking request.
 
 The existing `data/profile.json` is a useful seed for the compact preference profile, but it is not a replacement for paper-level history.
+
+
+## Local Output Conventions
+
+Use stable folders so scheduled runs are easy to inspect and sync:
+
+- Scout metadata: `data/scout/YYYY-MM-DD.jsonl`
+- Downloaded PDFs: `data/papers/<source>/`
+- Local extraction summaries: `data/extractions/<source>/`
+
+When a downloaded arXiv PDF is extracted, deterministic arXiv metadata should supply the paper date before falling back to model-extracted dates.

@@ -86,9 +86,10 @@ class PaperSource(Protocol):
 class ArxivSource:
     name = "arxiv"
 
-    def __init__(self, request_delay: float = 3.0, retries: int = 2):
+    def __init__(self, request_delay: float = 3.0, retries: int = 2, verbose: bool = True):
         self.request_delay = request_delay
         self.retries = retries
+        self.verbose = verbose
 
     def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
         terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
@@ -100,11 +101,17 @@ class ArxivSource:
         for index, topic in enumerate(terms):
             if index:
                 time.sleep(self.request_delay)
+            if self.verbose:
+                print(f"fetching arXiv topic {index + 1}/{len(terms)}: {topic} ({per_topic} requested)")
             try:
                 entries = self._fetch_topic(topic, per_topic)
             except OSError as error:
                 errors.append(f"{topic}: {error}")
+                if self.verbose:
+                    print(f"arXiv topic failed: {topic}: {error}")
                 continue
+            if self.verbose:
+                print(f"received {len(entries)} arXiv entries for topic: {topic}")
 
             for entry in entries:
                 candidate = arxiv_entry_to_candidate(entry)
@@ -148,6 +155,8 @@ class ArxivSource:
                     raise
                 retry_after = error.headers.get("Retry-After")
                 delay = float(retry_after) if retry_after and retry_after.isdigit() else self.request_delay * (attempt + 2)
+                if self.verbose:
+                    print(f"arXiv rate limited topic '{topic}', retrying in {delay:.0f}s")
                 time.sleep(delay)
 
         if last_error:
@@ -240,21 +249,31 @@ def run_daily_scout(
     topics = topics or DEFAULT_SCOUT_TOPICS
     run_date = run_date or date.today()
 
+    print(
+        f"scout run: source={source.name} topics={len(topics)} "
+        f"fetch_limit={fetch_limit} keep={keep_limit} freshness_months={freshness_months}"
+    )
     fetched = source.fetch(topics, max_results=fetch_limit, freshness_months=freshness_months)
+    print(f"fetched {len(fetched)} raw candidates")
     candidates = dedupe_candidates(fetched)
+    print(f"deduped to {len(candidates)} candidates")
     ranked = rank_candidates(candidates, topics)
     selected = ranked[:keep_limit]
+    print(f"selected top {len(selected)} candidates")
     selected_ids = {candidate_key(candidate) for candidate in selected}
 
     for candidate in ranked:
         candidate.selected = candidate_key(candidate) in selected_ids
 
     if download_pdfs:
-        for candidate in selected:
+        for index, candidate in enumerate(selected, 1):
+            print(f"downloading PDF {index}/{len(selected)}: {candidate.source_id or candidate.title}")
             candidate.pdf_path = download_pdf(candidate, pdf_dir)
+            print(f"pdf path: {candidate.pdf_path or 'not available'}")
 
     output_path = scout_dir / f"{run_date.isoformat()}.jsonl"
     write_candidates_jsonl(ranked, output_path)
+    print(f"wrote scout metadata: {output_path}")
 
     return {
         "source": source.name,
@@ -421,6 +440,16 @@ OFF_DOMAIN_TERMS = [
     "semiconductor",
     "fpga",
     "verilog",
+    "railway",
+    "railway workshop",
+    "workshop",
+    "permit",
+    "contract",
+    "traffic incident",
+    "vehicular",
+    "vehicle",
+    "transportation",
+    "road",
 ]
 
 

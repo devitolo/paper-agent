@@ -130,6 +130,7 @@ def main() -> None:
             raise SystemExit(str(error)) from error
 
         output_path = args.output if args.output else output_path_for(args.source, args.model)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
         print(f"wrote {output_path}")
         print_section("Local extraction", output["merged"])
