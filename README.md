@@ -28,7 +28,8 @@ See [docs/architecture.md](docs/architecture.md) and [docs/ai-stack.md](docs/ai-
 Implemented today:
 
 - `ResearchScout` queries arXiv for recent papers based on `data/profile.json`.
-- OpenAI scores candidate titles and abstracts.
+- `scout-daily` runs a deterministic arXiv Scout MVP with keyword ranking, JSONL metadata storage, top-five selection, and PDF downloads for selected papers.
+- OpenAI scores candidate titles and abstracts in the older `run` prototype.
 - `ResearchCurator` selects a short reading list from the scout output.
 - `FeedbackAgent` updates `data/profile.json` from natural-language feedback.
 - Docker can run the CLI with a mounted `.env` and `data/` directory.
@@ -37,7 +38,7 @@ Not implemented yet:
 
 - SQLite registry or feedback database.
 - Gemini or other provider adapters.
-- Automatic open-access PDF download.
+- General open-access PDF resolution beyond arXiv.
 - PDF text or section extraction.
 - Local model inference.
 - Duplicate/history filtering beyond the preference profile.
@@ -117,6 +118,14 @@ You can still run locally with Python:
 ```bash
 python3 -m paper_agents.cli run
 ```
+
+Run the deterministic arXiv Scout MVP:
+
+```bash
+python3 -m paper_agents.cli scout-daily
+```
+
+The first Scout implementation uses arXiv only, stores all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`, ranks candidates with deterministic keywords, keeps the top 5, and downloads PDFs for the selected papers into `data/papers/arxiv/`.
 
 Extract structured paper metadata locally with Ollama:
 

@@ -13,7 +13,16 @@ from paper_agents.local_extract import (
     extract_paper,
     output_path_for,
 )
-from paper_agents.scout import ResearchScout
+from paper_agents.scout import (
+    DEFAULT_FETCH_LIMIT,
+    DEFAULT_FRESHNESS_MONTHS,
+    DEFAULT_KEEP_LIMIT,
+    DEFAULT_PDF_DIR,
+    DEFAULT_SCOUT_DIR,
+    DEFAULT_SCOUT_TOPICS,
+    ResearchScout,
+    run_daily_scout,
+)
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile, save_profile
 
 
@@ -35,6 +44,15 @@ def main() -> None:
 
     run_parser = subparsers.add_parser("run", help="Run Scout, then Curator")
     run_parser.add_argument("--max-results", type=int, default=10, help="Number of arXiv results to fetch")
+
+    daily_parser = subparsers.add_parser("scout-daily", help="Run deterministic daily arXiv scout MVP")
+    daily_parser.add_argument("--freshness-months", type=int, default=DEFAULT_FRESHNESS_MONTHS)
+    daily_parser.add_argument("--fetch", type=int, default=DEFAULT_FETCH_LIMIT, help="Maximum candidates to fetch")
+    daily_parser.add_argument("--keep", type=int, default=DEFAULT_KEEP_LIMIT, help="Number of top candidates to select")
+    daily_parser.add_argument("--scout-dir", type=Path, default=DEFAULT_SCOUT_DIR)
+    daily_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
+    daily_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
+    daily_parser.add_argument("--no-download", action="store_true", help="Do not download PDFs")
 
     feedback_parser = subparsers.add_parser("feedback", help="Update preferences from feedback")
     feedback_parser.add_argument("text", help="Natural-language feedback")
@@ -67,6 +85,23 @@ def main() -> None:
 
         print_section("Scout candidates", {"candidates": candidates})
         print_section("Curator recommendations", {"recommendations": recommendations})
+        return
+
+    if args.command == "scout-daily":
+        topics = args.topics or DEFAULT_SCOUT_TOPICS
+        try:
+            output = run_daily_scout(
+                topics=topics,
+                freshness_months=args.freshness_months,
+                fetch_limit=args.fetch,
+                keep_limit=args.keep,
+                scout_dir=args.scout_dir,
+                pdf_dir=args.pdf_dir,
+                download_pdfs=not args.no_download,
+            )
+        except RuntimeError as error:
+            raise SystemExit(str(error)) from error
+        print_section("Daily scout", output)
         return
 
     if args.command == "feedback":

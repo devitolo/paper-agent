@@ -1,16 +1,41 @@
 from __future__ import annotations
 
+import hashlib
 import html
+import json
+import re
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import asdict, dataclass, field
+from datetime import date, timedelta
+from pathlib import Path
+from typing import Any, Protocol
 
 from paper_agents.openai_helpers import call_openai_json
 
 
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
+DEFAULT_SCOUT_TOPICS = [
+    "AI applied to SRE",
+    "AIOps",
+    "incident response",
+    "incident management",
+    "observability",
+    "root cause analysis",
+    "debugging",
+    "software reliability",
+    "software operations",
+    "engineering workflows",
+    "LLM agents for software engineering",
+]
+DEFAULT_FETCH_LIMIT = 50
+DEFAULT_KEEP_LIMIT = 5
+DEFAULT_FRESHNESS_MONTHS = 24
+DEFAULT_SCOUT_DIR = Path("data/scout")
+DEFAULT_PDF_DIR = Path("data/papers")
 
 
 @dataclass
@@ -31,6 +56,109 @@ class PaperCandidate:
             "relevance_score": self.relevance_score,
             "reason": self.reason,
         }
+
+
+@dataclass
+class ScoutCandidate:
+    source: str
+    source_id: str
+    title: str
+    abstract: str
+    authors: list[str]
+    published: str
+    updated: str | None
+    url: str
+    pdf_url: str | None
+    categories: list[str] = field(default_factory=list)
+    primary_category: str | None = None
+    score: float = 0.0
+    matched_keywords: list[str] = field(default_factory=list)
+    ranking_reason: str | None = None
+    selected: bool = False
+    pdf_path: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class PaperSource(Protocol):
+    name: str
+
+    def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
+        """Return normalized candidate records for one source."""
+
+
+class ArxivSource:
+    name = "arxiv"
+
+    def __init__(self, request_delay: float = 3.0, retries: int = 2):
+        self.request_delay = request_delay
+        self.retries = retries
+
+    def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
+        terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
+        per_topic = max(1, min(10, (max_results + len(terms) - 1) // len(terms)))
+        cutoff = date.today() - timedelta(days=freshness_months * 31)
+        candidates: list[ScoutCandidate] = []
+        errors: list[str] = []
+
+        for index, topic in enumerate(terms):
+            if index:
+                time.sleep(self.request_delay)
+            try:
+                entries = self._fetch_topic(topic, per_topic)
+            except OSError as error:
+                errors.append(f"{topic}: {error}")
+                continue
+
+            for entry in entries:
+                candidate = arxiv_entry_to_candidate(entry)
+                candidate.metadata["query_topic"] = topic
+                if not candidate.title or not candidate.url:
+                    continue
+                if candidate.published:
+                    try:
+                        if date.fromisoformat(candidate.published) < cutoff:
+                            continue
+                    except ValueError:
+                        pass
+                candidates.append(candidate)
+
+        if not candidates and errors:
+            raise RuntimeError("arXiv fetch failed for every topic: " + "; ".join(errors[:3]))
+        return dedupe_candidates(candidates)[:max_results]
+
+    def _fetch_topic(self, topic: str, max_results: int) -> list[ET.Element]:
+        params = urllib.parse.urlencode(
+            {
+                "search_query": f'all:"{topic}"',
+                "start": 0,
+                "max_results": max_results,
+                "sortBy": "submittedDate",
+                "sortOrder": "descending",
+            }
+        )
+        url = f"https://export.arxiv.org/api/query?{params}"
+        request = urllib.request.Request(url, headers={"User-Agent": "paper-agent/0.1"})
+
+        last_error: OSError | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    root = ET.fromstring(response.read())
+                return list(root.findall("atom:entry", ARXIV_NS))
+            except urllib.error.HTTPError as error:
+                last_error = error
+                if error.code != 429 or attempt >= self.retries:
+                    raise
+                retry_after = error.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after and retry_after.isdigit() else self.request_delay * (attempt + 2)
+                time.sleep(delay)
+
+        if last_error:
+            raise last_error
+        return []
 
 
 class ResearchScout:
@@ -101,6 +229,239 @@ or AI-assisted software engineering.
         return result.get("candidates", [])
 
 
+def run_daily_scout(
+    *,
+    topics: list[str] | None = None,
+    source: PaperSource | None = None,
+    freshness_months: int = DEFAULT_FRESHNESS_MONTHS,
+    fetch_limit: int = DEFAULT_FETCH_LIMIT,
+    keep_limit: int = DEFAULT_KEEP_LIMIT,
+    scout_dir: Path = DEFAULT_SCOUT_DIR,
+    pdf_dir: Path = DEFAULT_PDF_DIR,
+    run_date: date | None = None,
+    download_pdfs: bool = True,
+) -> dict[str, Any]:
+    """Run the deterministic daily scout MVP and return a run report."""
+    source = source or ArxivSource()
+    topics = topics or DEFAULT_SCOUT_TOPICS
+    run_date = run_date or date.today()
+
+    fetched = source.fetch(topics, max_results=fetch_limit, freshness_months=freshness_months)
+    candidates = dedupe_candidates(fetched)
+    ranked = rank_candidates(candidates, topics)
+    selected = ranked[:keep_limit]
+    selected_ids = {candidate_key(candidate) for candidate in selected}
+
+    for candidate in ranked:
+        candidate.selected = candidate_key(candidate) in selected_ids
+
+    if download_pdfs:
+        for candidate in selected:
+            candidate.pdf_path = download_pdf(candidate, pdf_dir)
+
+    output_path = scout_dir / f"{run_date.isoformat()}.jsonl"
+    write_candidates_jsonl(ranked, output_path)
+
+    return {
+        "source": source.name,
+        "run_date": run_date.isoformat(),
+        "freshness_months": freshness_months,
+        "fetched_count": len(fetched),
+        "candidate_count": len(candidates),
+        "stored_count": len(ranked),
+        "selected_count": len(selected),
+        "output_path": str(output_path),
+        "selected": [candidate.as_dict() for candidate in selected],
+    }
+
+
+def build_arxiv_query(topics: list[str]) -> str:
+    terms = [topic for topic in topics if topic.strip()]
+    if not terms:
+        terms = DEFAULT_SCOUT_TOPICS
+    return " OR ".join(f'all:"{term}"' for term in terms[:12])
+
+
+def arxiv_entry_to_candidate(entry: ET.Element) -> ScoutCandidate:
+    title = _clean(entry.findtext("atom:title", default="", namespaces=ARXIV_NS))
+    abstract = _clean(entry.findtext("atom:summary", default="", namespaces=ARXIV_NS))
+    published = entry.findtext("atom:published", default="", namespaces=ARXIV_NS)[:10]
+    updated = entry.findtext("atom:updated", default="", namespaces=ARXIV_NS)[:10] or None
+    url = _paper_url(entry)
+    pdf_url = _pdf_url(entry)
+    source_id = arxiv_id_from_url(url)
+    authors = [
+        _clean(author.findtext("atom:name", default="", namespaces=ARXIV_NS))
+        for author in entry.findall("atom:author", ARXIV_NS)
+    ]
+    categories = [category.attrib.get("term", "") for category in entry.findall("atom:category", ARXIV_NS)]
+    categories = [category for category in categories if category]
+    primary = entry.find("atom:category", ARXIV_NS)
+    primary_category = primary.attrib.get("term") if primary is not None else None
+
+    return ScoutCandidate(
+        source="arxiv",
+        source_id=source_id,
+        title=title,
+        abstract=abstract,
+        authors=[author for author in authors if author],
+        published=published,
+        updated=updated,
+        url=url,
+        pdf_url=pdf_url,
+        categories=categories,
+        primary_category=primary_category,
+    )
+
+
+def dedupe_candidates(candidates: list[ScoutCandidate]) -> list[ScoutCandidate]:
+    seen: set[str] = set()
+    unique: list[ScoutCandidate] = []
+    for candidate in candidates:
+        key = candidate_key(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def rank_candidates(candidates: list[ScoutCandidate], topics: list[str]) -> list[ScoutCandidate]:
+    weighted_keywords = scout_keywords(topics)
+    for candidate in candidates:
+        score, matches = keyword_score(candidate, weighted_keywords)
+        candidate.score = round(score, 2)
+        candidate.matched_keywords = matches
+        if matches:
+            candidate.ranking_reason = "Matched " + ", ".join(matches[:8])
+        else:
+            candidate.ranking_reason = "No configured keywords matched."
+    return sorted(
+        candidates,
+        key=lambda candidate: (candidate.score, candidate.published, candidate.title.lower()),
+        reverse=True,
+    )
+
+
+def scout_keywords(topics: list[str]) -> dict[str, float]:
+    keywords: dict[str, float] = {
+        "sre": 5.0,
+        "site reliability": 5.0,
+        "aiops": 5.0,
+        "incident": 4.5,
+        "incident response": 5.0,
+        "incident management": 5.0,
+        "root cause": 4.5,
+        "root-cause": 4.5,
+        "observability": 4.0,
+        "debugging": 4.0,
+        "fault localization": 4.0,
+        "anomaly detection": 3.5,
+        "reliability": 3.0,
+        "software operation": 3.0,
+        "software engineering": 2.5,
+        "developer productivity": 3.0,
+        "llm": 2.5,
+        "large language model": 2.5,
+        "agent": 2.0,
+        "workflow": 2.0,
+        "automation": 2.0,
+        "monitoring": 2.0,
+        "cloud": 1.5,
+        "production": 1.5,
+    }
+    for topic in topics:
+        normalized = normalize_text(topic)
+        if normalized:
+            keywords.setdefault(normalized, 2.0)
+    return keywords
+
+
+def keyword_score(candidate: ScoutCandidate, keywords: dict[str, float]) -> tuple[float, list[str]]:
+    title = normalize_text(candidate.title)
+    abstract = normalize_text(candidate.abstract)
+    category_text = normalize_text(" ".join(candidate.categories))
+    score = 0.0
+    matches: list[str] = []
+
+    for keyword, weight in keywords.items():
+        title_hits = count_phrase(title, keyword)
+        abstract_hits = count_phrase(abstract, keyword)
+        category_hits = count_phrase(category_text, keyword)
+        if title_hits or abstract_hits or category_hits:
+            score += title_hits * weight * 4
+            score += min(abstract_hits, 3) * weight
+            score += category_hits * weight * 0.5
+            matches.append(keyword)
+
+    return score, matches
+
+
+def write_candidates_jsonl(candidates: list[ScoutCandidate], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as handle:
+        for candidate in candidates:
+            handle.write(json.dumps(candidate.as_dict(), ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def download_pdf(candidate: ScoutCandidate, pdf_dir: Path, timeout: int = 60) -> str | None:
+    if not candidate.pdf_url:
+        return None
+
+    source_dir = pdf_dir / candidate.source
+    source_dir.mkdir(parents=True, exist_ok=True)
+    filename = safe_filename(candidate.source_id or candidate.title) + ".pdf"
+    destination = source_dir / filename
+    if destination.exists() and destination.stat().st_size > 0:
+        return str(destination)
+
+    request = urllib.request.Request(candidate.pdf_url, headers={"User-Agent": "paper-agent/0.1"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = response.read()
+    except OSError:
+        return None
+
+    if not data.startswith(b"%PDF"):
+        return None
+
+    destination.write_bytes(data)
+    return str(destination)
+
+
+def candidate_key(candidate: ScoutCandidate) -> str:
+    if candidate.source and candidate.source_id:
+        return f"{candidate.source}:{candidate.source_id}"
+    return "title:" + normalize_text(candidate.title)
+
+
+def arxiv_id_from_url(url: str) -> str:
+    match = re.search(r"arxiv\.org/abs/([^?#]+)", url)
+    if not match:
+        return ""
+    return match.group(1).replace("/", "_")
+
+
+def safe_filename(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+    cleaned = cleaned.strip("-._")
+    if cleaned:
+        return cleaned[:120]
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def normalize_text(value: str) -> str:
+    return " ".join(html.unescape(value).lower().split())
+
+
+def count_phrase(text: str, phrase: str) -> int:
+    if not text or not phrase:
+        return 0
+    escaped = re.escape(phrase).replace(r"\ ", r"\s+")
+    pattern = rf"(?<![a-z0-9]){escaped}(?![a-z0-9])"
+    return len(re.findall(pattern, text))
+
+
 def _clean(value: str) -> str:
     return " ".join(html.unescape(value).split())
 
@@ -110,3 +471,13 @@ def _paper_url(entry: ET.Element) -> str:
         if link.attrib.get("rel") == "alternate":
             return link.attrib.get("href", "")
     return ""
+
+
+def _pdf_url(entry: ET.Element) -> str | None:
+    for link in entry.findall("atom:link", ARXIV_NS):
+        if link.attrib.get("title") == "pdf" or link.attrib.get("type") == "application/pdf":
+            return link.attrib.get("href")
+    paper_url = _paper_url(entry)
+    if paper_url:
+        return paper_url.replace("/abs/", "/pdf/")
+    return None
