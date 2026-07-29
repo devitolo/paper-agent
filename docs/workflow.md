@@ -136,10 +136,10 @@ It lists selected papers from SQLite, displays the local triage summary fields, 
 
 ## Nightly Cron
 
-The first scheduled setup can use cron and `scripts/nightly_pipeline.sh`:
+The first scheduled setup can use cron and `scripts/nightly_pipeline.sh` at 5:00 AM local time:
 
 ```bash
-(crontab -l 2>/dev/null; echo "15 2 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 5 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1") | crontab -
 ```
 
-This runs the quick pipeline nightly with polite arXiv settings. systemd timers remain the preferred later option once logging and failure recovery are more mature.
+This runs the quick pipeline every morning at 5:00 AM in the Mini's local timezone with polite arXiv settings. systemd timers remain the preferred later option once logging and failure recovery are more mature.
