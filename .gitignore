@@ -6,3 +6,5 @@ data/papers/
 data/scout/
 data/extractions/
 data/reviews/
+data/*.db
+data/*.db-*

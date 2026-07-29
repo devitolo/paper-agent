@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from paper_agents.curator import ResearchCurator
+from paper_agents.db import DEFAULT_DB_PATH, DEFAULT_SCHEMA_PATH, init_db
 from paper_agents.feedback import FeedbackAgent
 from paper_agents.local_extract import (
     DEFAULT_MODEL,
@@ -53,6 +54,12 @@ def main() -> None:
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    db_parser = subparsers.add_parser("db", help="Database utilities")
+    db_subparsers = db_parser.add_subparsers(dest="db_command", required=True)
+    db_init_parser = db_subparsers.add_parser("init", help="Initialize the local SQLite database")
+    db_init_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    db_init_parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA_PATH, help="Schema SQL path")
 
     run_parser = subparsers.add_parser("run", help="Run Scout, then Curator")
     run_parser.add_argument("--max-results", type=int, default=10, help="Number of arXiv results to fetch")
@@ -103,6 +110,15 @@ def main() -> None:
     subparsers.add_parser("profile", help="Print the current preference profile")
 
     args = parser.parse_args()
+
+    if args.command == "db":
+        if args.db_command == "init":
+            try:
+                output = init_db(args.db, args.schema)
+            except RuntimeError as error:
+                raise SystemExit(str(error)) from error
+            print_section("Database initialized", output)
+            return
 
     if args.command == "run":
         require_openai_api_key()
