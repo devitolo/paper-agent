@@ -12,6 +12,9 @@ from paper_agents.local_extract import (
     output_path_for,
 )
 from paper_agents.scout import (
+    DEFAULT_ARXIV_REQUEST_DELAY,
+    DEFAULT_ARXIV_RETRIES,
+    DEFAULT_ARXIV_TIMEOUT,
     DEFAULT_FETCH_LIMIT,
     DEFAULT_FRESHNESS_MONTHS,
     DEFAULT_KEEP_LIMIT,
@@ -43,6 +46,9 @@ def run_daily_pipeline(
     workers: int = DEFAULT_PIPELINE_WORKERS,
     db_path: Path | None = DEFAULT_DB_PATH,
     mode: str = "full",
+    request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
+    scout_retries: int = DEFAULT_ARXIV_RETRIES,
+    scout_timeout: int = DEFAULT_ARXIV_TIMEOUT,
 ) -> dict[str, Any]:
     """Run Scout, download selected PDFs, and extract local triage cards."""
     scout_output = run_daily_scout(
@@ -53,6 +59,9 @@ def run_daily_pipeline(
         scout_dir=scout_dir,
         pdf_dir=pdf_dir,
         download_pdfs=True,
+        request_delay=request_delay,
+        retries=scout_retries,
+        timeout=scout_timeout,
     )
 
     registry: dict[str, Any] | None = None

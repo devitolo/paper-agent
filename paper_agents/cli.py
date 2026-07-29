@@ -34,6 +34,9 @@ from paper_agents.review import (
     review_summary,
 )
 from paper_agents.scout import (
+    DEFAULT_ARXIV_REQUEST_DELAY,
+    DEFAULT_ARXIV_RETRIES,
+    DEFAULT_ARXIV_TIMEOUT,
     DEFAULT_FETCH_LIMIT,
     DEFAULT_FRESHNESS_MONTHS,
     DEFAULT_KEEP_LIMIT,
@@ -91,6 +94,24 @@ def main() -> None:
     daily_parser.add_argument("--scout-dir", type=Path, default=DEFAULT_SCOUT_DIR)
     daily_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
     daily_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
+    daily_parser.add_argument(
+        "--request-delay",
+        type=float,
+        default=DEFAULT_ARXIV_REQUEST_DELAY,
+        help="Seconds to wait between arXiv topic requests",
+    )
+    daily_parser.add_argument(
+        "--retries",
+        type=int,
+        default=DEFAULT_ARXIV_RETRIES,
+        help="Retries per arXiv topic request",
+    )
+    daily_parser.add_argument(
+        "--source-timeout",
+        type=int,
+        default=DEFAULT_ARXIV_TIMEOUT,
+        help="Timeout seconds per arXiv request",
+    )
     daily_parser.add_argument("--no-download", action="store_true", help="Do not download PDFs")
 
     pipeline_parser = subparsers.add_parser("pipeline-daily", help="Run Scout, download PDFs, and extract triage cards")
@@ -107,6 +128,24 @@ def main() -> None:
     pipeline_parser.add_argument("--quick", action="store_true", help="Interactive preview mode; extract only the first 2 chunks per paper unless --limit-chunks is set")
     pipeline_parser.add_argument("--timeout", type=int, default=DEFAULT_PIPELINE_TIMEOUT)
     pipeline_parser.add_argument("--workers", type=int, default=DEFAULT_PIPELINE_WORKERS)
+    pipeline_parser.add_argument(
+        "--request-delay",
+        type=float,
+        default=DEFAULT_ARXIV_REQUEST_DELAY,
+        help="Seconds to wait between arXiv topic requests",
+    )
+    pipeline_parser.add_argument(
+        "--retries",
+        type=int,
+        default=DEFAULT_ARXIV_RETRIES,
+        help="Retries per arXiv topic request",
+    )
+    pipeline_parser.add_argument(
+        "--source-timeout",
+        type=int,
+        default=DEFAULT_ARXIV_TIMEOUT,
+        help="Timeout seconds per arXiv request",
+    )
     pipeline_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
     pipeline_parser.add_argument("--no-db", action="store_true", help="Do not record pipeline results in SQLite")
 
@@ -181,6 +220,9 @@ def main() -> None:
                 scout_dir=args.scout_dir,
                 pdf_dir=args.pdf_dir,
                 download_pdfs=not args.no_download,
+                request_delay=args.request_delay,
+                retries=args.retries,
+                timeout=args.source_timeout,
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
@@ -207,6 +249,9 @@ def main() -> None:
                 workers=args.workers,
                 db_path=None if args.no_db else args.db,
                 mode=mode,
+                request_delay=args.request_delay,
+                scout_retries=args.retries,
+                scout_timeout=args.source_timeout,
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error

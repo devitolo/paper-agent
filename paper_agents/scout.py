@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from socket import timeout as SocketTimeout
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
@@ -30,6 +31,9 @@ DEFAULT_KEEP_LIMIT = 5
 DEFAULT_FRESHNESS_MONTHS = 24
 DEFAULT_SCOUT_DIR = Path("data/scout")
 DEFAULT_PDF_DIR = Path("data/papers")
+DEFAULT_ARXIV_REQUEST_DELAY = 3.0
+DEFAULT_ARXIV_RETRIES = 3
+DEFAULT_ARXIV_TIMEOUT = 60
 
 
 @dataclass
@@ -86,9 +90,16 @@ class PaperSource(Protocol):
 class ArxivSource:
     name = "arxiv"
 
-    def __init__(self, request_delay: float = 3.0, retries: int = 2, verbose: bool = True):
+    def __init__(
+        self,
+        request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
+        retries: int = DEFAULT_ARXIV_RETRIES,
+        timeout: int = DEFAULT_ARXIV_TIMEOUT,
+        verbose: bool = True,
+    ):
         self.request_delay = request_delay
         self.retries = retries
+        self.timeout = timeout
         self.verbose = verbose
 
     def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
@@ -105,7 +116,7 @@ class ArxivSource:
                 print(f"fetching arXiv topic {index + 1}/{len(terms)}: {topic} ({per_topic} requested)")
             try:
                 entries = self._fetch_topic(topic, per_topic)
-            except OSError as error:
+            except (OSError, ET.ParseError) as error:
                 errors.append(f"{topic}: {error}")
                 if self.verbose:
                     print(f"arXiv topic failed: {topic}: {error}")
@@ -126,8 +137,13 @@ class ArxivSource:
                         pass
                 candidates.append(candidate)
 
+        if errors and self.verbose:
+            print(f"arXiv partial failures: {len(errors)}/{len(terms)} topics failed")
         if not candidates and errors:
-            raise RuntimeError("arXiv fetch failed for every topic: " + "; ".join(errors[:3]))
+            raise RuntimeError(
+                "arXiv fetch returned 0 candidates because every topic failed: "
+                + "; ".join(errors[:3])
+            )
         return dedupe_candidates(candidates)[:max_results]
 
     def _fetch_topic(self, topic: str, max_results: int) -> list[ET.Element]:
@@ -143,25 +159,45 @@ class ArxivSource:
         url = f"https://export.arxiv.org/api/query?{params}"
         request = urllib.request.Request(url, headers={"User-Agent": "paper-agent/0.1"})
 
-        last_error: OSError | None = None
+        last_error: OSError | ET.ParseError | None = None
         for attempt in range(self.retries + 1):
             try:
-                with urllib.request.urlopen(request, timeout=30) as response:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     root = ET.fromstring(response.read())
                 return list(root.findall("atom:entry", ARXIV_NS))
             except urllib.error.HTTPError as error:
                 last_error = error
                 if error.code != 429 or attempt >= self.retries:
                     raise
-                retry_after = error.headers.get("Retry-After")
-                delay = float(retry_after) if retry_after and retry_after.isdigit() else self.request_delay * (attempt + 2)
+                delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After"))
                 if self.verbose:
                     print(f"arXiv rate limited topic '{topic}', retrying in {delay:.0f}s")
+                time.sleep(delay)
+            except (urllib.error.URLError, TimeoutError, SocketTimeout) as error:
+                last_error = error
+                if attempt >= self.retries:
+                    raise
+                delay = self._retry_delay(attempt)
+                if self.verbose:
+                    print(f"arXiv request failed for topic '{topic}' ({error}), retrying in {delay:.0f}s")
+                time.sleep(delay)
+            except ET.ParseError as error:
+                last_error = error
+                if attempt >= self.retries:
+                    raise
+                delay = self._retry_delay(attempt)
+                if self.verbose:
+                    print(f"arXiv returned malformed XML for topic '{topic}', retrying in {delay:.0f}s")
                 time.sleep(delay)
 
         if last_error:
             raise last_error
         return []
+
+    def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
+        if retry_after and retry_after.isdigit():
+            return float(retry_after)
+        return self.request_delay * (2 ** attempt)
 
 
 class ResearchScout:
@@ -243,15 +279,19 @@ def run_daily_scout(
     pdf_dir: Path = DEFAULT_PDF_DIR,
     run_date: date | None = None,
     download_pdfs: bool = True,
+    request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
+    retries: int = DEFAULT_ARXIV_RETRIES,
+    timeout: int = DEFAULT_ARXIV_TIMEOUT,
 ) -> dict[str, Any]:
     """Run the deterministic daily scout MVP and return a run report."""
-    source = source or ArxivSource()
+    source = source or ArxivSource(request_delay=request_delay, retries=retries, timeout=timeout)
     topics = topics or DEFAULT_SCOUT_TOPICS
     run_date = run_date or date.today()
 
     print(
         f"scout run: source={source.name} topics={len(topics)} "
-        f"fetch_limit={fetch_limit} keep={keep_limit} freshness_months={freshness_months}"
+        f"fetch_limit={fetch_limit} keep={keep_limit} freshness_months={freshness_months} "
+        f"request_delay={request_delay}s retries={retries} timeout={timeout}s"
     )
     fetched = source.fetch(topics, max_results=fetch_limit, freshness_months=freshness_months)
     print(f"fetched {len(fetched)} raw candidates")
