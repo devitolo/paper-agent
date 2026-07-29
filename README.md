@@ -127,6 +127,14 @@ python3 -m paper_agents.cli scout-daily
 
 The first Scout implementation uses arXiv only, stores all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`, ranks candidates with deterministic keywords, keeps the top 5, and downloads PDFs for the selected papers into `data/papers/arxiv/`. The default Scout run fetches up to 50 candidates across the default topic set.
 
+Run the daily Scout-to-triage pipeline:
+
+```bash
+python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
+```
+
+This runs Scout, downloads the selected PDFs, extracts local triage cards with Ollama, saves summaries under `data/extractions/`, and prints a compact review list.
+
 Stable local output folders:
 
 - Scout metadata: `data/scout/YYYY-MM-DD.jsonl`

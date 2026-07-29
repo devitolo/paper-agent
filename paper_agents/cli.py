@@ -13,6 +13,13 @@ from paper_agents.local_extract import (
     extract_paper,
     output_path_for,
 )
+from paper_agents.pipeline import (
+    DEFAULT_PIPELINE_LIMIT_CHUNKS,
+    DEFAULT_PIPELINE_MAX_CHARS,
+    DEFAULT_PIPELINE_TIMEOUT,
+    DEFAULT_PIPELINE_WORKERS,
+    run_daily_pipeline,
+)
 from paper_agents.scout import (
     DEFAULT_FETCH_LIMIT,
     DEFAULT_FRESHNESS_MONTHS,
@@ -53,6 +60,20 @@ def main() -> None:
     daily_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
     daily_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
     daily_parser.add_argument("--no-download", action="store_true", help="Do not download PDFs")
+
+    pipeline_parser = subparsers.add_parser("pipeline-daily", help="Run Scout, download PDFs, and extract triage cards")
+    pipeline_parser.add_argument("--freshness-months", type=int, default=DEFAULT_FRESHNESS_MONTHS)
+    pipeline_parser.add_argument("--fetch", type=int, default=DEFAULT_FETCH_LIMIT, help="Maximum candidates to fetch")
+    pipeline_parser.add_argument("--keep", type=int, default=DEFAULT_KEEP_LIMIT, help="Number of top candidates to select and extract")
+    pipeline_parser.add_argument("--scout-dir", type=Path, default=DEFAULT_SCOUT_DIR)
+    pipeline_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
+    pipeline_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
+    pipeline_parser.add_argument("--model", default=DEFAULT_MODEL)
+    pipeline_parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
+    pipeline_parser.add_argument("--max-chars", type=int, default=DEFAULT_PIPELINE_MAX_CHARS)
+    pipeline_parser.add_argument("--limit-chunks", type=int, default=DEFAULT_PIPELINE_LIMIT_CHUNKS)
+    pipeline_parser.add_argument("--timeout", type=int, default=DEFAULT_PIPELINE_TIMEOUT)
+    pipeline_parser.add_argument("--workers", type=int, default=DEFAULT_PIPELINE_WORKERS)
 
     feedback_parser = subparsers.add_parser("feedback", help="Update preferences from feedback")
     feedback_parser.add_argument("text", help="Natural-language feedback")
@@ -102,6 +123,27 @@ def main() -> None:
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
         print_section("Daily scout", output)
+        return
+
+    if args.command == "pipeline-daily":
+        try:
+            output = run_daily_pipeline(
+                topics=args.topics or DEFAULT_SCOUT_TOPICS,
+                freshness_months=args.freshness_months,
+                fetch_limit=args.fetch,
+                keep_limit=args.keep,
+                scout_dir=args.scout_dir,
+                pdf_dir=args.pdf_dir,
+                model=args.model,
+                ollama_url=args.ollama_url,
+                max_chars=args.max_chars,
+                limit_chunks=args.limit_chunks,
+                timeout=args.timeout,
+                workers=args.workers,
+            )
+        except RuntimeError as error:
+            raise SystemExit(str(error)) from error
+        print_section("Pipeline review cards", {"cards": output["cards"]})
         return
 
     if args.command == "feedback":
