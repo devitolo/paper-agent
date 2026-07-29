@@ -1,6 +1,6 @@
 # Workflow
 
-This document describes the planned end-to-end workflow. The current prototype implements only arXiv discovery, OpenAI scoring and curation, and JSON-profile feedback.
+This document describes the planned end-to-end workflow. The current implementation includes arXiv discovery, deterministic ranking, PDF download for selected candidates, local Ollama triage extraction, SQLite run/artifact registration, OpenAI-assisted review generation, and JSON-profile feedback.
 
 ## Scheduled Run
 
@@ -82,5 +82,42 @@ Use stable folders so scheduled runs are easy to inspect and sync:
 - Scout metadata: `data/scout/YYYY-MM-DD.jsonl`
 - Downloaded PDFs: `data/papers/<source>/`
 - Local extraction summaries: `data/extractions/<source>/`
+- ChatGPT section-by-section reviews: `data/reviews/<source>/`
+- SQLite registry: `data/paper_agent.db`
 
 When a downloaded arXiv PDF is extracted, deterministic arXiv metadata should supply the paper date before falling back to model-extracted dates.
+
+## SQLite Registry
+
+The registry currently stores:
+
+- `papers`: normalized source metadata and stable source identifiers.
+- `scout_runs`: source, topics, mode, fetch/keep limits, and run time.
+- `scout_candidates`: candidate score, matched keywords, ranking reason, and whether the candidate was selected.
+- `artifacts`: downloaded PDFs, triage summaries, and later generated review files.
+- `feedback`: reserved for Feedback Loop v2.
+
+Useful inspection commands:
+
+```bash
+python3 -m paper_agents.cli db stats
+python3 -m paper_agents.cli db recent-runs --limit 5
+python3 -m paper_agents.cli db papers --selected --limit 10
+```
+
+## Source Reliability
+
+The arXiv source adapter supports polite request tuning:
+
+```bash
+python3 -m paper_agents.cli scout-daily \
+  --topic "incident management" \
+  --fetch 3 \
+  --keep 1 \
+  --no-download \
+  --request-delay 5 \
+  --retries 4 \
+  --source-timeout 90
+```
+
+If one topic fails but another succeeds, the run keeps the successful candidates. If every topic fails, the command exits with a diagnostic error and does not write an empty Scout result.

@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the target Project Paper architecture. It is not a description of the current prototype, which is still a small arXiv plus OpenAI CLI.
+This document describes the target Project Paper architecture and the current arXiv-to-SQLite MVP. Some target components, such as provider adapters beyond arXiv and scheduled systemd operation, are still planned.
 
 ## Runtime Host
 
@@ -73,7 +73,7 @@ The Python workflow owns orchestration between deterministic steps and model-bac
 
 Provider adapters translate a normalized scouting request into provider-specific prompts or API calls and return normalized paper records. Downstream filtering, downloading, scoring, and reporting should not depend on a provider-specific response shape.
 
-The paper registry stores paper identifiers, source metadata, local file paths, hashes, review state, user ratings, and run telemetry. SQLite is the proposed initial store because the system is single-host and benefits from easy inspection and backup.
+The paper registry stores paper identifiers, source metadata, local file paths, artifact records, candidate scores, selected flags, and run telemetry. SQLite is the initial store because the system is single-host and benefits from easy inspection and backup. Feedback rows are reserved for the next feedback loop pass.
 
 The downloader resolves and fetches open-access PDFs when available. File transfer should be deterministic code, not an LLM responsibility.
 
@@ -92,5 +92,6 @@ Cloud escalation is reserved for discovery and high-value reasoning, such as dif
 - LLMs make judgments rather than perform file transfer.
 - Human feedback is persisted and reused.
 - Every run is measurable.
+- Source adapters should be polite and retry transient failures before giving up.
 - Initial implementation should remain simple and debuggable.
 - RAFT is not part of this project.

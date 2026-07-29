@@ -37,7 +37,7 @@ Rationale:
 
 ## ADR-003: SQLite for initial persistence
 
-Status: Proposed
+Status: Accepted
 
 Decision:
 
@@ -49,6 +49,7 @@ Rationale:
 - Simple deployment.
 - Adequate for paper metadata, history, feedback, and telemetry.
 - Easy backups and inspection.
+- Implemented for papers, scout runs, scout candidates, artifacts, and future feedback rows.
 
 Revisit when:
 

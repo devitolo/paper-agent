@@ -28,7 +28,9 @@ See [docs/architecture.md](docs/architecture.md) and [docs/ai-stack.md](docs/ai-
 Implemented today:
 
 - `ResearchScout` queries arXiv for recent papers based on `data/profile.json`.
-- `scout-daily` runs a deterministic arXiv Scout MVP with keyword ranking, JSONL metadata storage, top-five selection, and PDF downloads for selected papers.
+- `scout-daily` runs a deterministic arXiv Scout MVP with keyword ranking, JSONL metadata storage, top-five selection, PDF downloads for selected papers, and retry/backoff controls for arXiv requests.
+- `pipeline-daily` runs Scout, downloads selected PDFs, extracts local triage cards with Ollama, and records runs, papers, candidates, PDFs, and summary artifacts in SQLite.
+- `review-summary` creates a ChatGPT section-by-section Markdown review from a triage summary.
 - OpenAI scores candidate titles and abstracts in the older `run` prototype.
 - `ResearchCurator` selects a short reading list from the scout output.
 - `FeedbackAgent` updates `data/profile.json` from natural-language feedback.
@@ -36,12 +38,10 @@ Implemented today:
 
 Not implemented yet:
 
-- SQLite registry or feedback database.
+- Feedback Loop v2 backed by SQLite feedback rows.
 - Gemini or other provider adapters.
 - General open-access PDF resolution beyond arXiv.
-- PDF text or section extraction.
-- Local model inference.
-- Duplicate/history filtering beyond the preference profile.
+- Duplicate/history filtering backed by the SQLite registry.
 - systemd service and timer.
 - Benchmark recording and generated run reports.
 
@@ -60,7 +60,7 @@ Not implemented yet:
 11. A report is generated for user review.
 12. User feedback is written locally and reused in future runs.
 
-The current prototype implements only a thin arXiv plus OpenAI version of the scout, curator, and feedback loop.
+The current implementation covers the arXiv Scout MVP, local Ollama triage extraction, SQLite registry writes and inspection commands, ChatGPT review generation, and the older OpenAI scout/curator prototype.
 
 ## Requirements
 
@@ -127,16 +127,49 @@ python3 -m paper_agents.cli scout-daily
 
 The first Scout implementation uses arXiv only, stores all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`, ranks candidates with deterministic keywords, keeps the top 5, and downloads PDFs for the selected papers into `data/papers/arxiv/`. The default Scout run fetches up to 50 candidates across the default topic set.
 
+For a gentle arXiv test, use a single topic and the network hardening flags:
+
+```bash
+python3 -m paper_agents.cli scout-daily \
+  --topic "incident management" \
+  --fetch 3 \
+  --keep 1 \
+  --no-download \
+  --request-delay 5 \
+  --retries 4 \
+  --source-timeout 90
+```
+
+Initialize the SQLite registry:
+
+```bash
+python3 -m paper_agents.cli db init
+```
+
+Inspect the registry:
+
+```bash
+python3 -m paper_agents.cli db stats
+python3 -m paper_agents.cli db recent-runs --limit 5
+python3 -m paper_agents.cli db papers --selected --limit 10
+```
+
 Run the daily Scout-to-triage pipeline:
 
 ```bash
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-This runs Scout, downloads the selected PDFs, extracts local triage cards with Ollama, saves summaries under `data/extractions/`, and prints a compact review list. The default is full mode for scheduled runs. For an interactive preview, use quick mode:
+This runs Scout, downloads the selected PDFs, extracts local triage cards with Ollama, saves summaries under `data/extractions/`, records runs and artifacts in `data/paper_agent.db`, and prints a compact review list. The default is full mode for scheduled runs. Use `--no-db` for throwaway runs that should not touch the SQLite registry. For an interactive preview, use quick mode:
 
 ```bash
-python3 -m paper_agents.cli pipeline-daily --quick --fetch 20 --keep 3
+python3 -m paper_agents.cli pipeline-daily \
+  --quick \
+  --fetch 20 \
+  --keep 3 \
+  --request-delay 5 \
+  --retries 4 \
+  --source-timeout 90
 ```
 
 Quick mode extracts only the first 2 chunks per selected paper unless `--limit-chunks` is set explicitly.
@@ -154,6 +187,8 @@ Stable local output folders:
 - Scout metadata: `data/scout/YYYY-MM-DD.jsonl`
 - Downloaded PDFs: `data/papers/SOURCE/`
 - Local extraction summaries: `data/extractions/SOURCE/`
+- ChatGPT paper reviews: `data/reviews/SOURCE/`
+- SQLite registry: `data/paper_agent.db`
 
 Extract structured paper metadata locally with Ollama:
 
@@ -179,12 +214,19 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 |-- paper_agents/
 |   |-- cli.py
 |   |-- curator.py
+|   |-- db.py
 |   |-- feedback.py
+|   |-- local_extract.py
 |   |-- openai_helpers.py
+|   |-- pipeline.py
+|   |-- review.py
 |   |-- scout.py
 |   `-- store.py
 |-- scripts/
-|   `-- paper_extract_ollama.py
+|   |-- paper_extract_ollama.py
+|   `-- scout_daily.py
+|-- sql/
+|   `-- schema.sql
 |-- Dockerfile
 |-- docker-compose.yml
 |-- README.md
@@ -193,15 +235,15 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 
 ## Development Roadmap
 
-The next work should move from the prototype toward explicit data models and persistence:
+The next work should build on the arXiv-to-SQLite MVP:
 
-1. Define common paper, provider, run, and feedback records.
-2. Add SQLite persistence for paper history, user feedback, and telemetry.
-3. Add a manual-input proof of concept for paper links and PDFs.
-4. Benchmark local model candidates on Project Paper tasks.
-5. Add provider adapters for ChatGPT/Codex and Gemini behind one interface.
-6. Add open-access PDF resolution, download, hashing, and extraction.
-7. Add systemd scheduling, logs, and run reports.
+1. Use SQLite history for duplicate filtering and feedback-aware ranking.
+2. Add Feedback Loop v2 for selected, accepted, declined, and saved-for-later papers.
+3. Add a review queue that turns a selected triage summary into a ChatGPT section-by-section review.
+4. Add provider adapters for ChatGPT/Codex and Gemini behind one interface.
+5. Add general open-access PDF resolution beyond arXiv.
+6. Add systemd scheduling, logs, and run reports.
+7. Record benchmark runs and generated reports.
 
 See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
 
