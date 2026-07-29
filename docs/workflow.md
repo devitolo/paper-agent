@@ -105,6 +105,8 @@ python3 -m paper_agents.cli db recent-runs --limit 5
 python3 -m paper_agents.cli db papers --selected --limit 10
 ```
 
+Scout and pipeline runs use the registry as a history filter by default. Candidate metadata is still written to JSONL, but previously seen papers are not selected again unless `--include-seen` is passed. `pipeline-daily --no-db` disables both registry writes and the history filter for that run.
+
 ## Source Reliability
 
 The arXiv source adapter supports polite request tuning:

@@ -206,6 +206,19 @@ def candidate_registry_key(candidate: dict[str, Any]) -> str:
     return f"{source}:{source_id}"
 
 
+def seen_source_ids(db_path: Path = DEFAULT_DB_PATH, source: str | None = None) -> set[str]:
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        if source:
+            rows = connection.execute(
+                "SELECT source_id FROM papers WHERE source = ?",
+                (source,),
+            ).fetchall()
+        else:
+            rows = connection.execute("SELECT source_id FROM papers").fetchall()
+    return {row[0] for row in rows if row[0]}
+
+
 def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     init_db(db_path)
     with connect_db(db_path) as connection:

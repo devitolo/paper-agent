@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from paper_agents.db import DEFAULT_DB_PATH, connect_db, insert_artifact, record_scout_output
+from paper_agents.db import DEFAULT_DB_PATH, connect_db, insert_artifact, record_scout_output, seen_source_ids
 from paper_agents.local_extract import (
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
@@ -49,8 +49,10 @@ def run_daily_pipeline(
     request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
     scout_retries: int = DEFAULT_ARXIV_RETRIES,
     scout_timeout: int = DEFAULT_ARXIV_TIMEOUT,
+    include_seen: bool = False,
 ) -> dict[str, Any]:
     """Run Scout, download selected PDFs, and extract local triage cards."""
+    source_seen_ids = seen_source_ids(db_path, source="arxiv") if db_path is not None else set()
     scout_output = run_daily_scout(
         topics=topics or DEFAULT_SCOUT_TOPICS,
         freshness_months=freshness_months,
@@ -62,6 +64,8 @@ def run_daily_pipeline(
         request_delay=request_delay,
         retries=scout_retries,
         timeout=scout_timeout,
+        seen_source_ids=source_seen_ids,
+        include_seen=include_seen,
     )
 
     registry: dict[str, Any] | None = None

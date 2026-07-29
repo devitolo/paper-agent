@@ -13,6 +13,7 @@ from paper_agents.db import (
     init_db,
     list_papers,
     recent_runs,
+    seen_source_ids,
 )
 from paper_agents.feedback import FeedbackAgent
 from paper_agents.local_extract import (
@@ -112,6 +113,17 @@ def main() -> None:
         default=DEFAULT_ARXIV_TIMEOUT,
         help="Timeout seconds per arXiv request",
     )
+    daily_parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DB_PATH,
+        help="SQLite database path for history filtering",
+    )
+    daily_parser.add_argument(
+        "--include-seen",
+        action="store_true",
+        help="Allow papers already present in SQLite to be selected again",
+    )
     daily_parser.add_argument("--no-download", action="store_true", help="Do not download PDFs")
 
     pipeline_parser = subparsers.add_parser("pipeline-daily", help="Run Scout, download PDFs, and extract triage cards")
@@ -147,6 +159,11 @@ def main() -> None:
         help="Timeout seconds per arXiv request",
     )
     pipeline_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    pipeline_parser.add_argument(
+        "--include-seen",
+        action="store_true",
+        help="Allow papers already present in SQLite to be selected again",
+    )
     pipeline_parser.add_argument("--no-db", action="store_true", help="Do not record pipeline results in SQLite")
 
     review_parser = subparsers.add_parser("review-summary", help="Create a ChatGPT section-by-section review from a triage summary JSON")
@@ -211,6 +228,7 @@ def main() -> None:
 
     if args.command == "scout-daily":
         topics = args.topics or DEFAULT_SCOUT_TOPICS
+        source_seen_ids = seen_source_ids(args.db, source="arxiv") if not args.include_seen else set()
         try:
             output = run_daily_scout(
                 topics=topics,
@@ -223,6 +241,8 @@ def main() -> None:
                 request_delay=args.request_delay,
                 retries=args.retries,
                 timeout=args.source_timeout,
+                seen_source_ids=source_seen_ids,
+                include_seen=args.include_seen,
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
@@ -252,6 +272,7 @@ def main() -> None:
                 request_delay=args.request_delay,
                 scout_retries=args.retries,
                 scout_timeout=args.source_timeout,
+                include_seen=args.include_seen,
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error

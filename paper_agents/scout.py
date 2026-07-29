@@ -282,6 +282,8 @@ def run_daily_scout(
     request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
     retries: int = DEFAULT_ARXIV_RETRIES,
     timeout: int = DEFAULT_ARXIV_TIMEOUT,
+    seen_source_ids: set[str] | None = None,
+    include_seen: bool = False,
 ) -> dict[str, Any]:
     """Run the deterministic daily scout MVP and return a run report."""
     source = source or ArxivSource(request_delay=request_delay, retries=retries, timeout=timeout)
@@ -298,7 +300,12 @@ def run_daily_scout(
     candidates = dedupe_candidates(fetched)
     print(f"deduped to {len(candidates)} candidates")
     ranked = rank_candidates(candidates, topics)
-    selected = ranked[:keep_limit]
+    seen_source_ids = seen_source_ids or set()
+    selectable = filter_seen_candidates(ranked, seen_source_ids, include_seen=include_seen)
+    filtered_seen_count = len(ranked) - len(selectable)
+    if filtered_seen_count:
+        print(f"filtered {filtered_seen_count} previously seen candidates")
+    selected = selectable[:keep_limit]
     print(f"selected top {len(selected)} candidates")
     selected_ids = {candidate_key(candidate) for candidate in selected}
 
@@ -322,11 +329,30 @@ def run_daily_scout(
         "fetched_count": len(fetched),
         "candidate_count": len(candidates),
         "stored_count": len(ranked),
+        "seen_filtered_count": filtered_seen_count,
         "selected_count": len(selected),
         "output_path": str(output_path),
         "candidates": [candidate.as_dict() for candidate in ranked],
         "selected": [candidate.as_dict() for candidate in selected],
     }
+
+
+def filter_seen_candidates(
+    candidates: list[ScoutCandidate],
+    seen_source_ids: set[str],
+    *,
+    include_seen: bool = False,
+) -> list[ScoutCandidate]:
+    if include_seen or not seen_source_ids:
+        return candidates
+
+    selectable: list[ScoutCandidate] = []
+    for candidate in candidates:
+        candidate.metadata["seen_before"] = candidate.source_id in seen_source_ids
+        if candidate.metadata["seen_before"]:
+            continue
+        selectable.append(candidate)
+    return selectable
 
 
 def build_arxiv_query(topics: list[str]) -> str:

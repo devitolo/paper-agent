@@ -125,7 +125,7 @@ Run the deterministic arXiv Scout MVP:
 python3 -m paper_agents.cli scout-daily
 ```
 
-The first Scout implementation uses arXiv only, stores all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`, ranks candidates with deterministic keywords, keeps the top 5, and downloads PDFs for the selected papers into `data/papers/arxiv/`. The default Scout run fetches up to 50 candidates across the default topic set.
+The first Scout implementation uses arXiv only, stores all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`, ranks candidates with deterministic keywords, filters papers already present in SQLite, keeps the top 5 unseen candidates, and downloads PDFs for the selected papers into `data/papers/arxiv/`. The default Scout run fetches up to 50 candidates across the default topic set. Use `--include-seen` to allow previously seen papers to be selected again.
 
 For a gentle arXiv test, use a single topic and the network hardening flags:
 
@@ -160,7 +160,7 @@ Run the daily Scout-to-triage pipeline:
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-This runs Scout, downloads the selected PDFs, extracts local triage cards with Ollama, saves summaries under `data/extractions/`, records runs and artifacts in `data/paper_agent.db`, and prints a compact review list. The default is full mode for scheduled runs. Use `--no-db` for throwaway runs that should not touch the SQLite registry. For an interactive preview, use quick mode:
+This runs Scout, filters papers already present in SQLite, downloads the selected PDFs, extracts local triage cards with Ollama, saves summaries under `data/extractions/`, records runs and artifacts in `data/paper_agent.db`, and prints a compact review list. The default is full mode for scheduled runs. Use `--include-seen` to allow reruns to select previously seen papers. Use `--no-db` for throwaway runs that should not touch the SQLite registry or history filter. For an interactive preview, use quick mode:
 
 ```bash
 python3 -m paper_agents.cli pipeline-daily \
