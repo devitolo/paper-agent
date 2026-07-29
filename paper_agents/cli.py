@@ -87,6 +87,8 @@ def main() -> None:
     pipeline_parser.add_argument("--quick", action="store_true", help="Interactive preview mode; extract only the first 2 chunks per paper unless --limit-chunks is set")
     pipeline_parser.add_argument("--timeout", type=int, default=DEFAULT_PIPELINE_TIMEOUT)
     pipeline_parser.add_argument("--workers", type=int, default=DEFAULT_PIPELINE_WORKERS)
+    pipeline_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    pipeline_parser.add_argument("--no-db", action="store_true", help="Do not record pipeline results in SQLite")
 
     review_parser = subparsers.add_parser("review-summary", help="Create a ChatGPT section-by-section review from a triage summary JSON")
     review_parser.add_argument("summary", type=Path, help="Local extraction summary JSON")
@@ -171,6 +173,8 @@ def main() -> None:
                 limit_chunks=limit_chunks,
                 timeout=args.timeout,
                 workers=args.workers,
+                db_path=None if args.no_db else args.db,
+                mode=mode,
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
@@ -233,6 +237,7 @@ def resolve_pipeline_limit_chunks(quick: bool, limit_chunks: int | None) -> int:
     if quick:
         return 2
     return DEFAULT_PIPELINE_LIMIT_CHUNKS
+
 
 def print_section(title: str, payload: dict) -> None:
     print(f"\n## {title}")

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from paper_agents.db import DEFAULT_DB_PATH, connect_db, insert_artifact, record_scout_output
 from paper_agents.local_extract import (
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
@@ -40,6 +41,8 @@ def run_daily_pipeline(
     limit_chunks: int = DEFAULT_PIPELINE_LIMIT_CHUNKS,
     timeout: int = DEFAULT_PIPELINE_TIMEOUT,
     workers: int = DEFAULT_PIPELINE_WORKERS,
+    db_path: Path | None = DEFAULT_DB_PATH,
+    mode: str = "full",
 ) -> dict[str, Any]:
     """Run Scout, download selected PDFs, and extract local triage cards."""
     scout_output = run_daily_scout(
@@ -51,6 +54,21 @@ def run_daily_pipeline(
         pdf_dir=pdf_dir,
         download_pdfs=True,
     )
+
+    registry: dict[str, Any] | None = None
+    paper_ids: dict[str, int] = {}
+    topics_for_run = topics or DEFAULT_SCOUT_TOPICS
+    if db_path is not None:
+        registry = record_scout_output(
+            db_path,
+            scout_output,
+            topics=topics_for_run,
+            fetch_limit=fetch_limit,
+            keep_limit=keep_limit,
+            mode=mode,
+        )
+        paper_ids = registry.get("paper_ids", {})
+        print(f"recorded scout run in SQLite: {db_path} (run_id={registry['run_id']})")
 
     cards: list[dict[str, Any]] = []
     selected = scout_output.get("selected", [])
@@ -80,6 +98,15 @@ def run_daily_pipeline(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(extraction, indent=2, ensure_ascii=False) + "\n")
         print(f"wrote extraction: {output_path}")
+        if db_path is not None:
+            register_summary_artifact(
+                db_path,
+                candidate,
+                paper_ids,
+                output_path,
+                model=model,
+                extraction=extraction,
+            )
         cards.append(card_from_candidate(candidate, extraction=extraction, output_path=output_path))
 
     return {
@@ -88,6 +115,7 @@ def run_daily_pipeline(
         "max_chars": max_chars,
         "limit_chunks": limit_chunks,
         "workers": workers,
+        "registry": registry,
         "cards": cards,
     }
 
@@ -115,3 +143,38 @@ def card_from_candidate(
         "chunk_count": extraction.get("chunk_count") if extraction else None,
         "error": error,
     }
+
+
+def register_summary_artifact(
+    db_path: Path,
+    candidate: dict[str, Any],
+    paper_ids: dict[str, int],
+    output_path: Path,
+    *,
+    model: str,
+    extraction: dict[str, Any],
+) -> None:
+    paper_id = paper_ids.get(candidate_registry_key(candidate))
+    if paper_id is None:
+        return
+
+    metadata = {
+        "merge_strategy": extraction.get("merge_strategy"),
+        "chunk_count": extraction.get("chunk_count"),
+        "source_path": extraction.get("source_path"),
+    }
+    with connect_db(db_path) as connection:
+        insert_artifact(
+            connection,
+            paper_id,
+            artifact_type="triage_summary",
+            path=output_path,
+            model=model,
+            metadata=metadata,
+        )
+
+
+def candidate_registry_key(candidate: dict[str, Any]) -> str:
+    source = str(candidate.get("source") or "unknown")
+    source_id = str(candidate.get("source_id") or candidate.get("url") or candidate.get("title") or "unknown")
+    return f"{source}:{source_id}"

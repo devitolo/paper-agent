@@ -284,6 +284,7 @@ def run_daily_scout(
         "stored_count": len(ranked),
         "selected_count": len(selected),
         "output_path": str(output_path),
+        "candidates": [candidate.as_dict() for candidate in ranked],
         "selected": [candidate.as_dict() for candidate in selected],
     }
 
