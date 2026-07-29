@@ -71,7 +71,8 @@ def main() -> None:
     pipeline_parser.add_argument("--model", default=DEFAULT_MODEL)
     pipeline_parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
     pipeline_parser.add_argument("--max-chars", type=int, default=DEFAULT_PIPELINE_MAX_CHARS)
-    pipeline_parser.add_argument("--limit-chunks", type=int, default=DEFAULT_PIPELINE_LIMIT_CHUNKS)
+    pipeline_parser.add_argument("--limit-chunks", type=int, default=None)
+    pipeline_parser.add_argument("--quick", action="store_true", help="Interactive preview mode; extract only the first 2 chunks per paper unless --limit-chunks is set")
     pipeline_parser.add_argument("--timeout", type=int, default=DEFAULT_PIPELINE_TIMEOUT)
     pipeline_parser.add_argument("--workers", type=int, default=DEFAULT_PIPELINE_WORKERS)
 
@@ -126,6 +127,9 @@ def main() -> None:
         return
 
     if args.command == "pipeline-daily":
+        limit_chunks = resolve_pipeline_limit_chunks(args.quick, args.limit_chunks)
+        mode = "quick" if args.quick else "full"
+        print(f"pipeline mode: {mode} (limit_chunks={limit_chunks})")
         try:
             output = run_daily_pipeline(
                 topics=args.topics or DEFAULT_SCOUT_TOPICS,
@@ -137,7 +141,7 @@ def main() -> None:
                 model=args.model,
                 ollama_url=args.ollama_url,
                 max_chars=args.max_chars,
-                limit_chunks=args.limit_chunks,
+                limit_chunks=limit_chunks,
                 timeout=args.timeout,
                 workers=args.workers,
             )
@@ -181,6 +185,13 @@ def main() -> None:
     if args.command == "profile":
         print(json.dumps(load_profile(args.profile), indent=2, ensure_ascii=False))
 
+
+def resolve_pipeline_limit_chunks(quick: bool, limit_chunks: int | None) -> int:
+    if limit_chunks is not None:
+        return limit_chunks
+    if quick:
+        return 2
+    return DEFAULT_PIPELINE_LIMIT_CHUNKS
 
 def print_section(title: str, payload: dict) -> None:
     print(f"\n## {title}")

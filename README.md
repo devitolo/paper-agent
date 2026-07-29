@@ -133,7 +133,13 @@ Run the daily Scout-to-triage pipeline:
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-This runs Scout, downloads the selected PDFs, extracts local triage cards with Ollama, saves summaries under `data/extractions/`, and prints a compact review list.
+This runs Scout, downloads the selected PDFs, extracts local triage cards with Ollama, saves summaries under `data/extractions/`, and prints a compact review list. The default is full mode for scheduled runs. For an interactive preview, use quick mode:
+
+```bash
+python3 -m paper_agents.cli pipeline-daily --quick --fetch 20 --keep 3
+```
+
+Quick mode extracts only the first 2 chunks per selected paper unless `--limit-chunks` is set explicitly.
 
 Stable local output folders:
 
