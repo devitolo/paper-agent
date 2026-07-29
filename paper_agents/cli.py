@@ -6,7 +6,14 @@ import os
 from pathlib import Path
 
 from paper_agents.curator import ResearchCurator
-from paper_agents.db import DEFAULT_DB_PATH, DEFAULT_SCHEMA_PATH, init_db
+from paper_agents.db import (
+    DEFAULT_DB_PATH,
+    DEFAULT_SCHEMA_PATH,
+    db_stats,
+    init_db,
+    list_papers,
+    recent_runs,
+)
 from paper_agents.feedback import FeedbackAgent
 from paper_agents.local_extract import (
     DEFAULT_MODEL,
@@ -60,6 +67,19 @@ def main() -> None:
     db_init_parser = db_subparsers.add_parser("init", help="Initialize the local SQLite database")
     db_init_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
     db_init_parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA_PATH, help="Schema SQL path")
+    db_stats_parser = db_subparsers.add_parser("stats", help="Show SQLite registry counts")
+    db_stats_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    db_runs_parser = db_subparsers.add_parser("recent-runs", help="Show recent Scout/pipeline runs")
+    db_runs_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    db_runs_parser.add_argument("--limit", type=int, default=10, help="Number of runs to show")
+    db_papers_parser = db_subparsers.add_parser("papers", help="Show recent papers in the registry")
+    db_papers_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    db_papers_parser.add_argument("--limit", type=int, default=20, help="Number of papers to show")
+    db_papers_parser.add_argument(
+        "--selected",
+        action="store_true",
+        help="Only show papers selected by the latest scout ranking",
+    )
 
     run_parser = subparsers.add_parser("run", help="Run Scout, then Curator")
     run_parser.add_argument("--max-results", type=int, default=10, help="Number of arXiv results to fetch")
@@ -120,6 +140,18 @@ def main() -> None:
             except RuntimeError as error:
                 raise SystemExit(str(error)) from error
             print_section("Database initialized", output)
+            return
+        if args.db_command == "stats":
+            print_section("Database stats", db_stats(args.db))
+            return
+        if args.db_command == "recent-runs":
+            print_section("Recent database runs", recent_runs(args.db, limit=args.limit))
+            return
+        if args.db_command == "papers":
+            print_section(
+                "Database papers",
+                list_papers(args.db, limit=args.limit, selected_only=args.selected),
+            )
             return
 
     if args.command == "run":

@@ -204,3 +204,176 @@ def candidate_registry_key(candidate: dict[str, Any]) -> str:
     source = str(candidate.get("source") or "unknown")
     source_id = str(candidate.get("source_id") or candidate.get("url") or candidate.get("title") or "unknown")
     return f"{source}:{source_id}"
+
+
+def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        counts = {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ["papers", "scout_runs", "scout_candidates", "artifacts", "feedback"]
+        }
+        selected_candidates = connection.execute(
+            "SELECT COUNT(*) FROM scout_candidates WHERE selected = 1"
+        ).fetchone()[0]
+        artifact_types = [
+            {"artifact_type": row[0], "count": row[1]}
+            for row in connection.execute(
+                """
+                SELECT artifact_type, COUNT(*)
+                FROM artifacts
+                GROUP BY artifact_type
+                ORDER BY artifact_type
+                """
+            )
+        ]
+        latest_run = connection.execute(
+            """
+            SELECT id, started_at, source, fetch_limit, keep_limit, mode
+            FROM scout_runs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    return {
+        "db_path": str(db_path),
+        "counts": counts,
+        "selected_candidates": selected_candidates,
+        "artifact_types": artifact_types,
+        "latest_run": row_to_dict(
+            latest_run,
+            ["id", "started_at", "source", "fetch_limit", "keep_limit", "mode"],
+        ),
+    }
+
+
+def recent_runs(db_path: Path = DEFAULT_DB_PATH, limit: int = 10) -> dict[str, Any]:
+    init_db(db_path)
+    limit = max(1, limit)
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                scout_runs.id,
+                scout_runs.started_at,
+                scout_runs.source,
+                scout_runs.fetch_limit,
+                scout_runs.keep_limit,
+                scout_runs.mode,
+                scout_runs.topics_json,
+                COUNT(scout_candidates.id) AS candidate_count,
+                SUM(CASE WHEN scout_candidates.selected = 1 THEN 1 ELSE 0 END) AS selected_count
+            FROM scout_runs
+            LEFT JOIN scout_candidates ON scout_candidates.run_id = scout_runs.id
+            GROUP BY scout_runs.id
+            ORDER BY scout_runs.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    runs = []
+    for row in rows:
+        runs.append(
+            {
+                "id": row[0],
+                "started_at": row[1],
+                "source": row[2],
+                "fetch_limit": row[3],
+                "keep_limit": row[4],
+                "mode": row[5],
+                "topics": decode_json(row[6], []),
+                "candidate_count": row[7],
+                "selected_count": row[8] or 0,
+            }
+        )
+    return {"db_path": str(db_path), "runs": runs}
+
+
+def list_papers(
+    db_path: Path = DEFAULT_DB_PATH,
+    limit: int = 20,
+    selected_only: bool = False,
+) -> dict[str, Any]:
+    init_db(db_path)
+    limit = max(1, limit)
+    selected_clause = "WHERE latest.selected = 1" if selected_only else ""
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            f"""
+            WITH latest AS (
+                SELECT
+                    scout_candidates.paper_id,
+                    scout_candidates.score,
+                    scout_candidates.selected,
+                    scout_candidates.ranking_reason,
+                    scout_candidates.matched_keywords_json,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY scout_candidates.paper_id
+                        ORDER BY scout_candidates.run_id DESC
+                    ) AS row_number
+                FROM scout_candidates
+            ), artifact_counts AS (
+                SELECT paper_id, COUNT(*) AS artifact_count
+                FROM artifacts
+                GROUP BY paper_id
+            )
+            SELECT
+                papers.id,
+                papers.source,
+                papers.source_id,
+                papers.title,
+                papers.published,
+                papers.url,
+                latest.score,
+                latest.selected,
+                latest.ranking_reason,
+                latest.matched_keywords_json,
+                COALESCE(artifact_counts.artifact_count, 0) AS artifact_count
+            FROM papers
+            LEFT JOIN latest ON latest.paper_id = papers.id AND latest.row_number = 1
+            LEFT JOIN artifact_counts ON artifact_counts.paper_id = papers.id
+            {selected_clause}
+            ORDER BY papers.last_seen_at DESC, papers.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    papers = []
+    for row in rows:
+        papers.append(
+            {
+                "id": row[0],
+                "source": row[1],
+                "source_id": row[2],
+                "title": row[3],
+                "published": row[4],
+                "url": row[5],
+                "score": row[6],
+                "selected": bool(row[7]) if row[7] is not None else False,
+                "ranking_reason": row[8],
+                "matched_keywords": decode_json(row[9], []),
+                "artifact_count": row[10],
+            }
+        )
+    return {"db_path": str(db_path), "papers": papers}
+
+
+def row_to_dict(
+    row: sqlite3.Row | tuple[Any, ...] | None,
+    columns: list[str],
+) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return dict(zip(columns, row))
+
+
+def decode_json(value: str | None, fallback: Any) -> Any:
+    if not value:
+        return fallback
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return fallback
