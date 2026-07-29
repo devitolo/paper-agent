@@ -48,6 +48,7 @@ from paper_agents.scout import (
     run_daily_scout,
 )
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile, save_profile
+from paper_agents.web import run_review_ui
 
 
 ENV_PATH = Path(".env")
@@ -184,6 +185,11 @@ def main() -> None:
     extract_parser.add_argument("--timeout", type=int, default=600)
     extract_parser.add_argument("--workers", type=int, default=1)
     extract_parser.add_argument("--output", type=Path, help="Output JSON path")
+
+    web_parser = subparsers.add_parser("web", help="Run the local review queue web UI")
+    web_parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind")
+    web_parser.add_argument("--port", type=int, default=8000, help="Port to bind")
+    web_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
 
     subparsers.add_parser("profile", help="Print the current preference profile")
 
@@ -323,6 +329,10 @@ def main() -> None:
         output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
         print(f"wrote {output_path}")
         print_section("Local extraction", output["merged"])
+        return
+
+    if args.command == "web":
+        run_review_ui(host=args.host, port=args.port, db_path=args.db)
         return
 
     if args.command == "profile":

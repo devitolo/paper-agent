@@ -8,3 +8,4 @@ data/extractions/
 data/reviews/
 data/*.db
 data/*.db-*
+logs/

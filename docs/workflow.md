@@ -123,3 +123,23 @@ python3 -m paper_agents.cli scout-daily \
 ```
 
 If one topic fails but another succeeds, the run keeps the successful candidates. If every topic fails, the command exits with a diagnostic error and does not write an empty Scout result.
+
+## Review Queue UI
+
+The local review queue UI is intentionally small:
+
+```bash
+python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
+```
+
+It lists selected papers from SQLite, displays the local triage summary fields, opens registered artifacts, and appends feedback rows for `interested`, `read_later`, `not_interested`, and `reviewed`.
+
+## Nightly Cron
+
+The first scheduled setup can use cron and `scripts/nightly_pipeline.sh`:
+
+```bash
+(crontab -l 2>/dev/null; echo "15 2 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1") | crontab -
+```
+
+This runs the quick pipeline nightly with polite arXiv settings. systemd timers remain the preferred later option once logging and failure recovery are more mature.

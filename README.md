@@ -182,6 +182,21 @@ python3 -m paper_agents.cli review-summary data/extractions/arxiv/2607.07052v1.q
 
 This writes a listening-friendly Markdown review under `data/reviews/`. The review includes an `Audio Notes` section that can later feed a text-to-speech step.
 
+Run the local review queue UI:
+
+```bash
+python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
+```
+
+The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN.
+
+Install a simple nightly cron job on the Mac mini:
+
+```bash
+(crontab -l 2>/dev/null; echo "15 2 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1") | crontab -
+```
+
+
 Stable local output folders:
 
 - Scout metadata: `data/scout/YYYY-MM-DD.jsonl`
