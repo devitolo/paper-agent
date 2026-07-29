@@ -20,6 +20,11 @@ from paper_agents.pipeline import (
     DEFAULT_PIPELINE_WORKERS,
     run_daily_pipeline,
 )
+from paper_agents.review import (
+    DEFAULT_REVIEW_DIR,
+    DEFAULT_REVIEW_MAX_CHARS,
+    review_summary,
+)
 from paper_agents.scout import (
     DEFAULT_FETCH_LIMIT,
     DEFAULT_FRESHNESS_MONTHS,
@@ -75,6 +80,12 @@ def main() -> None:
     pipeline_parser.add_argument("--quick", action="store_true", help="Interactive preview mode; extract only the first 2 chunks per paper unless --limit-chunks is set")
     pipeline_parser.add_argument("--timeout", type=int, default=DEFAULT_PIPELINE_TIMEOUT)
     pipeline_parser.add_argument("--workers", type=int, default=DEFAULT_PIPELINE_WORKERS)
+
+    review_parser = subparsers.add_parser("review-summary", help="Create a ChatGPT section-by-section review from a triage summary JSON")
+    review_parser.add_argument("summary", type=Path, help="Local extraction summary JSON")
+    review_parser.add_argument("--output-dir", type=Path, default=DEFAULT_REVIEW_DIR)
+    review_parser.add_argument("--max-chars", type=int, default=DEFAULT_REVIEW_MAX_CHARS)
+    review_parser.add_argument("--timeout", type=int, default=240)
 
     feedback_parser = subparsers.add_parser("feedback", help="Update preferences from feedback")
     feedback_parser.add_argument("text", help="Natural-language feedback")
@@ -148,6 +159,20 @@ def main() -> None:
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
         print_section("Pipeline review cards", {"cards": output["cards"]})
+        return
+
+    if args.command == "review-summary":
+        require_openai_api_key()
+        try:
+            output = review_summary(
+                args.summary,
+                output_dir=args.output_dir,
+                max_chars=args.max_chars,
+                timeout=args.timeout,
+            )
+        except RuntimeError as error:
+            raise SystemExit(str(error)) from error
+        print_section("Paper review", output)
         return
 
     if args.command == "feedback":

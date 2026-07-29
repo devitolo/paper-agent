@@ -141,6 +141,14 @@ python3 -m paper_agents.cli pipeline-daily --quick --fetch 20 --keep 3
 
 Quick mode extracts only the first 2 chunks per selected paper unless `--limit-chunks` is set explicitly.
 
+Create a ChatGPT section-by-section review from one triage summary:
+
+```bash
+python3 -m paper_agents.cli review-summary data/extractions/arxiv/2607.07052v1.qwen2.5-1.5b-instruct.summary.json
+```
+
+This writes a listening-friendly Markdown review under `data/reviews/`. The review includes an `Audio Notes` section that can later feed a text-to-speech step.
+
 Stable local output folders:
 
 - Scout metadata: `data/scout/YYYY-MM-DD.jsonl`
