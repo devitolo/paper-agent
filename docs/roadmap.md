@@ -19,18 +19,18 @@ Status: Partially complete.
 - Run a local-model benchmark.
 - Record user feedback. Not started.
 
-## Phase 2: ArXiv Scout MVP
+## Phase 2: ArXiv Scout And Curator MVP
 
-Status: Implemented.
+Status: Implemented as V2 backend.
 
 - Implement arXiv as the first source adapter.
 - Retrieve up to 50 candidates from the last 24 months.
-- Store all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`.
-- Deduplicate candidates.
-- Rank candidates with deterministic keywords for AI applied to SRE, operations, observability, incident response, debugging, reliability, and engineering workflows.
-- Select the top 5 candidates.
-- Download PDFs for the selected candidates only.
-- Record Scout runs, candidates, selected flags, PDFs, and triage summaries in SQLite.
+- Store source candidate metadata in `data/scout/YYYY-MM-DD.jsonl` without Scout preference scores.
+- Deduplicate candidates and mark previously discovered papers as excluded.
+- Move ranking and recommendation decisions into Curator.
+- Recommend at most three papers per Curator run.
+- Download PDFs and extract triage summaries for recommended papers.
+- Record workflow cycles, Scout runs/candidates, Curator evaluations/recommendations, guidance, PDFs, and triage summaries in SQLite.
 - Retry arXiv timeouts, 429s, and malformed responses with configurable delay, retries, and timeout.
 
 ## Phase 3: Provider-Based Scouting
@@ -55,15 +55,16 @@ Status: Implemented.
 - Resume missed jobs.
 - Add safe failure recovery.
 
-## Phase 6: Feedback-Driven Ranking
+## Phase 6: Feedback-Driven Learning
 
 Next major feature area.
 
-- Build compact preference profiles.
-- Retrieve positive and negative examples from SQLite.
-- Move Scout retrieval topics, positive keywords, domain context terms, and negative keywords into an inspectable preference file.
-- Add Feedback Loop v2: convert natural-language paper feedback into proposed preference updates for review before applying them.
-- Improve ranking based on user feedback.
+- Add the product-facing Feedback Agent command/UI flow.
+- Store immutable raw ChatGPT discussion summaries.
+- Allow multiple parse attempts per raw summary.
+- Store structured feedback with parser/model provenance.
+- Create new profile versions from structured feedback.
+- Improve Curator ranking based on user feedback.
 
 ## Phase 7: Optimization
 

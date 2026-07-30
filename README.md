@@ -1,8 +1,8 @@
 # Project Paper
 
-Project Paper is a system for discovering, downloading, filtering, scoring, and recommending research papers based on a user's evolving interests and feedback.
+Project Paper is a system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
 
-The repository currently contains a small Python prototype called `paper_agents`. The prototype searches arXiv, uses OpenAI to score and curate candidates, and stores a human-editable preference profile in JSON. The broader Project Paper architecture described here is the target direction, not the current implementation.
+The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent will ingest manual ChatGPT discussion summaries into immutable SQLite history and versioned profiles.
 
 ## Overview
 
@@ -27,40 +27,39 @@ See [docs/architecture.md](docs/architecture.md) and [docs/ai-stack.md](docs/ai-
 
 Implemented today:
 
-- `ResearchScout` queries arXiv for recent papers based on `data/profile.json`.
-- `scout-daily` runs a deterministic arXiv Scout MVP with keyword ranking, JSONL metadata storage, top-five selection, PDF downloads for selected papers, and retry/backoff controls for arXiv requests.
-- `pipeline-daily` runs Scout, downloads selected PDFs, extracts local triage cards with Ollama, and records runs, papers, candidates, PDFs, and summary artifacts in SQLite.
+- `ScoutAgent` retrieves arXiv candidate pools, deduplicates source results, marks previously discovered papers as excluded, and persists Scout run telemetry without preference scores.
+- `CuratorAgent` reads Scout candidates, current profile version, and history; scores every considered candidate; recommends up to three papers; and writes active scouting guidance for later Scout runs.
+- `pipeline-daily` runs the V2 Scout -> Curator workflow, records workflow cycles, downloads/extracts recommended PDFs with Ollama, and stores artifacts in SQLite.
+- SQLite stores canonical papers, alternate source records, Scout runs/candidates, Curator runs/evaluations/recommendations, versioned scouting guidance, immutable raw feedback tables, parse attempts, structured feedback, and profile versions.
+- `bootstrap known-papers` backfills important seed papers, including the Microsoft/arXiv cloud incident LLM paper.
 - `review-summary` creates a ChatGPT section-by-section Markdown review from a triage summary.
-- OpenAI scores candidate titles and abstracts in the older `run` prototype.
-- `ResearchCurator` selects a short reading list from the scout output.
-- `FeedbackAgent` updates `data/profile.json` from natural-language feedback.
-- Docker can run the CLI with a mounted `.env` and `data/` directory.
+- The review queue UI reads Curator recommendations from SQLite and lets the user mark lightweight review statuses.
+
+Still manual in this MVP:
+
+- The user manually copies a recommended paper/link into a ChatGPT Paper Discussion conversation.
+- The user manually copies ChatGPT's final discussion summary back into the future Feedback Agent flow.
+- Feedback parsing and profile-version updates are supported at the repository/schema layer but are not yet wired into a product-facing CLI/UI flow.
 
 Not implemented yet:
 
-- Feedback Loop v2 backed by SQLite feedback rows.
 - Gemini or other provider adapters.
 - General open-access PDF resolution beyond arXiv.
-- Duplicate/history filtering backed by the SQLite registry.
 - systemd service and timer.
 - Benchmark recording and generated run reports.
 
-## Planned Workflow
+## MVP Workflow
 
-1. A systemd timer starts the workflow on the Mac mini.
-2. The workflow loads configuration, paper history, and preference data.
-3. A configured cloud scout provider finds candidate papers.
-4. Candidate records are normalized into a provider-independent schema.
-5. Local filters remove duplicates and papers already seen, accepted, declined, or recently reviewed.
-6. Open-access PDFs are downloaded when available.
-7. Downloaded files are hashed and registered.
-8. PDF text and useful sections are extracted.
-9. A benchmark-selected local model scores and summarizes selected content.
-10. Strong or difficult candidates may be escalated to a cloud model.
-11. A report is generated for user review.
-12. User feedback is written locally and reused in future runs.
+```text
+Scout
+  -> Curator
+  -> manual ChatGPT Paper Discussion
+  -> manual final discussion summary handoff
+  -> Feedback Agent
+  -> SQLite
+```
 
-The current implementation covers the arXiv Scout MVP, local Ollama triage extraction, SQLite registry writes and inspection commands, ChatGPT review generation, and the older OpenAI scout/curator prototype.
+The current scheduled path covers Scout -> Curator -> recommended PDF extraction. The two ChatGPT handoffs remain intentionally manual while the MVP validates the workflow.
 
 ## Requirements
 
@@ -119,13 +118,13 @@ You can still run locally with Python:
 python3 -m paper_agents.cli run
 ```
 
-Run the deterministic arXiv Scout MVP:
+Run the arXiv Scout source check:
 
 ```bash
 python3 -m paper_agents.cli scout-daily
 ```
 
-The first Scout implementation uses arXiv only, stores all candidate metadata in `data/scout/YYYY-MM-DD.jsonl`, ranks candidates with deterministic keywords, filters papers already present in SQLite, keeps the top 5 unseen candidates, and downloads PDFs for the selected papers into `data/papers/arxiv/`. The default Scout run fetches up to 50 candidates across the default topic set. Use `--include-seen` to allow previously seen papers to be selected again.
+Scout uses arXiv only in the MVP. It stores source candidate metadata in `data/scout/YYYY-MM-DD.jsonl` without preference scores, recommendation ranks, or final selection decisions. Ranking and recommendations belong to Curator inside `pipeline-daily`.
 
 For a gentle arXiv test, use a single topic and the network hardening flags:
 
@@ -146,6 +145,13 @@ Initialize the SQLite registry:
 python3 -m paper_agents.cli db init
 ```
 
+During the V2 reset window, recreate a local dev/Mini database with:
+
+```bash
+python3 -m paper_agents.cli db reset --yes
+python3 -m paper_agents.cli bootstrap known-papers
+```
+
 Inspect the registry:
 
 ```bash
@@ -154,13 +160,13 @@ python3 -m paper_agents.cli db recent-runs --limit 5
 python3 -m paper_agents.cli db papers --selected --limit 10
 ```
 
-Run the daily Scout-to-triage pipeline:
+Run the daily Scout-to-Curator pipeline:
 
 ```bash
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-This runs Scout, filters papers already present in SQLite, downloads the selected PDFs, extracts local triage cards with Ollama, saves summaries under `data/extractions/`, records runs and artifacts in `data/paper_agent.db`, and prints a compact review list. The default is full mode for scheduled runs. Use `--include-seen` to allow reruns to select previously seen papers. Use `--no-db` for throwaway runs that should not touch the SQLite registry or history filter. For an interactive preview, use quick mode:
+This creates a workflow cycle, runs Scout to retrieve and persist candidates, lets Curator evaluate every eligible candidate, stores up to three recommendations, downloads/extracts recommended PDFs, saves summaries under `data/extractions/`, records artifacts in `data/paper_agent.db`, and prints a compact review list. Previously discovered papers are retained as Scout candidate records with exclusion reasons instead of being re-recommended. For an interactive preview, use quick mode:
 
 ```bash
 python3 -m paper_agents.cli pipeline-daily \
@@ -228,7 +234,9 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 |   `-- workflow.md
 |-- paper_agents/
 |   |-- cli.py
+|   |-- bootstrap.py
 |   |-- curator.py
+|   |-- curator_agent.py
 |   |-- db.py
 |   |-- feedback.py
 |   |-- local_extract.py
@@ -236,6 +244,7 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 |   |-- pipeline.py
 |   |-- review.py
 |   |-- scout.py
+|   |-- scout_agent.py
 |   `-- store.py
 |-- scripts/
 |   |-- paper_extract_ollama.py
@@ -250,15 +259,14 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 
 ## Development Roadmap
 
-The next work should build on the arXiv-to-SQLite MVP:
+The next work should build on the V2 Scout/Curator backend:
 
-1. Use SQLite history for duplicate filtering and feedback-aware ranking.
-2. Add Feedback Loop v2 for selected, accepted, declined, and saved-for-later papers.
-3. Add a review queue that turns a selected triage summary into a ChatGPT section-by-section review.
-4. Add provider adapters for ChatGPT/Codex and Gemini behind one interface.
-5. Add general open-access PDF resolution beyond arXiv.
-6. Add systemd scheduling, logs, and run reports.
-7. Record benchmark runs and generated reports.
+1. Wire the Feedback Agent CLI/UI flow for immutable raw discussion summaries, parse attempts, structured feedback, and profile-version updates.
+2. Update the review queue UI around Curator recommendations and manual ChatGPT handoff status.
+3. Add provider adapters for ChatGPT/Codex and Gemini behind one source interface.
+4. Add general open-access PDF resolution beyond arXiv.
+5. Add systemd scheduling, logs, and run reports.
+6. Record benchmark runs and generated reports.
 
 See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
 

@@ -35,34 +35,31 @@ systemd timer
 Python workflow
       |
       v
-Cloud scout provider adapter
-   |-- ChatGPT/Codex client
-   |-- Gemini client
-   `-- Future provider adapters
+Scout source adapters
+   |-- arXiv adapter
+   |-- future company blog adapters
+   `-- future provider adapters
       |
       v
-Normalized candidate records
+SQLite candidate pool
       |
       v
-Local history and duplicate filtering
+Curator scoring and recommendations
       |
       v
-Automatic open-access PDF download
+Recommended PDF download and local extraction
       |
       v
-PDF text and section extraction
+Manual ChatGPT Paper Discussion
       |
       v
-Local LLM scoring and summarization
+Manual final summary handoff
       |
       v
-Optional cloud escalation
+Feedback Agent and profile versioning
       |
       v
-User review and feedback
-      |
-      v
-SQLite history and preference updates
+SQLite history and guidance
 ```
 
 ## Component Responsibilities
@@ -71,9 +68,11 @@ The scheduler starts runs and captures basic process status. The first scheduler
 
 The Python workflow owns orchestration between deterministic steps and model-backed judgment steps. It should remain explicit and debuggable before any larger agent framework is considered.
 
-Provider adapters translate a normalized scouting request into provider-specific prompts or API calls and return normalized paper records. Downstream filtering, downloading, scoring, and reporting should not depend on a provider-specific response shape.
+Scout source adapters translate a normalized scouting request into source-specific calls and return normalized paper records. Scout persists candidate pools and diagnostics only; preference scoring and recommendations belong to Curator.
 
-The paper registry stores paper identifiers, source metadata, local file paths, artifact records, candidate scores, selected flags, and run telemetry. SQLite is the initial store because the system is single-host and benefits from easy inspection and backup. Feedback rows are reserved for the next feedback loop pass.
+Curator reads the candidate pool, active profile version, history, and guidance. It stores evaluations for every candidate considered and writes at most three ordered recommendations.
+
+The paper registry stores canonical paper identifiers, alternate sources, workflow state, Scout telemetry, Curator evaluations, recommendation records, artifacts, immutable feedback inputs, parse attempts, structured feedback, profile versions, and active scouting guidance. SQLite is the initial store because the system is single-host and benefits from easy inspection and backup.
 
 The downloader resolves and fetches open-access PDFs when available. File transfer should be deterministic code, not an LLM responsibility.
 
