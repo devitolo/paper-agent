@@ -49,7 +49,7 @@ SQLite candidate pool
 Curator scoring and recommendations
       |
       v
-Recommended PDF download and local extraction
+Reviewer PDF download and local extraction
       |
       v
 Manual ChatGPT Paper Discussion
@@ -76,9 +76,9 @@ Curator reads the candidate pool, active profile version, history, and guidance.
 
 The paper registry stores canonical paper identifiers, alternate sources, workflow state, Scout telemetry, Curator evaluations, recommendation records, artifacts, immutable feedback inputs, parse attempts, structured feedback, profile versions, and active scouting guidance. SQLite is the initial store because the system is single-host and benefits from easy inspection and backup.
 
-The downloader resolves and fetches open-access PDFs when available. File transfer should be deterministic code, not an LLM responsibility.
+Reviewer resolves and fetches open-access PDFs when available, registers PDF artifacts, runs local triage extraction, and stores summary artifacts. File transfer should be deterministic code, not an LLM responsibility.
 
-PDF extraction turns downloaded papers into structured text chunks such as title, abstract, introduction, methodology, results, and conclusion when those sections are available.
+PDF extraction turns downloaded papers into structured triage fields such as paper date, research problem, why it matters, and approach.
 
 Local model inference handles high-volume scoring and summarization if benchmarks show that a small quantized model performs acceptably on the Mac mini.
 

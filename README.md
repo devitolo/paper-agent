@@ -39,7 +39,7 @@ Implemented today:
 
 - `ScoutAgent` retrieves arXiv candidate pools, deduplicates source results, marks previously discovered papers as excluded, and persists Scout run telemetry without preference scores.
 - `CuratorAgent` reads Scout candidates, current profile version, and history; scores every considered candidate; recommends up to three papers; and writes active scouting guidance for later Scout runs.
-- `pipeline-daily` runs the V2 Scout -> Curator workflow, records workflow cycles, downloads/extracts recommended PDFs with Ollama, and stores artifacts in SQLite.
+- `pipeline-daily` orchestrates the V2 Scout -> Curator -> Reviewer workflow, records workflow cycles, downloads/extracts recommended PDFs with Ollama, and stores artifacts in SQLite.
 - SQLite stores canonical papers, alternate source records, Scout runs/candidates, Curator runs/evaluations/recommendations, versioned scouting guidance, immutable raw feedback tables, parse attempts, structured feedback, and profile versions.
 - `bootstrap known-papers` backfills important seed papers, including the Microsoft/arXiv cloud incident LLM paper.
 - `review-summary` creates a ChatGPT section-by-section Markdown review from a triage summary.
@@ -253,6 +253,7 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 |   |-- openai_helpers.py
 |   |-- pipeline.py
 |   |-- review.py
+|   |-- reviewer_agent.py
 |   |-- scout.py
 |   |-- scout_agent.py
 |   `-- store.py

@@ -37,8 +37,8 @@ Do not automate these handoffs until the manual loop is clearly useful.
 5. Previously discovered papers are recorded as excluded Scout candidates with an exclusion reason.
 6. Curator evaluates every eligible candidate.
 7. Curator writes up to three recommendations and active guidance for future Scout runs.
-8. Recommended PDFs are downloaded when available.
-9. Local Ollama extraction creates triage summaries for recommended PDFs.
+8. Reviewer downloads recommended PDFs when available.
+9. Reviewer runs local Ollama extraction and stores triage summary artifacts for recommended PDFs.
 10. The workflow waits for manual ChatGPT discussion.
 11. Later, the Feedback Agent ingests the final discussion summary and updates profile history.
 

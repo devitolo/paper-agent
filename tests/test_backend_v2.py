@@ -10,6 +10,7 @@ from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.scout import ScoutCandidate
 from paper_agents.scout import run_daily_scout
+from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
 
 
@@ -182,6 +183,39 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(active["id"], second)
         inactive_count = self.connection.execute("SELECT COUNT(*) FROM scouting_guidance WHERE active = 0").fetchone()[0]
         self.assertEqual(inactive_count, 1)
+
+
+    def test_reviewer_card_uses_extraction_summary_fields(self):
+        card = card_from_recommendation(
+            {
+                "paper_id": 42,
+                "title": "Interesting Ops Paper",
+                "url": "https://example.test/paper",
+                "published": "2026-07-30",
+                "score": 72.5,
+                "rationale": "Strong production operations match.",
+            },
+            index=1,
+            pdf_path=Path("data/papers/example.pdf"),
+            output_path=Path("data/extractions/example.summary.json"),
+            extraction={
+                "merged": {
+                    "paper_date": "2026-07-29",
+                    "research_problem": "Automating incident review",
+                    "why_it_matters": "It saves on-call time",
+                    "approach": "Local triage extraction",
+                },
+                "merge_strategy": "synthesis",
+                "chunk_count": 3,
+            },
+        )
+        self.assertEqual(card["recommendation_order"], 1)
+        self.assertEqual(card["paper_date"], "2026-07-29")
+        self.assertEqual(card["research_problem"], "Automating incident review")
+        self.assertEqual(card["why_it_matters"], "It saves on-call time")
+        self.assertEqual(card["approach"], "Local triage extraction")
+        self.assertEqual(card["merge_strategy"], "synthesis")
+        self.assertEqual(card["chunk_count"], 3)
 
 
     def test_legacy_scout_import_recovers_selected_recommendations(self):
