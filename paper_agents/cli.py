@@ -13,6 +13,7 @@ from paper_agents.db import (
     init_db,
     list_papers,
     recent_runs,
+    reset_db,
     seen_source_ids,
 )
 from paper_agents.feedback import FeedbackAgent
@@ -23,6 +24,7 @@ from paper_agents.local_extract import (
     output_path_for,
 )
 from paper_agents.pipeline import (
+    DEFAULT_MAX_SCOUT_ATTEMPTS,
     DEFAULT_PIPELINE_LIMIT_CHUNKS,
     DEFAULT_PIPELINE_MAX_CHARS,
     DEFAULT_PIPELINE_TIMEOUT,
@@ -72,6 +74,10 @@ def main() -> None:
     db_init_parser = db_subparsers.add_parser("init", help="Initialize the local SQLite database")
     db_init_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
     db_init_parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA_PATH, help="Schema SQL path")
+    db_reset_parser = db_subparsers.add_parser("reset", help="Delete and recreate the local SQLite database")
+    db_reset_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    db_reset_parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA_PATH, help="Schema SQL path")
+    db_reset_parser.add_argument("--yes", action="store_true", help="Confirm destructive database reset")
     db_stats_parser = db_subparsers.add_parser("stats", help="Show SQLite registry counts")
     db_stats_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
     db_runs_parser = db_subparsers.add_parser("recent-runs", help="Show recent Scout/pipeline runs")
@@ -130,7 +136,7 @@ def main() -> None:
     pipeline_parser = subparsers.add_parser("pipeline-daily", help="Run Scout, download PDFs, and extract triage cards")
     pipeline_parser.add_argument("--freshness-months", type=int, default=DEFAULT_FRESHNESS_MONTHS)
     pipeline_parser.add_argument("--fetch", type=int, default=DEFAULT_FETCH_LIMIT, help="Maximum candidates to fetch")
-    pipeline_parser.add_argument("--keep", type=int, default=DEFAULT_KEEP_LIMIT, help="Number of top candidates to select and extract")
+    pipeline_parser.add_argument("--keep", type=int, default=3, help="Maximum recommendations to curate and extract; capped at 3")
     pipeline_parser.add_argument("--scout-dir", type=Path, default=DEFAULT_SCOUT_DIR)
     pipeline_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
     pipeline_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
@@ -160,12 +166,13 @@ def main() -> None:
         help="Timeout seconds per arXiv request",
     )
     pipeline_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    pipeline_parser.add_argument("--max-scout-attempts", type=int, default=DEFAULT_MAX_SCOUT_ATTEMPTS)
+    pipeline_parser.add_argument("--min-quality-score", type=float, default=25.0)
     pipeline_parser.add_argument(
         "--include-seen",
         action="store_true",
-        help="Allow papers already present in SQLite to be selected again",
+        help="Deprecated in V2; previously discovered papers are recorded as excluded Scout candidates",
     )
-    pipeline_parser.add_argument("--no-db", action="store_true", help="Do not record pipeline results in SQLite")
 
     review_parser = subparsers.add_parser("review-summary", help="Create a ChatGPT section-by-section review from a triage summary JSON")
     review_parser.add_argument("summary", type=Path, help="Local extraction summary JSON")
@@ -202,6 +209,11 @@ def main() -> None:
             except RuntimeError as error:
                 raise SystemExit(str(error)) from error
             print_section("Database initialized", output)
+            return
+        if args.db_command == "reset":
+            if not args.yes:
+                raise SystemExit("Refusing to reset database without --yes")
+            print_section("Database reset", reset_db(args.db, args.schema))
             return
         if args.db_command == "stats":
             print_section("Database stats", db_stats(args.db))
@@ -273,12 +285,15 @@ def main() -> None:
                 limit_chunks=limit_chunks,
                 timeout=args.timeout,
                 workers=args.workers,
-                db_path=None if args.no_db else args.db,
+                db_path=args.db,
                 mode=mode,
                 request_delay=args.request_delay,
                 scout_retries=args.retries,
                 scout_timeout=args.source_timeout,
                 include_seen=args.include_seen,
+                max_scout_attempts=args.max_scout_attempts,
+                min_quality_score=args.min_quality_score,
+                profile_path=args.profile,
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error

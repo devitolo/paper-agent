@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -7,6 +8,21 @@ from typing import Any
 
 DEFAULT_DB_PATH = Path("data/paper_agent.db")
 DEFAULT_SCHEMA_PATH = Path("sql/schema.sql")
+
+WORKFLOW_STATES = {
+    "created",
+    "scouting",
+    "scout_complete",
+    "curating",
+    "rescout_requested",
+    "recommendations_ready",
+    "awaiting_manual_discussion",
+    "raw_feedback_received",
+    "feedback_parsed",
+    "profile_updated",
+    "complete",
+    "failed",
+}
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
@@ -18,18 +34,19 @@ def init_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_
     with sqlite3.connect(db_path) as connection:
         connection.executescript(schema_sql)
         connection.execute("PRAGMA foreign_keys = ON")
-        tables = [
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-            )
-        ]
+        tables = list_tables(connection)
 
-    return {
-        "db_path": str(db_path),
-        "schema_path": str(schema_path),
-        "tables": tables,
-    }
+    return {"db_path": str(db_path), "schema_path": str(schema_path), "tables": tables}
+
+
+def reset_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
+    if db_path.exists():
+        db_path.unlink()
+    for suffix in ["-wal", "-shm"]:
+        sidecar = Path(str(db_path) + suffix)
+        if sidecar.exists():
+            sidecar.unlink()
+    return init_db(db_path, schema_path)
 
 
 def connect_db(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -38,137 +55,551 @@ def connect_db(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     return connection
 
 
-def record_scout_output(
-    db_path: Path,
-    scout_output: dict[str, Any],
-    *,
-    topics: list[str],
-    fetch_limit: int,
-    keep_limit: int,
-    mode: str,
-) -> dict[str, Any]:
-    init_db(db_path)
-    candidates = scout_output.get("candidates") or scout_output.get("selected", [])
-    with connect_db(db_path) as connection:
-        run_id = insert_scout_run(
-            connection,
-            source=scout_output.get("source") or "unknown",
-            fetch_limit=fetch_limit,
-            keep_limit=keep_limit,
-            topics=topics,
-            mode=mode,
+def list_tables(connection: sqlite3.Connection) -> list[str]:
+    return [
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         )
-        paper_ids: dict[str, int] = {}
-        for candidate in candidates:
-            paper_id = upsert_paper(connection, candidate)
-            paper_ids[candidate_registry_key(candidate)] = paper_id
-            insert_scout_candidate(connection, run_id, paper_id, candidate)
-            if candidate.get("pdf_path"):
-                insert_artifact(
-                    connection,
-                    paper_id,
-                    artifact_type="pdf",
-                    path=Path(candidate["pdf_path"]),
-                    metadata={"pdf_url": candidate.get("pdf_url")},
-                )
+    ]
 
+
+def create_workflow_cycle(
+    connection: sqlite3.Connection,
+    *,
+    mode: str,
+    max_scout_attempts: int,
+    metadata: dict[str, Any] | None = None,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO workflow_cycles (state, mode, max_scout_attempts, metadata_json)
+        VALUES ('created', ?, ?, ?)
+        """,
+        (mode, max_scout_attempts, json_dumps(metadata or {})),
+    )
+    return int(cursor.lastrowid)
+
+
+def update_workflow_state(connection: sqlite3.Connection, cycle_id: int, state: str) -> None:
+    if state not in WORKFLOW_STATES:
+        raise ValueError(f"Unknown workflow state: {state}")
+    connection.execute(
+        "UPDATE workflow_cycles SET state = ?, updated_at = datetime('now') WHERE id = ?",
+        (state, cycle_id),
+    )
+
+
+def increment_scout_attempts(connection: sqlite3.Connection, cycle_id: int) -> None:
+    connection.execute(
+        """
+        UPDATE workflow_cycles
+        SET scout_attempts_used = scout_attempts_used + 1,
+            updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (cycle_id,),
+    )
+
+
+def get_workflow_cycle(connection: sqlite3.Connection, cycle_id: int) -> dict[str, Any] | None:
+    row = connection.execute(
+        """
+        SELECT id, created_at, updated_at, state, mode, max_scout_attempts, scout_attempts_used, metadata_json
+        FROM workflow_cycles
+        WHERE id = ?
+        """,
+        (cycle_id,),
+    ).fetchone()
+    if row is None:
+        return None
     return {
-        "db_path": str(db_path),
-        "run_id": run_id,
-        "paper_ids": paper_ids,
-        "candidate_count": len(candidates),
+        "id": row[0],
+        "created_at": row[1],
+        "updated_at": row[2],
+        "state": row[3],
+        "mode": row[4],
+        "max_scout_attempts": row[5],
+        "scout_attempts_used": row[6],
+        "metadata": decode_json(row[7], {}),
     }
+
+
+def current_profile_version(connection: sqlite3.Connection) -> dict[str, Any] | None:
+    row = connection.execute(
+        """
+        SELECT id, version, created_at, profile_json, source_structured_feedback_id, change_summary, active
+        FROM profile_versions
+        WHERE active = 1
+        ORDER BY version DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0],
+        "version": row[1],
+        "created_at": row[2],
+        "profile": decode_json(row[3], {}),
+        "source_structured_feedback_id": row[4],
+        "change_summary": row[5],
+        "active": bool(row[6]),
+    }
+
+
+def ensure_profile_version(
+    connection: sqlite3.Connection,
+    profile: dict[str, Any],
+    *,
+    change_summary: str = "Initial profile seed",
+) -> int:
+    current = current_profile_version(connection)
+    if current:
+        return int(current["id"])
+    return create_profile_version(connection, profile, change_summary=change_summary)
+
+
+def create_profile_version(
+    connection: sqlite3.Connection,
+    profile: dict[str, Any],
+    *,
+    source_structured_feedback_id: int | None = None,
+    change_summary: str | None = None,
+) -> int:
+    row = connection.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM profile_versions").fetchone()
+    version = int(row[0])
+    connection.execute("UPDATE profile_versions SET active = 0 WHERE active = 1")
+    cursor = connection.execute(
+        """
+        INSERT INTO profile_versions (
+            version, profile_json, source_structured_feedback_id, change_summary, active
+        )
+        VALUES (?, ?, ?, ?, 1)
+        """,
+        (version, json_dumps(profile), source_structured_feedback_id, change_summary),
+    )
+    return int(cursor.lastrowid)
+
+
+def active_scouting_guidance(connection: sqlite3.Connection) -> dict[str, Any] | None:
+    row = connection.execute(
+        """
+        SELECT id, curator_run_id, guidance_text, created_at, expires_at, metadata_json
+        FROM scouting_guidance
+        WHERE active = 1 AND (expires_at IS NULL OR expires_at > datetime('now'))
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0],
+        "curator_run_id": row[1],
+        "guidance_text": row[2],
+        "created_at": row[3],
+        "expires_at": row[4],
+        "metadata": decode_json(row[5], {}),
+    }
+
+
+def create_scouting_guidance(
+    connection: sqlite3.Connection,
+    *,
+    curator_run_id: int | None,
+    guidance_text: str,
+    metadata: dict[str, Any] | None = None,
+    active: bool = True,
+) -> int:
+    if active:
+        connection.execute("UPDATE scouting_guidance SET active = 0 WHERE active = 1")
+    cursor = connection.execute(
+        """
+        INSERT INTO scouting_guidance (curator_run_id, guidance_text, active, metadata_json)
+        VALUES (?, ?, ?, ?)
+        """,
+        (curator_run_id, guidance_text, 1 if active else 0, json_dumps(metadata or {})),
+    )
+    return int(cursor.lastrowid)
+
+
+def canonical_key_for_candidate(candidate: dict[str, Any]) -> str:
+    arxiv_id = normalized_arxiv_id(candidate.get("arxiv_id"))
+    if not arxiv_id and candidate.get("source") == "arxiv":
+        arxiv_id = normalized_arxiv_id(candidate.get("source_id"))
+    if arxiv_id:
+        return f"arxiv:{arxiv_id}"
+    doi = normalize_doi(candidate.get("doi"))
+    if doi:
+        return f"doi:{doi}"
+    source = str(candidate.get("source") or "unknown")
+    source_id = str(candidate.get("source_id") or candidate.get("url") or candidate.get("title") or "unknown")
+    return f"{source}:{source_id}"
+
+
+def upsert_paper(connection: sqlite3.Connection, candidate: dict[str, Any]) -> tuple[int, bool]:
+    canonical_key = canonical_key_for_candidate(candidate)
+    arxiv_id = normalized_arxiv_id(candidate.get("arxiv_id"))
+    if not arxiv_id and candidate.get("source") == "arxiv":
+        arxiv_id = normalized_arxiv_id(candidate.get("source_id"))
+    doi = normalize_doi(candidate.get("doi"))
+    title = str(candidate.get("title") or canonical_key)
+    authors = candidate.get("authors") or []
+    categories = candidate.get("categories") or []
+    row = connection.execute("SELECT id FROM papers WHERE canonical_key = ?", (canonical_key,)).fetchone()
+    is_new = row is None
+
+    connection.execute(
+        """
+        INSERT INTO papers (
+            canonical_key, title, abstract, published, updated, doi, arxiv_id, authors_json, categories_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(canonical_key) DO UPDATE SET
+            title = excluded.title,
+            abstract = COALESCE(excluded.abstract, papers.abstract),
+            published = COALESCE(excluded.published, papers.published),
+            updated = COALESCE(excluded.updated, papers.updated),
+            doi = COALESCE(excluded.doi, papers.doi),
+            arxiv_id = COALESCE(excluded.arxiv_id, papers.arxiv_id),
+            authors_json = excluded.authors_json,
+            categories_json = excluded.categories_json,
+            last_discovered_at = datetime('now')
+        """,
+        (
+            canonical_key,
+            title,
+            candidate.get("abstract"),
+            candidate.get("published") or candidate.get("publication_date"),
+            candidate.get("updated"),
+            doi,
+            arxiv_id,
+            json_dumps(authors),
+            json_dumps(categories),
+        ),
+    )
+    paper_id = int(connection.execute("SELECT id FROM papers WHERE canonical_key = ?", (canonical_key,)).fetchone()[0])
+    upsert_paper_source(connection, paper_id, candidate)
+    return paper_id, is_new
+
+
+def upsert_paper_source(connection: sqlite3.Connection, paper_id: int, candidate: dict[str, Any]) -> None:
+    source = str(candidate.get("source") or "unknown")
+    source_id = str(candidate.get("source_id") or candidate.get("url") or candidate.get("title") or "unknown")
+    connection.execute(
+        """
+        INSERT INTO paper_sources (paper_id, source, source_id, url, pdf_url, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source, source_id) DO UPDATE SET
+            paper_id = excluded.paper_id,
+            url = excluded.url,
+            pdf_url = excluded.pdf_url,
+            metadata_json = excluded.metadata_json
+        """,
+        (
+            paper_id,
+            source,
+            source_id,
+            candidate.get("url"),
+            candidate.get("pdf_url"),
+            json_dumps(candidate.get("metadata") or {}),
+        ),
+    )
+
+
+def discovered_canonical_keys(db_path: Path = DEFAULT_DB_PATH) -> set[str]:
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        rows = connection.execute("SELECT canonical_key FROM papers").fetchall()
+    return {row[0] for row in rows if row[0]}
+
+
+def seen_source_ids(db_path: Path = DEFAULT_DB_PATH, source: str | None = None) -> set[str]:
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        if source:
+            rows = connection.execute("SELECT source_id FROM paper_sources WHERE source = ?", (source,)).fetchall()
+        else:
+            rows = connection.execute("SELECT source_id FROM paper_sources").fetchall()
+    return {row[0] for row in rows if row[0]}
 
 
 def insert_scout_run(
     connection: sqlite3.Connection,
     *,
+    workflow_cycle_id: int,
+    attempt_number: int,
     source: str,
-    fetch_limit: int,
-    keep_limit: int,
+    target_candidates: int,
+    max_candidates: int,
+    freshness_months: int,
     topics: list[str],
-    mode: str,
+    guidance_id: int | None,
+    diagnostics: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
+    errors: list[str] | None = None,
 ) -> int:
     cursor = connection.execute(
         """
-        INSERT INTO scout_runs (source, fetch_limit, keep_limit, topics_json, mode)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO scout_runs (
+            workflow_cycle_id, attempt_number, source, target_candidates, max_candidates,
+            freshness_months, topics_json, guidance_id, diagnostics_json, warnings_json, errors_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (source, fetch_limit, keep_limit, json.dumps(topics, ensure_ascii=False), mode),
+        (
+            workflow_cycle_id,
+            attempt_number,
+            source,
+            target_candidates,
+            max_candidates,
+            freshness_months,
+            json_dumps(topics),
+            guidance_id,
+            json_dumps(diagnostics or {}),
+            json_dumps(warnings or []),
+            json_dumps(errors or []),
+        ),
     )
     return int(cursor.lastrowid)
 
 
-def upsert_paper(connection: sqlite3.Connection, candidate: dict[str, Any]) -> int:
-    source = str(candidate.get("source") or "unknown")
-    source_id = str(candidate.get("source_id") or candidate.get("url") or candidate.get("title") or "unknown")
-    title = str(candidate.get("title") or source_id)
-    authors = candidate.get("authors") or []
-    categories = candidate.get("categories") or []
-
+def complete_scout_run(
+    connection: sqlite3.Connection,
+    scout_run_id: int,
+    *,
+    diagnostics: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
+    errors: list[str] | None = None,
+) -> None:
     connection.execute(
         """
-        INSERT INTO papers (
-            source, source_id, title, url, pdf_url, published, updated, authors_json, categories_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(source, source_id) DO UPDATE SET
-            title = excluded.title,
-            url = excluded.url,
-            pdf_url = excluded.pdf_url,
-            published = excluded.published,
-            updated = excluded.updated,
-            authors_json = excluded.authors_json,
-            categories_json = excluded.categories_json,
-            last_seen_at = datetime('now')
+        UPDATE scout_runs
+        SET completed_at = datetime('now'),
+            diagnostics_json = ?,
+            warnings_json = ?,
+            errors_json = ?
+        WHERE id = ?
         """,
-        (
-            source,
-            source_id,
-            title,
-            candidate.get("url"),
-            candidate.get("pdf_url"),
-            candidate.get("published") or candidate.get("publication_date"),
-            candidate.get("updated"),
-            json.dumps(authors, ensure_ascii=False),
-            json.dumps(categories, ensure_ascii=False),
-        ),
+        (json_dumps(diagnostics or {}), json_dumps(warnings or []), json_dumps(errors or []), scout_run_id),
     )
-    row = connection.execute(
-        "SELECT id FROM papers WHERE source = ? AND source_id = ?",
-        (source, source_id),
-    ).fetchone()
-    if row is None:
-        raise RuntimeError(f"Could not load paper registry id for {source}:{source_id}")
-    return int(row[0])
 
 
 def insert_scout_candidate(
     connection: sqlite3.Connection,
-    run_id: int,
+    *,
+    scout_run_id: int,
     paper_id: int,
-    candidate: dict[str, Any],
-) -> None:
-    connection.execute(
+    retrieval_order: int,
+    is_new: bool,
+    excluded: bool = False,
+    exclusion_reason: str | None = None,
+    source_query: str | None = None,
+    source_diagnostics: dict[str, Any] | None = None,
+) -> int:
+    cursor = connection.execute(
         """
         INSERT INTO scout_candidates (
-            run_id, paper_id, score, matched_keywords_json, ranking_reason, selected
+            scout_run_id, paper_id, retrieval_order, is_new, excluded,
+            exclusion_reason, source_query, source_diagnostics_json
         )
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(run_id, paper_id) DO UPDATE SET
-            score = excluded.score,
-            matched_keywords_json = excluded.matched_keywords_json,
-            ranking_reason = excluded.ranking_reason,
-            selected = excluded.selected
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(scout_run_id, paper_id) DO UPDATE SET
+            retrieval_order = excluded.retrieval_order,
+            is_new = excluded.is_new,
+            excluded = excluded.excluded,
+            exclusion_reason = excluded.exclusion_reason,
+            source_query = excluded.source_query,
+            source_diagnostics_json = excluded.source_diagnostics_json
         """,
         (
-            run_id,
+            scout_run_id,
             paper_id,
-            float(candidate.get("score") or 0),
-            json.dumps(candidate.get("matched_keywords") or [], ensure_ascii=False),
-            candidate.get("ranking_reason"),
-            1 if candidate.get("selected") else 0,
+            retrieval_order,
+            1 if is_new else 0,
+            1 if excluded else 0,
+            exclusion_reason,
+            source_query,
+            json_dumps(source_diagnostics or {}),
         ),
+    )
+    if cursor.lastrowid:
+        return int(cursor.lastrowid)
+    row = connection.execute(
+        "SELECT id FROM scout_candidates WHERE scout_run_id = ? AND paper_id = ?",
+        (scout_run_id, paper_id),
+    ).fetchone()
+    return int(row[0])
+
+
+def eligible_candidates_for_cycle(connection: sqlite3.Connection, workflow_cycle_id: int) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT
+            scout_candidates.id,
+            scout_candidates.paper_id,
+            papers.title,
+            papers.abstract,
+            papers.published,
+            papers.canonical_key,
+            papers.arxiv_id,
+            paper_sources.source,
+            paper_sources.source_id,
+            paper_sources.url,
+            paper_sources.pdf_url,
+            scout_candidates.retrieval_order,
+            scout_runs.id
+        FROM scout_candidates
+        JOIN scout_runs ON scout_runs.id = scout_candidates.scout_run_id
+        JOIN papers ON papers.id = scout_candidates.paper_id
+        LEFT JOIN paper_sources ON paper_sources.paper_id = papers.id
+        WHERE scout_runs.workflow_cycle_id = ?
+          AND scout_candidates.excluded = 0
+          AND (paper_sources.id IS NULL OR paper_sources.id = (
+              SELECT MIN(id) FROM paper_sources WHERE paper_id = papers.id
+          ))
+        ORDER BY scout_runs.attempt_number ASC, scout_candidates.retrieval_order ASC
+        """,
+        (workflow_cycle_id,),
+    ).fetchall()
+    return [
+        {
+            "scout_candidate_id": row[0],
+            "paper_id": row[1],
+            "title": row[2],
+            "abstract": row[3],
+            "published": row[4],
+            "canonical_key": row[5],
+            "arxiv_id": row[6],
+            "source": row[7],
+            "source_id": row[8],
+            "url": row[9],
+            "pdf_url": row[10],
+            "retrieval_order": row[11],
+            "scout_run_id": row[12],
+        }
+        for row in rows
+    ]
+
+
+def create_curator_run(
+    connection: sqlite3.Connection,
+    *,
+    workflow_cycle_id: int,
+    profile_version_id: int | None,
+    scout_attempt_count: int,
+    max_scout_attempts: int,
+    min_quality_score: float,
+    max_recommendations: int,
+    model: str | None,
+    metadata: dict[str, Any] | None = None,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO curator_runs (
+            workflow_cycle_id, profile_version_id, scout_attempt_count, max_scout_attempts,
+            min_quality_score, max_recommendations, model, metadata_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            workflow_cycle_id,
+            profile_version_id,
+            scout_attempt_count,
+            max_scout_attempts,
+            min_quality_score,
+            max_recommendations,
+            model,
+            json_dumps(metadata or {}),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def insert_curator_evaluation(
+    connection: sqlite3.Connection,
+    *,
+    curator_run_id: int,
+    paper_id: int,
+    scout_candidate_id: int | None,
+    score: float,
+    rationale: str,
+    matched_signals: list[str],
+    quality_threshold_met: bool,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO curator_evaluations (
+            curator_run_id, paper_id, scout_candidate_id, score, rationale,
+            matched_signals_json, quality_threshold_met
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(curator_run_id, paper_id) DO UPDATE SET
+            scout_candidate_id = excluded.scout_candidate_id,
+            score = excluded.score,
+            rationale = excluded.rationale,
+            matched_signals_json = excluded.matched_signals_json,
+            quality_threshold_met = excluded.quality_threshold_met
+        """,
+        (
+            curator_run_id,
+            paper_id,
+            scout_candidate_id,
+            score,
+            rationale,
+            json_dumps(matched_signals),
+            1 if quality_threshold_met else 0,
+        ),
+    )
+    if cursor.lastrowid:
+        return int(cursor.lastrowid)
+    row = connection.execute(
+        "SELECT id FROM curator_evaluations WHERE curator_run_id = ? AND paper_id = ?",
+        (curator_run_id, paper_id),
+    ).fetchone()
+    return int(row[0])
+
+
+def insert_recommendation(
+    connection: sqlite3.Connection,
+    *,
+    curator_run_id: int,
+    paper_id: int,
+    recommendation_order: int,
+    rationale: str,
+    status: str = "recommended",
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO recommendations (curator_run_id, paper_id, recommendation_order, rationale, status)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(curator_run_id, paper_id) DO UPDATE SET
+            recommendation_order = excluded.recommendation_order,
+            rationale = excluded.rationale,
+            status = excluded.status
+        """,
+        (curator_run_id, paper_id, recommendation_order, rationale, status),
+    )
+    if cursor.lastrowid:
+        return int(cursor.lastrowid)
+    row = connection.execute(
+        "SELECT id FROM recommendations WHERE curator_run_id = ? AND paper_id = ?",
+        (curator_run_id, paper_id),
+    ).fetchone()
+    return int(row[0])
+
+
+def update_curator_rescout(
+    connection: sqlite3.Connection,
+    curator_run_id: int,
+    *,
+    requested: bool,
+    reason: str | None,
+) -> None:
+    connection.execute(
+        "UPDATE curator_runs SET requested_rescout = ?, rescout_reason = ? WHERE id = ?",
+        (1 if requested else 0, reason, curator_run_id),
     )
 
 
@@ -180,8 +611,8 @@ def insert_artifact(
     path: Path,
     model: str | None = None,
     metadata: dict[str, Any] | None = None,
-) -> None:
-    connection.execute(
+) -> int:
+    cursor = connection.execute(
         """
         INSERT INTO artifacts (paper_id, artifact_type, path, model, metadata_json)
         VALUES (?, ?, ?, ?, ?)
@@ -190,73 +621,118 @@ def insert_artifact(
             metadata_json = excluded.metadata_json,
             created_at = datetime('now')
         """,
-        (
-            paper_id,
-            artifact_type,
-            str(path),
-            model,
-            json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
-        ),
+        (paper_id, artifact_type, str(path), model, json_dumps(metadata or {})),
     )
+    if cursor.lastrowid:
+        return int(cursor.lastrowid)
+    row = connection.execute(
+        "SELECT id FROM artifacts WHERE paper_id = ? AND artifact_type = ? AND path = ?",
+        (paper_id, artifact_type, str(path)),
+    ).fetchone()
+    return int(row[0])
 
 
-def candidate_registry_key(candidate: dict[str, Any]) -> str:
-    source = str(candidate.get("source") or "unknown")
-    source_id = str(candidate.get("source_id") or candidate.get("url") or candidate.get("title") or "unknown")
-    return f"{source}:{source_id}"
+def create_raw_feedback(
+    connection: sqlite3.Connection,
+    *,
+    content: str,
+    paper_id: int | None = None,
+    recommendation_id: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[int, bool]:
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    row = connection.execute("SELECT id FROM raw_feedback WHERE content_hash = ?", (content_hash,)).fetchone()
+    if row:
+        return int(row[0]), False
+    cursor = connection.execute(
+        """
+        INSERT INTO raw_feedback (paper_id, recommendation_id, content, content_hash, metadata_json)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (paper_id, recommendation_id, content, content_hash, json_dumps(metadata or {})),
+    )
+    return int(cursor.lastrowid), True
 
 
-def seen_source_ids(db_path: Path = DEFAULT_DB_PATH, source: str | None = None) -> set[str]:
-    init_db(db_path)
-    with connect_db(db_path) as connection:
-        if source:
-            rows = connection.execute(
-                "SELECT source_id FROM papers WHERE source = ?",
-                (source,),
-            ).fetchall()
-        else:
-            rows = connection.execute("SELECT source_id FROM papers").fetchall()
-    return {row[0] for row in rows if row[0]}
+def create_feedback_parse_attempt(
+    connection: sqlite3.Connection,
+    *,
+    raw_feedback_id: int,
+    parser_name: str,
+    parser_version: str,
+    model: str | None,
+    status: str,
+    output: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO feedback_parse_attempts (
+            raw_feedback_id, parser_name, parser_version, model, status, error, output_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (raw_feedback_id, parser_name, parser_version, model, status, error, json_dumps(output or {})),
+    )
+    return int(cursor.lastrowid)
+
+
+def create_structured_feedback(
+    connection: sqlite3.Connection,
+    *,
+    parse_attempt_id: int,
+    paper_id: int | None,
+    decision: str | None,
+    score: int | None,
+    observations: list[str],
+    preference_signals: list[str],
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO structured_feedback (
+            parse_attempt_id, paper_id, decision, score, observations_json, preference_signals_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (parse_attempt_id, paper_id, decision, score, json_dumps(observations), json_dumps(preference_signals)),
+    )
+    return int(cursor.lastrowid)
 
 
 def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     init_db(db_path)
+    tracked = [
+        "papers",
+        "paper_sources",
+        "workflow_cycles",
+        "scout_runs",
+        "scout_candidates",
+        "curator_runs",
+        "curator_evaluations",
+        "recommendations",
+        "artifacts",
+        "raw_feedback",
+        "feedback_parse_attempts",
+        "structured_feedback",
+        "profile_versions",
+        "feedback",
+    ]
     with connect_db(db_path) as connection:
-        counts = {
-            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in ["papers", "scout_runs", "scout_candidates", "artifacts", "feedback"]
-        }
-        selected_candidates = connection.execute(
-            "SELECT COUNT(*) FROM scout_candidates WHERE selected = 1"
-        ).fetchone()[0]
-        artifact_types = [
-            {"artifact_type": row[0], "count": row[1]}
-            for row in connection.execute(
-                """
-                SELECT artifact_type, COUNT(*)
-                FROM artifacts
-                GROUP BY artifact_type
-                ORDER BY artifact_type
-                """
-            )
-        ]
-        latest_run = connection.execute(
+        counts = {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in tracked}
+        latest_cycle = connection.execute(
             """
-            SELECT id, started_at, source, fetch_limit, keep_limit, mode
-            FROM scout_runs
+            SELECT id, created_at, updated_at, state, mode, max_scout_attempts, scout_attempts_used
+            FROM workflow_cycles
             ORDER BY id DESC
             LIMIT 1
             """
         ).fetchone()
-
     return {
         "db_path": str(db_path),
         "counts": counts,
-        "selected_candidates": selected_candidates,
-        "artifact_types": artifact_types,
-        "latest_run": row_to_dict(
-            latest_run,
-            ["id", "started_at", "source", "fetch_limit", "keep_limit", "mode"],
+        "latest_cycle": row_to_dict(
+            latest_cycle,
+            ["id", "created_at", "updated_at", "state", "mode", "max_scout_attempts", "scout_attempts_used"],
         ),
     }
 
@@ -268,119 +744,191 @@ def recent_runs(db_path: Path = DEFAULT_DB_PATH, limit: int = 10) -> dict[str, A
         rows = connection.execute(
             """
             SELECT
-                scout_runs.id,
-                scout_runs.started_at,
-                scout_runs.source,
-                scout_runs.fetch_limit,
-                scout_runs.keep_limit,
-                scout_runs.mode,
-                scout_runs.topics_json,
-                COUNT(scout_candidates.id) AS candidate_count,
-                SUM(CASE WHEN scout_candidates.selected = 1 THEN 1 ELSE 0 END) AS selected_count
-            FROM scout_runs
-            LEFT JOIN scout_candidates ON scout_candidates.run_id = scout_runs.id
-            GROUP BY scout_runs.id
-            ORDER BY scout_runs.id DESC
+                workflow_cycles.id,
+                workflow_cycles.created_at,
+                workflow_cycles.state,
+                workflow_cycles.mode,
+                workflow_cycles.scout_attempts_used,
+                COUNT(DISTINCT scout_runs.id) AS scout_run_count,
+                COUNT(DISTINCT curator_runs.id) AS curator_run_count,
+                COUNT(DISTINCT recommendations.id) AS recommendation_count
+            FROM workflow_cycles
+            LEFT JOIN scout_runs ON scout_runs.workflow_cycle_id = workflow_cycles.id
+            LEFT JOIN curator_runs ON curator_runs.workflow_cycle_id = workflow_cycles.id
+            LEFT JOIN recommendations ON recommendations.curator_run_id = curator_runs.id
+            GROUP BY workflow_cycles.id
+            ORDER BY workflow_cycles.id DESC
             LIMIT ?
             """,
             (limit,),
         ).fetchall()
-
-    runs = []
-    for row in rows:
-        runs.append(
+    return {
+        "db_path": str(db_path),
+        "runs": [
             {
                 "id": row[0],
-                "started_at": row[1],
-                "source": row[2],
-                "fetch_limit": row[3],
-                "keep_limit": row[4],
-                "mode": row[5],
-                "topics": decode_json(row[6], []),
-                "candidate_count": row[7],
-                "selected_count": row[8] or 0,
+                "created_at": row[1],
+                "state": row[2],
+                "mode": row[3],
+                "scout_attempts_used": row[4],
+                "scout_run_count": row[5],
+                "curator_run_count": row[6],
+                "recommendation_count": row[7],
             }
-        )
-    return {"db_path": str(db_path), "runs": runs}
+            for row in rows
+        ],
+    }
 
 
-def list_papers(
-    db_path: Path = DEFAULT_DB_PATH,
-    limit: int = 20,
-    selected_only: bool = False,
-) -> dict[str, Any]:
+def list_papers(db_path: Path = DEFAULT_DB_PATH, limit: int = 20, selected_only: bool = False) -> dict[str, Any]:
     init_db(db_path)
     limit = max(1, limit)
-    selected_clause = "WHERE latest.selected = 1" if selected_only else ""
+    selected_clause = "WHERE latest_recommendation.id IS NOT NULL" if selected_only else ""
     with connect_db(db_path) as connection:
         rows = connection.execute(
             f"""
-            WITH latest AS (
+            WITH latest_recommendation AS (
                 SELECT
-                    scout_candidates.paper_id,
-                    scout_candidates.score,
-                    scout_candidates.selected,
-                    scout_candidates.ranking_reason,
-                    scout_candidates.matched_keywords_json,
+                    recommendations.id,
+                    recommendations.paper_id,
+                    recommendations.recommendation_order,
+                    recommendations.rationale,
+                    curator_evaluations.score,
                     ROW_NUMBER() OVER (
-                        PARTITION BY scout_candidates.paper_id
-                        ORDER BY scout_candidates.run_id DESC
+                        PARTITION BY recommendations.paper_id
+                        ORDER BY recommendations.curator_run_id DESC, recommendations.recommendation_order ASC
                     ) AS row_number
-                FROM scout_candidates
+                FROM recommendations
+                LEFT JOIN curator_evaluations
+                  ON curator_evaluations.curator_run_id = recommendations.curator_run_id
+                 AND curator_evaluations.paper_id = recommendations.paper_id
             ), artifact_counts AS (
                 SELECT paper_id, COUNT(*) AS artifact_count
                 FROM artifacts
                 GROUP BY paper_id
+            ), primary_source AS (
+                SELECT
+                    paper_id,
+                    source,
+                    source_id,
+                    url,
+                    pdf_url,
+                    ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id ASC) AS row_number
+                FROM paper_sources
             )
             SELECT
                 papers.id,
-                papers.source,
-                papers.source_id,
+                papers.canonical_key,
                 papers.title,
                 papers.published,
-                papers.url,
-                latest.score,
-                latest.selected,
-                latest.ranking_reason,
-                latest.matched_keywords_json,
+                primary_source.source,
+                primary_source.source_id,
+                primary_source.url,
+                primary_source.pdf_url,
+                latest_recommendation.score,
+                latest_recommendation.recommendation_order,
+                latest_recommendation.rationale,
                 COALESCE(artifact_counts.artifact_count, 0) AS artifact_count
             FROM papers
-            LEFT JOIN latest ON latest.paper_id = papers.id AND latest.row_number = 1
+            LEFT JOIN primary_source ON primary_source.paper_id = papers.id AND primary_source.row_number = 1
+            LEFT JOIN latest_recommendation ON latest_recommendation.paper_id = papers.id AND latest_recommendation.row_number = 1
             LEFT JOIN artifact_counts ON artifact_counts.paper_id = papers.id
             {selected_clause}
-            ORDER BY papers.last_seen_at DESC, papers.id DESC
+            ORDER BY COALESCE(latest_recommendation.id, 0) DESC, papers.last_discovered_at DESC, papers.id DESC
             LIMIT ?
             """,
             (limit,),
         ).fetchall()
-
-    papers = []
-    for row in rows:
-        papers.append(
+    return {
+        "db_path": str(db_path),
+        "papers": [
             {
                 "id": row[0],
-                "source": row[1],
-                "source_id": row[2],
-                "title": row[3],
-                "published": row[4],
-                "url": row[5],
-                "score": row[6],
-                "selected": bool(row[7]) if row[7] is not None else False,
-                "ranking_reason": row[8],
-                "matched_keywords": decode_json(row[9], []),
-                "artifact_count": row[10],
+                "canonical_key": row[1],
+                "title": row[2],
+                "published": row[3],
+                "source": row[4],
+                "source_id": row[5],
+                "url": row[6],
+                "pdf_url": row[7],
+                "score": row[8],
+                "recommendation_order": row[9],
+                "rationale": row[10],
+                "artifact_count": row[11],
             }
-        )
-    return {"db_path": str(db_path), "papers": papers}
+            for row in rows
+        ],
+    }
 
 
-def row_to_dict(
-    row: sqlite3.Row | tuple[Any, ...] | None,
-    columns: list[str],
-) -> dict[str, Any] | None:
+def latest_recommendations(db_path: Path = DEFAULT_DB_PATH, limit: int = 50) -> list[dict[str, Any]]:
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        row = connection.execute("SELECT MAX(id) FROM curator_runs").fetchone()
+        if not row or row[0] is None:
+            return []
+        curator_run_id = int(row[0])
+        rows = connection.execute(
+            """
+            SELECT
+                recommendations.id,
+                recommendations.recommendation_order,
+                recommendations.rationale,
+                recommendations.status,
+                papers.id,
+                papers.title,
+                papers.published,
+                papers.canonical_key,
+                paper_sources.source,
+                paper_sources.source_id,
+                paper_sources.url,
+                paper_sources.pdf_url,
+                curator_evaluations.score,
+                curator_evaluations.matched_signals_json
+            FROM recommendations
+            JOIN papers ON papers.id = recommendations.paper_id
+            LEFT JOIN paper_sources ON paper_sources.paper_id = papers.id
+            LEFT JOIN curator_evaluations
+              ON curator_evaluations.curator_run_id = recommendations.curator_run_id
+             AND curator_evaluations.paper_id = recommendations.paper_id
+            WHERE recommendations.curator_run_id = ?
+              AND (paper_sources.id IS NULL OR paper_sources.id = (
+                  SELECT MIN(id) FROM paper_sources WHERE paper_id = papers.id
+              ))
+            ORDER BY recommendations.recommendation_order ASC
+            LIMIT ?
+            """,
+            (curator_run_id, limit),
+        ).fetchall()
+    return [
+        {
+            "recommendation_id": row[0],
+            "recommendation_order": row[1],
+            "rationale": row[2],
+            "status": row[3],
+            "paper_id": row[4],
+            "title": row[5],
+            "published": row[6],
+            "canonical_key": row[7],
+            "source": row[8],
+            "source_id": row[9],
+            "url": row[10],
+            "pdf_url": row[11],
+            "score": row[12],
+            "matched_signals": decode_json(row[13], []),
+        }
+        for row in rows
+    ]
+
+
+def row_to_dict(row: sqlite3.Row | tuple[Any, ...] | None, columns: list[str]) -> dict[str, Any] | None:
     if row is None:
         return None
     return dict(zip(columns, row))
+
+
+def json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def decode_json(value: str | None, fallback: Any) -> Any:
@@ -390,3 +938,23 @@ def decode_json(value: str | None, fallback: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return fallback
+
+
+def normalized_arxiv_id(value: Any) -> str | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.removeprefix("arxiv:")
+    return text
+
+
+def normalize_doi(value: Any) -> str | None:
+    if not value:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    text = text.removeprefix("https://doi.org/").removeprefix("doi:")
+    return text or None

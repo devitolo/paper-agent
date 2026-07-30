@@ -313,24 +313,31 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
         params = (filter_value,)
 
     order_clause = (
-        "ORDER BY latest_selected.score DESC, latest_selected.run_id DESC, papers.id DESC"
+        "ORDER BY latest_recommendation.score DESC, latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
         if sort_value == "score"
-        else "ORDER BY latest_selected.run_id DESC, papers.id DESC"
+        else "ORDER BY latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
     )
 
     with connect_db(db_path) as connection:
         rows = connection.execute(
             f"""
-            WITH latest_selected AS (
+            WITH latest_recommendation AS (
                 SELECT
-                    paper_id,
-                    run_id,
-                    score,
-                    matched_keywords_json,
-                    ranking_reason,
-                    ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY run_id DESC) AS row_number
-                FROM scout_candidates
-                WHERE selected = 1
+                    recommendations.id AS recommendation_id,
+                    recommendations.paper_id,
+                    recommendations.curator_run_id,
+                    recommendations.recommendation_order,
+                    recommendations.rationale,
+                    curator_evaluations.score,
+                    curator_evaluations.matched_signals_json,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY recommendations.paper_id
+                        ORDER BY recommendations.curator_run_id DESC, recommendations.recommendation_order ASC
+                    ) AS row_number
+                FROM recommendations
+                LEFT JOIN curator_evaluations
+                  ON curator_evaluations.curator_run_id = recommendations.curator_run_id
+                 AND curator_evaluations.paper_id = recommendations.paper_id
             ), latest_feedback AS (
                 SELECT
                     paper_id,
@@ -338,21 +345,32 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
                     notes,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id DESC) AS row_number
                 FROM feedback
+            ), primary_source AS (
+                SELECT
+                    paper_id,
+                    source,
+                    source_id,
+                    url,
+                    ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id ASC) AS row_number
+                FROM paper_sources
             )
             SELECT
                 papers.id,
-                papers.source,
-                papers.source_id,
+                primary_source.source,
+                primary_source.source_id,
                 papers.title,
                 papers.published,
-                papers.url,
-                latest_selected.score,
-                latest_selected.matched_keywords_json,
-                latest_selected.ranking_reason,
+                primary_source.url,
+                latest_recommendation.score,
+                latest_recommendation.matched_signals_json,
+                latest_recommendation.rationale,
                 latest_feedback.status,
                 latest_feedback.notes
             FROM papers
-            JOIN latest_selected ON latest_selected.paper_id = papers.id AND latest_selected.row_number = 1
+            JOIN latest_recommendation
+              ON latest_recommendation.paper_id = papers.id
+             AND latest_recommendation.row_number = 1
+            LEFT JOIN primary_source ON primary_source.paper_id = papers.id AND primary_source.row_number = 1
             LEFT JOIN latest_feedback ON latest_feedback.paper_id = papers.id AND latest_feedback.row_number = 1
             {where_clause}
             {order_clause}
@@ -368,8 +386,8 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
             cards.append(
                 {
                     "id": paper_id,
-                    "source": row[1],
-                    "source_id": row[2],
+                    "source": row[1] or "unknown",
+                    "source_id": row[2] or "unknown",
                     "title": row[3],
                     "published": row[4],
                     "url": row[5],
@@ -383,7 +401,6 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
                 }
             )
     return cards
-
 
 
 def render_tabs(
