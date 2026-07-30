@@ -172,26 +172,22 @@ def render_review_queue(
         <h1>Project Paper Review Queue</h1>
         <p>{len(cards)} papers | {escape(selected_label(FILTERS, filter_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}</p>
       </div>
-      <nav aria-label="Queue filters" class="control-group">
-        {render_tabs(FILTERS, "filter", filter_value, filter_value, sort_value, view_value)}
-      </nav>
-      <nav aria-label="Sort order" class="control-group">
-        {render_tabs(SORTS, "sort", sort_value, filter_value, sort_value, view_value)}
-      </nav>
-      <nav aria-label="View mode" class="control-group">
-        {render_tabs(VIEWS, "view", view_value, filter_value, sort_value, view_value)}
-      </nav>
+      <form method="get" action="/" class="queue-controls">
+        {render_select(FILTERS, "filter", filter_value, "Status")}
+        {render_select(SORTS, "sort", sort_value, "Sort")}
+        {render_select(VIEWS, "view", view_value, "View")}
+        <button type="submit" class="secondary">Apply</button>
+      </form>
     </header>
     {saved_banner}
     <div class="cards">{card_html}</div>
     <script>
-      document.querySelectorAll("[data-copy-text]").forEach((button) => {{
+      document.querySelectorAll("[data-copy-value]").forEach((button) => {{
+        const originalText = button.textContent;
         button.addEventListener("click", async () => {{
-          const target = document.getElementById(button.dataset.copyText);
-          if (!target) return;
-          await navigator.clipboard.writeText(target.value);
+          await navigator.clipboard.writeText(button.dataset.copyValue);
           button.textContent = "Copied";
-          setTimeout(() => {{ button.textContent = "Copy prompt"; }}, 1400);
+          setTimeout(() => {{ button.textContent = originalText; }}, 1400);
         }});
       }});
     </script>
@@ -211,34 +207,32 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     feedback_status = card.get("feedback_status")
     feedback_label = f'<span class="feedback-state">Current: {escape(feedback_status)}</span>' if feedback_status else ""
     summary = card["summary"]
-    source_link = render_source_link(card)
-    copy_id = f"copy-{card['id']}"
-    copy_prompt = build_copy_prompt(card)
+    source_controls = render_source_controls(card)
     compact_class = " compact" if view_value == "compact" else ""
     summary_html = render_summary(summary, compact=view_value == "compact")
 
     return f"""<article class="paper-card{compact_class}">
-  <div class="card-head">
-    <div>
-      <h2>{escape(card["title"])}</h2>
-      <p>{escape(card.get("published") or "date unknown")} | {escape(card["source"])} | {escape(card["source_id"])} | {source_link}</p>
-    </div>
-    <div class="score"><strong>{card["score"]:.1f}</strong><span>score</span></div>
-  </div>
-  <div class="tags">{tags}</div>
-  {summary_html}
-  <div class="links">{links}</div>
-  <details class="copy-box">
-    <summary>Copy prompt/link</summary>
-    <textarea id="{copy_id}" readonly>{escape(copy_prompt)}</textarea>
-    <button type="button" class="secondary" data-copy-text="{copy_id}">Copy prompt</button>
-  </details>
-  <form method="post" action="/feedback" class="feedback-form">
+  <form method="post" action="/feedback" class="paper-form">
     <input type="hidden" name="paper_id" value="{card['id']}">
     <input type="hidden" name="return_to" value="{escape(return_to)}">
-    <div class="feedback-row">{feedback_buttons}{feedback_label}</div>
-    <label>Notes<textarea name="notes">{notes}</textarea></label>
-    <button type="submit" name="status" value="{feedback_status or 'read_later'}" class="secondary">Save notes</button>
+    <div class="paper-main">
+      <div class="card-head">
+        <div>
+          <h2>{escape(card["title"])}</h2>
+          <p>{escape(card.get("published") or "date unknown")} | {escape(card["source"])} | {escape(card["source_id"])} | {source_controls}</p>
+        </div>
+      </div>
+      <div class="tags">{tags}</div>
+      {summary_html}
+      <div class="links">{links}</div>
+      <label>Feedback<textarea name="notes">{notes}</textarea></label>
+      <button type="submit" name="status" value="{feedback_status or 'read_later'}" class="secondary save-feedback">Save feedback</button>
+    </div>
+    <div class="action-rail">
+      <div class="score"><strong>{card["score"]:.1f}</strong></div>
+      <div class="feedback-actions">{feedback_buttons}</div>
+      {feedback_label}
+    </div>
   </form>
 </article>"""
 
@@ -254,18 +248,20 @@ def render_artifact_links(artifacts: dict[str, dict[str, Any]]) -> str:
         artifact = artifacts.get(artifact_type)
         if artifact:
             links.append(f'<a href="/artifact/{artifact["id"]}" target="_blank" rel="noreferrer">{label}</a>')
-    if not artifacts.get("chatgpt_review"):
-        links.append('<span class="missing">No ChatGPT review yet</span>')
     return "".join(links)
 
 
 
-def render_source_link(card: dict[str, Any]) -> str:
+def render_source_controls(card: dict[str, Any]) -> str:
     url = card.get("url")
     if not url:
         return "source link unavailable"
     label = "arXiv" if card.get("source") == "arxiv" else "source"
-    return f'<a class="source-link" href="{escape(url)}" target="_blank" rel="noreferrer">{label}</a>'
+    escaped_url = escape(url)
+    return (
+        f'<a class="source-link" href="{escaped_url}" target="_blank" rel="noreferrer">{label}</a>'
+        f'<button type="button" class="copy-url" data-copy-value="{escaped_url}" aria-label="Copy paper URL">Copy</button>'
+    )
 
 
 def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
@@ -278,25 +274,6 @@ def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
     <section><h3>Approach</h3><p>{escape(summary.get("approach") or "Not extracted yet.")}</p></section>
   </div>"""
 
-
-def build_copy_prompt(card: dict[str, Any]) -> str:
-    summary = card["summary"]
-    return "\n".join(
-        [
-            "Please help me review this paper.",
-            "",
-            f"Title: {card['title']}",
-            f"Date: {card.get('published') or summary.get('paper_date') or 'unknown'}",
-            f"Link: {card.get('url') or 'unknown'}",
-            f"Score: {card['score']:.1f}",
-            "",
-            f"Problem: {summary.get('research_problem') or 'Not extracted yet.'}",
-            f"Why it matters: {summary.get('why_it_matters') or 'Not extracted yet.'}",
-            f"Approach: {summary.get('approach') or 'Not extracted yet.'}",
-            "",
-            "Give me a listening-friendly, section-by-section summary and tell me whether this is worth reading further.",
-        ]
-    )
 
 def button_class(card: dict[str, Any], status: str) -> str:
     return "primary" if card.get("feedback_status") == status else "secondary"
@@ -403,24 +380,21 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
     return cards
 
 
-def render_tabs(
+def render_select(
     choices: list[tuple[str, str]],
-    param: str,
+    name: str,
     current_value: str,
-    filter_value: str,
-    sort_value: str,
-    view_value: str,
+    label: str,
 ) -> str:
-    links = []
-    for value, label in choices:
-        next_filter = value if param == "filter" else filter_value
-        next_sort = value if param == "sort" else sort_value
-        next_view = value if param == "view" else view_value
-        active = " active" if value == current_value else ""
-        links.append(
-            f'<a class="tab{active}" href="{build_queue_href(next_filter, next_sort, next_view)}">{escape(label)}</a>'
-        )
-    return "".join(links)
+    options = []
+    for value, option_label in choices:
+        selected = " selected" if value == current_value else ""
+        options.append(f'<option value="{escape(value)}"{selected}>{escape(option_label)}</option>')
+    return (
+        f'<label class="control-label">{escape(label)}'
+        f'<select name="{escape(name)}" onchange="this.form.submit()">{"".join(options)}</select>'
+        "</label>"
+    )
 
 
 def build_queue_href(filter_value: str, sort_value: str, view_value: str) -> str:
@@ -524,55 +498,65 @@ def escape(value: Any) -> str:
 def page_css() -> str:
     return """
 :root { color-scheme: light dark; }
-body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #1f2328; }
-main { max-width: 1120px; margin: 0 auto; padding: 24px; }
-.topbar { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 1px solid #d8dee4; padding-bottom: 14px; margin-bottom: 16px; }
-h1 { margin: 0 0 4px; font-size: 24px; font-weight: 600; }
-h2 { margin: 0 0 5px; font-size: 18px; font-weight: 600; }
-h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #57606a; }
+body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #1f2328; }
+main { max-width: 1180px; margin: 0 auto; padding: 14px; }
+.topbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 12px; align-items: end; border-bottom: 1px solid #d8dee4; padding-bottom: 8px; margin-bottom: 10px; }
+h1 { margin: 0 0 2px; font-size: 18px; font-weight: 650; }
+h2 { margin: 0 0 3px; font-size: 15px; font-weight: 650; line-height: 1.25; }
+h3 { margin: 0 0 3px; font-size: 12px; font-weight: 650; color: #57606a; }
 p { margin: 0; }
-.topbar p, .card-head p { color: #57606a; }
-nav, .tags, .links, .feedback-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.control-group { justify-content: flex-end; }
+.topbar p, .card-head p { color: #57606a; font-size: 12px; }
+.queue-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: end; }
+.control-label { display: grid; gap: 2px; color: #57606a; font-size: 11px; }
+select, button { border: 1px solid #d8dee4; border-radius: 5px; padding: 4px 7px; background: #ffffff; color: #24292f; font: inherit; min-height: 28px; }
+button { cursor: pointer; }
 .source-link { color: #0969da; text-decoration: none; }
 .source-link:hover { text-decoration: underline; }
-.tab, .links a, button, .missing { border: 1px solid #d8dee4; border-radius: 6px; padding: 7px 10px; background: #ffffff; color: #24292f; text-decoration: none; font: inherit; }
-.tab.active, button.primary { background: #1f6feb; color: #ffffff; border-color: #1f6feb; }
+.copy-url { display: inline-flex; align-items: center; min-height: 22px; margin-left: 6px; padding: 1px 6px; font-size: 12px; }
+.links a { border: 1px solid #d8dee4; border-radius: 5px; padding: 3px 7px; background: #ffffff; color: #24292f; text-decoration: none; }
+button.primary { background: #1f6feb; color: #ffffff; border-color: #1f6feb; }
 button.secondary { background: #f6f8fa; }
-.banner { padding: 10px 12px; border: 1px solid #2da44e; background: #dafbe1; border-radius: 6px; margin-bottom: 12px; }
-.cards { display: grid; gap: 14px; }
-.paper-card, .empty { background: #ffffff; border: 1px solid #d8dee4; border-radius: 8px; padding: 16px; }
-.card-head { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; }
-.score { min-width: 64px; text-align: center; border: 1px solid #d8dee4; border-radius: 6px; padding: 8px; background: #f6f8fa; }
-.score strong { display: block; font-size: 18px; }
-.score span, .feedback-state { color: #57606a; font-size: 13px; }
-.tag { border: 1px solid #d8dee4; color: #57606a; border-radius: 999px; padding: 3px 8px; font-size: 13px; }
-.summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.banner { padding: 7px 9px; border: 1px solid #2da44e; background: #dafbe1; border-radius: 5px; margin-bottom: 8px; }
+.cards { display: grid; gap: 8px; }
+.paper-card, .empty { background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; padding: 10px; }
+.paper-form { display: grid; grid-template-columns: minmax(0, 1fr) 116px; gap: 12px; align-items: start; }
+.paper-main { min-width: 0; }
+.card-head { display: grid; gap: 4px; align-items: start; }
+.score { text-align: center; border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 6px; background: #f6f8fa; }
+.score strong { display: block; font-size: 17px; line-height: 1; }
+.feedback-state { color: #57606a; font-size: 11px; text-align: center; }
+.tags, .links { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.tag { border: 1px solid #d8dee4; color: #57606a; border-radius: 999px; padding: 1px 6px; font-size: 11px; }
+.summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
 .summary-grid section { min-width: 0; }
-.compact-summary { margin: 10px 0; color: #57606a; line-height: 1.4; }
-.links { margin-bottom: 12px; }
-.copy-box { border-top: 1px solid #d8dee4; padding-top: 10px; margin-bottom: 12px; }
-.copy-box summary { cursor: pointer; color: #57606a; font-size: 13px; margin-bottom: 8px; }
-.copy-box textarea { min-height: 132px; margin-bottom: 8px; }
-.paper-card.compact { padding: 12px; }
-.paper-card.compact .tags, .paper-card.compact .links, .paper-card.compact .feedback-form { margin-top: 8px; }
-.feedback-form { display: grid; gap: 10px; border-top: 1px solid #d8dee4; padding-top: 12px; }
-label { display: grid; gap: 6px; color: #57606a; font-size: 13px; }
-textarea { width: 100%; min-height: 48px; resize: vertical; border: 1px solid #d8dee4; border-radius: 6px; padding: 8px; font: inherit; color: #1f2328; background: #ffffff; }
+.summary-grid p, .compact-summary { color: #3f4650; font-size: 12px; }
+.compact-summary { margin: 6px 0; line-height: 1.35; }
+.links { margin-bottom: 7px; }
+.paper-card.compact { padding: 8px 10px; }
+.paper-card.compact .tags, .paper-card.compact .links { margin-top: 5px; }
+.action-rail { display: grid; gap: 6px; }
+.feedback-actions { display: grid; gap: 5px; }
+.feedback-actions button { width: 100%; min-height: 26px; padding: 3px 6px; text-align: left; }
+label { display: grid; gap: 3px; color: #57606a; font-size: 12px; }
+textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertical; border: 1px solid #d8dee4; border-radius: 5px; padding: 6px; font: inherit; color: #1f2328; background: #ffffff; }
+.save-feedback { margin-top: 5px; }
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
-  .topbar, .feedback-form { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .score span, .feedback-state, .tag, label, .compact-summary, .copy-box summary { color: #8b949e; }
+  .topbar { border-color: #30363d; }
+  .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary { color: #8b949e; }
+  .summary-grid p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .tab, .links a, button, .missing, .paper-card, .empty, textarea, .copy-box { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .links a, button, select, .paper-card, .empty, textarea { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
   .banner { background: #0f2a1a; border-color: #238636; }
 }
 @media (max-width: 720px) {
-  main { padding: 14px; }
-  .topbar, .card-head { display: grid; grid-template-columns: 1fr; }
-  .control-group { justify-content: flex-start; }
+  main { padding: 10px; }
+  .topbar, .paper-form { grid-template-columns: 1fr; }
+  .queue-controls { justify-content: flex-start; }
   .summary-grid { grid-template-columns: 1fr; }
-  .score { width: fit-content; text-align: left; }
+  .action-rail { grid-template-columns: 64px 1fr; align-items: start; }
+  .feedback-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .feedback-state { text-align: left; grid-column: 1 / -1; }
 }
 """

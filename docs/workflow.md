@@ -107,7 +107,7 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link, supports status filters, latest/score sorting, full/condensed views, and appends lightweight status rows.
+The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, supports status filters, latest/score sorting, full/condensed views, and appends lightweight status rows with optional pasted feedback notes.
 
 ## Nightly Cron
 

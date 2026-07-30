@@ -12,6 +12,7 @@ from paper_agents.scout import ScoutCandidate
 from paper_agents.scout import run_daily_scout
 from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
+from paper_agents import web
 
 
 class FakeSource:
@@ -305,6 +306,78 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(current["id"], version_id)
         self.assertEqual(current["source_structured_feedback_id"], structured_id)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 2)
+
+    def test_review_queue_renders_dense_feedback_controls(self):
+        self._seed_review_recommendation()
+        self.connection.commit()
+
+        html = web.render_review_queue(self.db_path)
+
+        self.assertIn('<form method="get" action="/" class="queue-controls">', html)
+        self.assertIn('<select name="filter"', html)
+        self.assertIn('<select name="sort"', html)
+        self.assertIn('<select name="view"', html)
+        self.assertIn('class="action-rail"', html)
+        self.assertIn('<strong>72.5</strong>', html)
+        self.assertIn('data-copy-value="https://example.test/review-paper"', html)
+        self.assertIn("Feedback<textarea name=\"notes\">", html)
+        self.assertNotIn("No ChatGPT review yet", html)
+        self.assertNotIn("Copy prompt/link", html)
+        self.assertNotIn("<span>score</span>", html)
+        self.assertNotIn(">Notes<textarea", html)
+
+    def test_review_queue_feedback_save_still_inserts_status_and_notes(self):
+        paper_id = self._seed_review_recommendation()
+        self.connection.commit()
+
+        web.save_feedback(self.db_path, paper_id=paper_id, status="reviewed", notes="Dense feedback blob")
+
+        row = self.connection.execute(
+            "SELECT status, notes FROM feedback WHERE paper_id = ? ORDER BY id DESC",
+            (paper_id,),
+        ).fetchone()
+        self.assertEqual(row, ("reviewed", "Dense feedback blob"))
+
+    def _seed_review_recommendation(self) -> int:
+        paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "arxiv",
+                "source_id": "2607.reviewv1",
+                "title": "Dense Review Paper",
+                "url": "https://example.test/review-paper",
+                "published": "2026-07-30",
+                "abstract": "Applied incident review automation.",
+            },
+        )
+        curator_run_id = db.create_curator_run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            profile_version_id=self.profile_id,
+            scout_attempt_count=1,
+            max_scout_attempts=3,
+            min_quality_score=25,
+            max_recommendations=3,
+            model="test",
+        )
+        db.insert_curator_evaluation(
+            self.connection,
+            curator_run_id=curator_run_id,
+            paper_id=paper_id,
+            scout_candidate_id=None,
+            score=72.5,
+            rationale="Strong match.",
+            matched_signals=["incident", "automation"],
+            quality_threshold_met=True,
+        )
+        db.insert_recommendation(
+            self.connection,
+            curator_run_id=curator_run_id,
+            paper_id=paper_id,
+            recommendation_order=1,
+            rationale="Strong match.",
+        )
+        return paper_id
 
 
 if __name__ == "__main__":
