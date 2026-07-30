@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from paper_agents import db
+from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.scout import ScoutCandidate
 from paper_agents.scout import run_daily_scout
@@ -181,6 +182,34 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(active["id"], second)
         inactive_count = self.connection.execute("SELECT COUNT(*) FROM scouting_guidance WHERE active = 0").fetchone()[0]
         self.assertEqual(inactive_count, 1)
+
+
+    def test_legacy_scout_import_recovers_selected_recommendations(self):
+        jsonl = Path(self.tmp.name) / "2026-07-29.jsonl"
+        jsonl.write_text(
+            '\n'.join(
+                [
+                    '{"source":"arxiv","source_id":"2601.selectedv1","title":"Selected paper","url":"https://arxiv.org/abs/2601.selectedv1","pdf_url":"https://arxiv.org/pdf/2601.selectedv1","published":"2026-07-29","abstract":"incident management","score":67,"matched_keywords":["incident"],"ranking_reason":"good","selected":true}',
+                    '{"source":"arxiv","source_id":"2601.otherv1","title":"Other paper","url":"https://arxiv.org/abs/2601.otherv1","pdf_url":"https://arxiv.org/pdf/2601.otherv1","published":"2026-07-29","abstract":"incident management","score":20,"matched_keywords":["incident"],"ranking_reason":"ok","selected":false}',
+                ]
+            )
+            + "\n"
+        )
+        self.connection.close()
+        output = import_legacy_scout_files([jsonl], db_path=self.db_path)
+        self.connection = db.connect_db(self.db_path)
+        self.assertEqual(output["runs"][0]["candidate_count"], 2)
+        self.assertEqual(output["runs"][0]["recommendation_count"], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0], 2)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM curator_evaluations").fetchone()[0], 2)
+        recommended = self.connection.execute(
+            """
+            SELECT paper_sources.source_id
+            FROM recommendations
+            JOIN paper_sources ON paper_sources.paper_id = recommendations.paper_id
+            """
+        ).fetchone()[0]
+        self.assertEqual(recommended, "2601.selectedv1")
 
     def test_raw_feedback_is_immutable_and_can_have_multiple_parse_attempts(self):
         raw_id, created = db.create_raw_feedback(self.connection, content="Great paper. Score 5.")
