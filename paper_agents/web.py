@@ -19,6 +19,25 @@ FEEDBACK_STATUSES = [
     ("reviewed", "Reviewed"),
 ]
 
+FILTERS = [
+    ("needs_review", "Needs review"),
+    ("all", "All selected"),
+    ("interested", "Interested"),
+    ("read_later", "Read later"),
+    ("reviewed", "Reviewed"),
+    ("not_interested", "Not interested"),
+]
+
+SORTS = [
+    ("latest", "Latest"),
+    ("score", "Score"),
+]
+
+VIEWS = [
+    ("full", "Full"),
+    ("compact", "Condensed"),
+]
+
 
 def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEFAULT_DB_PATH) -> None:
     init_db(db_path)
@@ -38,7 +57,15 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path == "/":
                 params = urllib.parse.parse_qs(parsed.query)
-                self.respond_html(render_review_queue(db_path, status=params.get("status", [None])[0]))
+                self.respond_html(
+                    render_review_queue(
+                        db_path,
+                        saved=params.get("saved", [None])[0] == "1",
+                        filter_value=params.get("filter", ["needs_review"])[0],
+                        sort_value=params.get("sort", ["latest"])[0],
+                        view_value=params.get("view", ["full"])[0],
+                    )
+                )
                 return
             if parsed.path.startswith("/artifact/"):
                 self.serve_artifact(db_path, parsed.path.removeprefix("/artifact/"))
@@ -67,8 +94,10 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
 
             save_feedback(db_path, paper_id=paper_id, status=status, notes=notes)
+            return_to = form.get("return_to", ["/"])[0]
+            redirect_to = add_query_param(return_to, "saved", "1")
             self.send_response(HTTPStatus.SEE_OTHER)
-            self.send_header("Location", "/?status=saved")
+            self.send_header("Location", redirect_to)
             self.end_headers()
 
         def serve_artifact(self, db_path: Path, artifact_id_text: str) -> None:
@@ -110,10 +139,21 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
     return ReviewHandler
 
 
-def render_review_queue(db_path: Path, status: str | None = None) -> str:
-    cards = load_review_cards(db_path)
-    saved_banner = '<div class="banner">Feedback saved.</div>' if status == "saved" else ""
-    card_html = "\n".join(render_card(card) for card in cards)
+def render_review_queue(
+    db_path: Path,
+    *,
+    saved: bool = False,
+    filter_value: str = "needs_review",
+    sort_value: str = "latest",
+    view_value: str = "full",
+) -> str:
+    filter_value = normalize_choice(filter_value, FILTERS, "needs_review")
+    sort_value = normalize_choice(sort_value, SORTS, "latest")
+    view_value = normalize_choice(view_value, VIEWS, "full")
+    cards = load_review_cards(db_path, filter_value=filter_value, sort_value=sort_value)
+    saved_banner = '<div class="banner">Feedback saved.</div>' if saved else ""
+    request_path = build_queue_href(filter_value, sort_value, view_value)
+    card_html = "\n".join(render_card(card, view_value=view_value, return_to=request_path) for card in cards)
     if not card_html:
         card_html = '<section class="empty">No selected papers are waiting in the registry yet.</section>'
 
@@ -130,22 +170,37 @@ def render_review_queue(db_path: Path, status: str | None = None) -> str:
     <header class="topbar">
       <div>
         <h1>Project Paper Review Queue</h1>
-        <p>{len(cards)} selected papers from SQLite</p>
+        <p>{len(cards)} papers | {escape(selected_label(FILTERS, filter_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}</p>
       </div>
-      <nav aria-label="Queue filters">
-        <a class="tab active" href="/">Needs review</a>
-        <a class="tab" href="/">All selected</a>
-        <a class="tab" href="/">Read later</a>
+      <nav aria-label="Queue filters" class="control-group">
+        {render_tabs(FILTERS, "filter", filter_value, filter_value, sort_value, view_value)}
+      </nav>
+      <nav aria-label="Sort order" class="control-group">
+        {render_tabs(SORTS, "sort", sort_value, filter_value, sort_value, view_value)}
+      </nav>
+      <nav aria-label="View mode" class="control-group">
+        {render_tabs(VIEWS, "view", view_value, filter_value, sort_value, view_value)}
       </nav>
     </header>
     {saved_banner}
     <div class="cards">{card_html}</div>
+    <script>
+      document.querySelectorAll("[data-copy-text]").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          const target = document.getElementById(button.dataset.copyText);
+          if (!target) return;
+          await navigator.clipboard.writeText(target.value);
+          button.textContent = "Copied";
+          setTimeout(() => {{ button.textContent = "Copy prompt"; }}, 1400);
+        }});
+      }});
+    </script>
   </main>
 </body>
 </html>"""
 
 
-def render_card(card: dict[str, Any]) -> str:
+def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str:
     tags = "".join(f'<span class="tag">{escape(keyword)}</span>' for keyword in card["matched_keywords"][:6])
     links = render_artifact_links(card["artifacts"])
     feedback_buttons = "".join(
@@ -156,24 +211,31 @@ def render_card(card: dict[str, Any]) -> str:
     feedback_status = card.get("feedback_status")
     feedback_label = f'<span class="feedback-state">Current: {escape(feedback_status)}</span>' if feedback_status else ""
     summary = card["summary"]
+    source_link = render_source_link(card)
+    copy_id = f"copy-{card['id']}"
+    copy_prompt = build_copy_prompt(card)
+    compact_class = " compact" if view_value == "compact" else ""
+    summary_html = render_summary(summary, compact=view_value == "compact")
 
-    return f"""<article class="paper-card">
+    return f"""<article class="paper-card{compact_class}">
   <div class="card-head">
     <div>
       <h2>{escape(card["title"])}</h2>
-      <p>{escape(card.get("published") or "date unknown")} | {escape(card["source"])} | {escape(card["source_id"])}</p>
+      <p>{escape(card.get("published") or "date unknown")} | {escape(card["source"])} | {escape(card["source_id"])} | {source_link}</p>
     </div>
     <div class="score"><strong>{card["score"]:.1f}</strong><span>score</span></div>
   </div>
   <div class="tags">{tags}</div>
-  <div class="summary-grid">
-    <section><h3>Problem</h3><p>{escape(summary.get("research_problem") or "Not extracted yet.")}</p></section>
-    <section><h3>Why it matters</h3><p>{escape(summary.get("why_it_matters") or "Not extracted yet.")}</p></section>
-    <section><h3>Approach</h3><p>{escape(summary.get("approach") or "Not extracted yet.")}</p></section>
-  </div>
+  {summary_html}
   <div class="links">{links}</div>
+  <details class="copy-box">
+    <summary>Copy prompt/link</summary>
+    <textarea id="{copy_id}" readonly>{escape(copy_prompt)}</textarea>
+    <button type="button" class="secondary" data-copy-text="{copy_id}">Copy prompt</button>
+  </details>
   <form method="post" action="/feedback" class="feedback-form">
     <input type="hidden" name="paper_id" value="{card['id']}">
+    <input type="hidden" name="return_to" value="{escape(return_to)}">
     <div class="feedback-row">{feedback_buttons}{feedback_label}</div>
     <label>Notes<textarea name="notes">{notes}</textarea></label>
     <button type="submit" name="status" value="{feedback_status or 'read_later'}" class="secondary">Save notes</button>
@@ -197,15 +259,68 @@ def render_artifact_links(artifacts: dict[str, dict[str, Any]]) -> str:
     return "".join(links)
 
 
+
+def render_source_link(card: dict[str, Any]) -> str:
+    url = card.get("url")
+    if not url:
+        return "source link unavailable"
+    label = "arXiv" if card.get("source") == "arxiv" else "source"
+    return f'<a class="source-link" href="{escape(url)}" target="_blank" rel="noreferrer">{label}</a>'
+
+
+def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
+    problem = escape(summary.get("research_problem") or "Not extracted yet.")
+    if compact:
+        return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
+    return f"""<div class="summary-grid">
+    <section><h3>Problem</h3><p>{problem}</p></section>
+    <section><h3>Why it matters</h3><p>{escape(summary.get("why_it_matters") or "Not extracted yet.")}</p></section>
+    <section><h3>Approach</h3><p>{escape(summary.get("approach") or "Not extracted yet.")}</p></section>
+  </div>"""
+
+
+def build_copy_prompt(card: dict[str, Any]) -> str:
+    summary = card["summary"]
+    return "\n".join(
+        [
+            "Please help me review this paper.",
+            "",
+            f"Title: {card['title']}",
+            f"Date: {card.get('published') or summary.get('paper_date') or 'unknown'}",
+            f"Link: {card.get('url') or 'unknown'}",
+            f"Score: {card['score']:.1f}",
+            "",
+            f"Problem: {summary.get('research_problem') or 'Not extracted yet.'}",
+            f"Why it matters: {summary.get('why_it_matters') or 'Not extracted yet.'}",
+            f"Approach: {summary.get('approach') or 'Not extracted yet.'}",
+            "",
+            "Give me a listening-friendly, section-by-section summary and tell me whether this is worth reading further.",
+        ]
+    )
+
 def button_class(card: dict[str, Any], status: str) -> str:
     return "primary" if card.get("feedback_status") == status else "secondary"
 
 
-def load_review_cards(db_path: Path) -> list[dict[str, Any]]:
+def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> list[dict[str, Any]]:
     init_db(db_path)
+    where_clause = ""
+    params: tuple[Any, ...] = ()
+    if filter_value == "needs_review":
+        where_clause = "WHERE latest_feedback.status IS NULL"
+    elif filter_value != "all":
+        where_clause = "WHERE latest_feedback.status = ?"
+        params = (filter_value,)
+
+    order_clause = (
+        "ORDER BY latest.score DESC, papers.last_seen_at DESC, papers.id DESC"
+        if sort_value == "score"
+        else "ORDER BY papers.last_seen_at DESC, papers.id DESC"
+    )
+
     with connect_db(db_path) as connection:
         rows = connection.execute(
-            """
+            f"""
             WITH latest AS (
                 SELECT
                     paper_id,
@@ -238,9 +353,11 @@ def load_review_cards(db_path: Path) -> list[dict[str, Any]]:
             FROM papers
             JOIN latest ON latest.paper_id = papers.id AND latest.row_number = 1 AND latest.selected = 1
             LEFT JOIN latest_feedback ON latest_feedback.paper_id = papers.id AND latest_feedback.row_number = 1
-            ORDER BY papers.last_seen_at DESC, papers.id DESC
+            {where_clause}
+            {order_clause}
             LIMIT 50
-            """
+            """,
+            params,
         ).fetchall()
 
         cards = []
@@ -265,6 +382,47 @@ def load_review_cards(db_path: Path) -> list[dict[str, Any]]:
                 }
             )
     return cards
+
+
+
+def render_tabs(
+    choices: list[tuple[str, str]],
+    param: str,
+    current_value: str,
+    filter_value: str,
+    sort_value: str,
+    view_value: str,
+) -> str:
+    links = []
+    for value, label in choices:
+        next_filter = value if param == "filter" else filter_value
+        next_sort = value if param == "sort" else sort_value
+        next_view = value if param == "view" else view_value
+        active = " active" if value == current_value else ""
+        links.append(
+            f'<a class="tab{active}" href="{build_queue_href(next_filter, next_sort, next_view)}">{escape(label)}</a>'
+        )
+    return "".join(links)
+
+
+def build_queue_href(filter_value: str, sort_value: str, view_value: str) -> str:
+    return "/?" + urllib.parse.urlencode({"filter": filter_value, "sort": sort_value, "view": view_value})
+
+
+def add_query_param(path: str, key: str, value: str) -> str:
+    parsed = urllib.parse.urlparse(path or "/")
+    query = urllib.parse.parse_qs(parsed.query)
+    query[key] = [value]
+    return urllib.parse.urlunparse(("", "", parsed.path or "/", "", urllib.parse.urlencode(query, doseq=True), ""))
+
+
+def normalize_choice(value: str, choices: list[tuple[str, str]], default: str) -> str:
+    allowed = {choice for choice, _ in choices}
+    return value if value in allowed else default
+
+
+def selected_label(choices: list[tuple[str, str]], value: str) -> str:
+    return dict(choices).get(value, value)
 
 
 def load_artifacts_for_paper(connection: sqlite3.Connection, paper_id: int) -> dict[str, dict[str, Any]]:
@@ -357,6 +515,9 @@ h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #57606a; }
 p { margin: 0; }
 .topbar p, .card-head p { color: #57606a; }
 nav, .tags, .links, .feedback-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.control-group { justify-content: flex-end; }
+.source-link { color: #0969da; text-decoration: none; }
+.source-link:hover { text-decoration: underline; }
 .tab, .links a, button, .missing { border: 1px solid #d8dee4; border-radius: 6px; padding: 7px 10px; background: #ffffff; color: #24292f; text-decoration: none; font: inherit; }
 .tab.active, button.primary { background: #1f6feb; color: #ffffff; border-color: #1f6feb; }
 button.secondary { background: #f6f8fa; }
@@ -370,21 +531,29 @@ button.secondary { background: #f6f8fa; }
 .tag { border: 1px solid #d8dee4; color: #57606a; border-radius: 999px; padding: 3px 8px; font-size: 13px; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
 .summary-grid section { min-width: 0; }
+.compact-summary { margin: 10px 0; color: #57606a; line-height: 1.4; }
 .links { margin-bottom: 12px; }
+.copy-box { border-top: 1px solid #d8dee4; padding-top: 10px; margin-bottom: 12px; }
+.copy-box summary { cursor: pointer; color: #57606a; font-size: 13px; margin-bottom: 8px; }
+.copy-box textarea { min-height: 132px; margin-bottom: 8px; }
+.paper-card.compact { padding: 12px; }
+.paper-card.compact .tags, .paper-card.compact .links, .paper-card.compact .feedback-form { margin-top: 8px; }
 .feedback-form { display: grid; gap: 10px; border-top: 1px solid #d8dee4; padding-top: 12px; }
 label { display: grid; gap: 6px; color: #57606a; font-size: 13px; }
 textarea { width: 100%; min-height: 48px; resize: vertical; border: 1px solid #d8dee4; border-radius: 6px; padding: 8px; font: inherit; color: #1f2328; background: #ffffff; }
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar, .feedback-form { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .score span, .feedback-state, .tag, label { color: #8b949e; }
-  .tab, .links a, button, .missing, .paper-card, .empty, textarea { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .topbar p, .card-head p, h3, .score span, .feedback-state, .tag, label, .compact-summary, .copy-box summary { color: #8b949e; }
+  .source-link { color: #58a6ff; }
+  .tab, .links a, button, .missing, .paper-card, .empty, textarea, .copy-box { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
   .banner { background: #0f2a1a; border-color: #238636; }
 }
 @media (max-width: 720px) {
   main { padding: 14px; }
   .topbar, .card-head { display: grid; grid-template-columns: 1fr; }
+  .control-group { justify-content: flex-start; }
   .summary-grid { grid-template-columns: 1fr; }
   .score { width: fit-content; text-align: left; }
 }

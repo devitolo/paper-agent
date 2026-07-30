@@ -188,7 +188,7 @@ Run the local review queue UI:
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN.
+The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It also exposes the original paper link, supports status filters, latest/score sorting, full/condensed views, and a compact copy prompt for moving a paper into ChatGPT.
 
 Install a simple daily 5:00 AM local-time cron job on the Mac mini:
 

@@ -132,7 +132,7 @@ The local review queue UI is intentionally small:
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-It lists selected papers from SQLite, displays the local triage summary fields, opens registered artifacts, and appends feedback rows for `interested`, `read_later`, `not_interested`, and `reviewed`.
+It lists selected papers from SQLite, displays the local triage summary fields, opens registered artifacts, and appends feedback rows for `interested`, `read_later`, `not_interested`, and `reviewed`. It also exposes the original paper link, supports status filters, latest/score sorting, full/condensed views, and a compact copy prompt for moving a paper into ChatGPT.
 
 ## Nightly Cron
 
