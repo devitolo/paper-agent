@@ -10,6 +10,16 @@ Project Paper is intended to become a provider-agnostic, hybrid local/cloud pape
 
 The first production-oriented implementation should favor simple Python, SQLite, explicit workflow stages, and systemd timers over a heavy agent framework.
 
+## Canonical Local Checkout
+
+For this project, the canonical local repository checkout is:
+
+```text
+/Users/vhl/workspace/paper-agent
+```
+
+Use this path for local commands, cron entries, deployment scripts, and future Codex work on Project Paper.
+
 ## Architecture Summary
 
 - The Mac mini is the runtime host.

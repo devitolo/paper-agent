@@ -81,6 +81,10 @@ python3 -m paper_agents.cli db recent-runs --limit 5
 python3 -m paper_agents.cli db papers --selected --limit 10
 ```
 
+## Repository Path
+
+Use `/Users/vhl/workspace/paper-agent` as the canonical local checkout path for Project Paper commands, cron entries, deployment scripts, and Codex follow-up work.
+
 ## Pipeline Commands
 
 Quick interactive run:
