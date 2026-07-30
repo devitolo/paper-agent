@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 
+from paper_agents.bootstrap import bootstrap_known_papers
 from paper_agents.curator import ResearchCurator
 from paper_agents.db import (
     DEFAULT_DB_PATH,
@@ -91,6 +92,11 @@ def main() -> None:
         action="store_true",
         help="Only show papers selected by the latest scout ranking",
     )
+
+    bootstrap_parser = subparsers.add_parser("bootstrap", help="Backfill known Project Paper seed data")
+    bootstrap_subparsers = bootstrap_parser.add_subparsers(dest="bootstrap_command", required=True)
+    known_parser = bootstrap_subparsers.add_parser("known-papers", help="Insert known seed papers into the V2 registry")
+    known_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
 
     run_parser = subparsers.add_parser("run", help="Run Scout, then Curator")
     run_parser.add_argument("--max-results", type=int, default=10, help="Number of arXiv results to fetch")
@@ -226,6 +232,11 @@ def main() -> None:
                 "Database papers",
                 list_papers(args.db, limit=args.limit, selected_only=args.selected),
             )
+            return
+
+    if args.command == "bootstrap":
+        if args.bootstrap_command == "known-papers":
+            print_section("Bootstrap known papers", bootstrap_known_papers(db_path=args.db, profile_path=args.profile))
             return
 
     if args.command == "run":

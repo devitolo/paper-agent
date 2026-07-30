@@ -299,27 +299,14 @@ def run_daily_scout(
     print(f"fetched {len(fetched)} raw candidates")
     candidates = dedupe_candidates(fetched)
     print(f"deduped to {len(candidates)} candidates")
-    ranked = rank_candidates(candidates, topics)
     seen_source_ids = seen_source_ids or set()
-    selectable = filter_seen_candidates(ranked, seen_source_ids, include_seen=include_seen)
-    filtered_seen_count = len(ranked) - len(selectable)
+    selectable = filter_seen_candidates(candidates, seen_source_ids, include_seen=include_seen)
+    filtered_seen_count = len(candidates) - len(selectable)
     if filtered_seen_count:
-        print(f"filtered {filtered_seen_count} previously seen candidates")
-    selected = selectable[:keep_limit]
-    print(f"selected top {len(selected)} candidates")
-    selected_ids = {candidate_key(candidate) for candidate in selected}
-
-    for candidate in ranked:
-        candidate.selected = candidate_key(candidate) in selected_ids
-
-    if download_pdfs:
-        for index, candidate in enumerate(selected, 1):
-            print(f"downloading PDF {index}/{len(selected)}: {candidate.source_id or candidate.title}")
-            candidate.pdf_path = download_pdf(candidate, pdf_dir)
-            print(f"pdf path: {candidate.pdf_path or 'not available'}")
+        print(f"marked {filtered_seen_count} previously seen candidates as excluded")
 
     output_path = scout_dir / f"{run_date.isoformat()}.jsonl"
-    write_candidates_jsonl(ranked, output_path)
+    write_candidates_jsonl(candidates, output_path)
     print(f"wrote scout metadata: {output_path}")
 
     return {
@@ -328,12 +315,10 @@ def run_daily_scout(
         "freshness_months": freshness_months,
         "fetched_count": len(fetched),
         "candidate_count": len(candidates),
-        "stored_count": len(ranked),
+        "stored_count": len(candidates),
         "seen_filtered_count": filtered_seen_count,
-        "selected_count": len(selected),
         "output_path": str(output_path),
-        "candidates": [candidate.as_dict() for candidate in ranked],
-        "selected": [candidate.as_dict() for candidate in selected],
+        "candidates": [scout_candidate_record(candidate) for candidate in candidates],
     }
 
 
@@ -548,7 +533,14 @@ def write_candidates_jsonl(candidates: list[ScoutCandidate], output_path: Path) 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as handle:
         for candidate in candidates:
-            handle.write(json.dumps(candidate.as_dict(), ensure_ascii=False, sort_keys=True) + "\n")
+            handle.write(json.dumps(scout_candidate_record(candidate), ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def scout_candidate_record(candidate: ScoutCandidate) -> dict[str, Any]:
+    record = candidate.as_dict()
+    for key in ["score", "matched_keywords", "ranking_reason", "selected"]:
+        record.pop(key, None)
+    return record
 
 
 def download_pdf(candidate: ScoutCandidate, pdf_dir: Path, timeout: int = 60) -> str | None:

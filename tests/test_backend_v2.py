@@ -8,6 +8,7 @@ from pathlib import Path
 from paper_agents import db
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.scout import ScoutCandidate
+from paper_agents.scout import run_daily_scout
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
 
 
@@ -65,6 +66,23 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn("score", columns)
         self.assertNotIn("ranking_reason", columns)
         self.assertNotIn("selected", columns)
+
+
+    def test_legacy_scout_daily_output_has_no_preference_scores(self):
+        output_dir = Path(self.tmp.name) / "scout"
+        output = run_daily_scout(
+            topics=["AIOps"],
+            source=FakeSource([candidate("2601.dailyv1", "Daily Scout")]),
+            fetch_limit=1,
+            keep_limit=1,
+            scout_dir=output_dir,
+            download_pdfs=False,
+        )
+        self.assertNotIn("selected", output)
+        record = output["candidates"][0]
+        self.assertNotIn("score", record)
+        self.assertNotIn("ranking_reason", record)
+        self.assertNotIn("selected", record)
 
     def test_previously_discovered_paper_is_excluded_on_later_scout_run(self):
         source = FakeSource([candidate("2601.1v1", "Incident RCA")])
