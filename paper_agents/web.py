@@ -313,23 +313,24 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
         params = (filter_value,)
 
     order_clause = (
-        "ORDER BY latest.score DESC, papers.last_seen_at DESC, papers.id DESC"
+        "ORDER BY latest_selected.score DESC, latest_selected.run_id DESC, papers.id DESC"
         if sort_value == "score"
-        else "ORDER BY papers.last_seen_at DESC, papers.id DESC"
+        else "ORDER BY latest_selected.run_id DESC, papers.id DESC"
     )
 
     with connect_db(db_path) as connection:
         rows = connection.execute(
             f"""
-            WITH latest AS (
+            WITH latest_selected AS (
                 SELECT
                     paper_id,
+                    run_id,
                     score,
-                    selected,
                     matched_keywords_json,
                     ranking_reason,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY run_id DESC) AS row_number
                 FROM scout_candidates
+                WHERE selected = 1
             ), latest_feedback AS (
                 SELECT
                     paper_id,
@@ -345,13 +346,13 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
                 papers.title,
                 papers.published,
                 papers.url,
-                latest.score,
-                latest.matched_keywords_json,
-                latest.ranking_reason,
+                latest_selected.score,
+                latest_selected.matched_keywords_json,
+                latest_selected.ranking_reason,
                 latest_feedback.status,
                 latest_feedback.notes
             FROM papers
-            JOIN latest ON latest.paper_id = papers.id AND latest.row_number = 1 AND latest.selected = 1
+            JOIN latest_selected ON latest_selected.paper_id = papers.id AND latest_selected.row_number = 1
             LEFT JOIN latest_feedback ON latest_feedback.paper_id = papers.id AND latest_feedback.row_number = 1
             {where_clause}
             {order_clause}
