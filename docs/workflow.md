@@ -17,7 +17,7 @@ Scout retrieves configured sources, normalizes candidate records, deduplicates s
 
 Curator reads the Scout candidate pool, the active profile version, historical state, and active guidance. It evaluates every eligible candidate, stores scores and rationales, recommends at most three papers, and writes active guidance for later Scout runs. Re-scout requests are bounded by the workflow cycle's maximum Scout attempt count.
 
-Feedback Agent is the next major product flow. It will receive the manually copied final ChatGPT discussion summary, store the exact raw summary immutably, create parse attempts, store structured feedback, and create a new profile version with provenance.
+Feedback Agent is the next major product flow. The product path is blob-first: the user pastes a final ChatGPT discussion summary into Project Paper, and the eventual shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, stores structured feedback, and creates a new profile version with provenance.
 
 ## Manual MVP Boundaries
 
@@ -107,7 +107,7 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, supports status filters, latest/score sorting, full/condensed views, and appends lightweight status rows with optional pasted feedback notes.
+The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, and appends lightweight status rows. The product direction is a denser review-inbox layout with compact controls, quick action rail, score-only score display, and a Feedback box for pasted ChatGPT discussion blobs.
 
 ## Nightly Cron
 

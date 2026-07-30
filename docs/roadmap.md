@@ -59,6 +59,7 @@ Status: Implemented as V2 backend.
 
 Next major feature area.
 
+- Redesign the Review Queue UI around dense paper triage and blob-first feedback capture.
 - Add the product-facing Feedback Agent command/UI flow.
 - Store immutable raw ChatGPT discussion summaries.
 - Allow multiple parse attempts per raw summary.

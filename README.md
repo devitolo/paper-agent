@@ -55,6 +55,7 @@ Not implemented yet:
 
 - Gemini or other provider adapters.
 - General open-access PDF resolution beyond arXiv.
+- Shared CLI/UI V2 feedback ingestion from pasted ChatGPT feedback blobs.
 - systemd service and timer.
 - Benchmark recording and generated run reports.
 
@@ -204,7 +205,7 @@ Run the local review queue UI:
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It also exposes the original paper link with a URL copy control, supports status filters, latest/score sorting, full/condensed views, and provides a feedback box for pasted ChatGPT discussion notes.
+The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, keeps quick review actions close to each paper, and provides a Feedback box for pasted ChatGPT discussion blobs.
 
 Install a simple daily 5:00 AM local-time cron job on the Mac mini:
 
@@ -240,6 +241,7 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 |   |-- architecture.md
 |   |-- benchmarking.md
 |   |-- decision-log.md
+|   |-- product-changelog.md
 |   |-- roadmap.md
 |   `-- workflow.md
 |-- paper_agents/
@@ -289,3 +291,4 @@ See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
 - [Benchmarking](docs/benchmarking.md)
 - [Roadmap](docs/roadmap.md)
 - [Decision log](docs/decision-log.md)
+- [Product changelog](docs/product-changelog.md)
