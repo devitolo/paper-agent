@@ -196,7 +196,29 @@ def apply_feedback_to_profile(
         "structured_feedback": feedback_rows,
     }
     profile_provider = provider_fn or call_gemini_json
-    proposed = normalize_profile_update(profile_provider(payload, model))
+    try:
+        proposed = normalize_profile_update(profile_provider(payload, model))
+    except RuntimeError as error:
+        attempt_id = db.create_feedback_profile_apply_attempt(
+            connection,
+            provider=provider,
+            model=model,
+            structured_feedback_ids=feedback_ids,
+            dry_run=dry_run,
+            status="failed",
+            error=str(error),
+            metadata={"mode": "incremental"},
+        )
+        return {
+            "status": "failed",
+            "dry_run": dry_run,
+            "provider": provider,
+            "model": model,
+            "current_profile_version_id": current["id"] if current else None,
+            "structured_feedback_ids": feedback_ids,
+            "error": str(error),
+            "apply_attempt_id": attempt_id,
+        }
     output = {
         "status": "dry_run" if dry_run else "applied",
         "dry_run": dry_run,
@@ -208,6 +230,16 @@ def apply_feedback_to_profile(
         "change_summary": proposed["change_summary"],
     }
     if dry_run:
+        attempt_id = db.create_feedback_profile_apply_attempt(
+            connection,
+            provider=provider,
+            model=model,
+            structured_feedback_ids=feedback_ids,
+            dry_run=True,
+            status="succeeded",
+            metadata={"mode": "incremental", "change_summary": proposed["change_summary"]},
+        )
+        output["apply_attempt_id"] = attempt_id
         return output
 
     profile_version_id = db.create_profile_version(
@@ -217,8 +249,19 @@ def apply_feedback_to_profile(
         change_summary=proposed["change_summary"],
     )
     application_ids = db.create_feedback_profile_applications(connection, feedback_ids, profile_version_id)
+    attempt_id = db.create_feedback_profile_apply_attempt(
+        connection,
+        provider=provider,
+        model=model,
+        structured_feedback_ids=feedback_ids,
+        dry_run=False,
+        status="succeeded",
+        profile_version_id=profile_version_id,
+        metadata={"mode": "incremental", "change_summary": proposed["change_summary"]},
+    )
     output["profile_version_id"] = profile_version_id
     output["feedback_profile_application_ids"] = application_ids
+    output["apply_attempt_id"] = attempt_id
     return output
 
 
@@ -255,7 +298,29 @@ def rebuild_feedback_profile(
         "structured_feedback": feedback_rows,
     }
     profile_provider = provider_fn or call_gemini_json
-    proposed = normalize_profile_update(profile_provider(payload, model))
+    try:
+        proposed = normalize_profile_update(profile_provider(payload, model))
+    except RuntimeError as error:
+        attempt_id = db.create_feedback_profile_apply_attempt(
+            connection,
+            provider=provider,
+            model=model,
+            structured_feedback_ids=feedback_ids,
+            dry_run=dry_run,
+            status="failed",
+            error=str(error),
+            metadata={"mode": "full_rebuild"},
+        )
+        return {
+            "status": "failed",
+            "dry_run": dry_run,
+            "provider": provider,
+            "model": model,
+            "current_profile_version_id": current["id"] if current else None,
+            "structured_feedback_ids": feedback_ids,
+            "error": str(error),
+            "apply_attempt_id": attempt_id,
+        }
     output = {
         "status": "dry_run" if dry_run else "rebuilt",
         "dry_run": dry_run,
@@ -267,6 +332,16 @@ def rebuild_feedback_profile(
         "change_summary": proposed["change_summary"],
     }
     if dry_run:
+        attempt_id = db.create_feedback_profile_apply_attempt(
+            connection,
+            provider=provider,
+            model=model,
+            structured_feedback_ids=feedback_ids,
+            dry_run=True,
+            status="succeeded",
+            metadata={"mode": "full_rebuild", "change_summary": proposed["change_summary"]},
+        )
+        output["apply_attempt_id"] = attempt_id
         return output
 
     profile_version_id = db.create_profile_version(
@@ -275,7 +350,18 @@ def rebuild_feedback_profile(
         source_structured_feedback_id=None,
         change_summary=proposed["change_summary"],
     )
+    attempt_id = db.create_feedback_profile_apply_attempt(
+        connection,
+        provider=provider,
+        model=model,
+        structured_feedback_ids=feedback_ids,
+        dry_run=False,
+        status="succeeded",
+        profile_version_id=profile_version_id,
+        metadata={"mode": "full_rebuild", "change_summary": proposed["change_summary"]},
+    )
     output["profile_version_id"] = profile_version_id
+    output["apply_attempt_id"] = attempt_id
     return output
 
 

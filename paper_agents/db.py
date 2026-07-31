@@ -820,6 +820,40 @@ def create_feedback_profile_applications(
     return application_ids
 
 
+def create_feedback_profile_apply_attempt(
+    connection: sqlite3.Connection,
+    *,
+    provider: str,
+    model: str | None,
+    structured_feedback_ids: list[int],
+    dry_run: bool,
+    status: str,
+    error: str | None = None,
+    profile_version_id: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO feedback_profile_apply_attempts (
+            provider, model, structured_feedback_ids_json, dry_run, status,
+            error, profile_version_id, metadata_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            provider,
+            model,
+            json_dumps(structured_feedback_ids),
+            1 if dry_run else 0,
+            status,
+            error,
+            profile_version_id,
+            json_dumps(metadata or {}),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
 def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     init_db(db_path)
     tracked = [
@@ -836,6 +870,7 @@ def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
         "feedback_parse_attempts",
         "structured_feedback",
         "feedback_profile_applications",
+        "feedback_profile_apply_attempts",
         "profile_versions",
         "feedback",
     ]

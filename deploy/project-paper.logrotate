@@ -1,0 +1,8 @@
+/home/devitolo/workspace/paper-agent/logs/*.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

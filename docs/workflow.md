@@ -135,8 +135,6 @@ python3 -m paper_agents.cli feedback rebuild-profile --provider gemini
 Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
 
 
-The next workflow step is automatic incremental profile apply after UI feedback submit. A future manual `feedback rebuild-profile` path should regenerate the compact profile from all structured feedback, initially for monthly use, after about 10 new feedback items, or when recommendation quality drifts.
-
 If older recommended papers have PDFs but no triage summaries, backfill those missing summaries without running Scout/Curator again:
 
 ```bash
@@ -152,3 +150,25 @@ The current Mac mini setup uses cron at 5:00 AM local time:
 ```
 
 systemd timers remain the preferred later option once logging and failure recovery are more mature.
+
+## Backups And Logs
+
+Back up SQLite weekly with the online backup API and verify the backup with `PRAGMA integrity_check`:
+
+```bash
+0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
+```
+
+Backups are written under `backups/` by default and are intentionally ignored by git.
+
+Install weekly compressed log rotation for `logs/*.log`:
+
+```bash
+sudo cp deploy/project-paper.logrotate /etc/logrotate.d/project-paper
+```
+
+Tail current logs:
+
+```bash
+scripts/tail_logs.sh
+```

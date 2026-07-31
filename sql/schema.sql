@@ -222,6 +222,22 @@ CREATE TABLE IF NOT EXISTS feedback_profile_applications (
 
 CREATE INDEX IF NOT EXISTS idx_feedback_profile_applications_profile ON feedback_profile_applications (profile_version_id);
 
+CREATE TABLE IF NOT EXISTS feedback_profile_apply_attempts (
+    id INTEGER PRIMARY KEY,
+    provider TEXT NOT NULL,
+    model TEXT,
+    structured_feedback_ids_json TEXT NOT NULL DEFAULT '[]',
+    dry_run INTEGER NOT NULL DEFAULT 0 CHECK (dry_run IN (0, 1)),
+    status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+    error TEXT,
+    profile_version_id INTEGER REFERENCES profile_versions(id) ON DELETE SET NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_profile_apply_attempts_status ON feedback_profile_apply_attempts (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_feedback_profile_apply_attempts_profile ON feedback_profile_apply_attempts (profile_version_id);
+
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY,
     paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,

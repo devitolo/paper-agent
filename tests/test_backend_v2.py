@@ -504,6 +504,10 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(calls[0][1], "gemini-test")
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 0)
+        attempt = self.connection.execute(
+            "SELECT provider, model, dry_run, status, profile_version_id FROM feedback_profile_apply_attempts"
+        ).fetchone()
+        self.assertEqual(attempt, ("gemini", "gemini-test", 1, "succeeded", None))
 
     def test_feedback_profile_apply_creates_profile_version_and_application_rows(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
@@ -552,7 +556,38 @@ class BackendV2Tests(unittest.TestCase):
                 (second["structured_feedback_id"], output["profile_version_id"]),
             ],
         )
+        attempt = self.connection.execute(
+            "SELECT dry_run, status, error, profile_version_id FROM feedback_profile_apply_attempts"
+        ).fetchone()
+        self.assertEqual(attempt, (0, "succeeded", None, output["profile_version_id"]))
         self.assertEqual(db.unapplied_structured_feedback(self.connection), [])
+
+    def test_feedback_profile_apply_failure_records_attempt_and_remains_retryable(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        feedback = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nVery applied.",
+            source="test",
+        )
+
+        def provider(payload, model):
+            raise RuntimeError("provider unavailable")
+
+        output = apply_feedback_to_profile(self.connection, dry_run=False, provider_fn=provider)
+
+        attempt = self.connection.execute(
+            """
+            SELECT status, error, profile_version_id, structured_feedback_ids_json
+            FROM feedback_profile_apply_attempts
+            """
+        ).fetchone()
+        self.assertEqual(output["status"], "failed")
+        self.assertEqual(output["error"], "provider unavailable")
+        self.assertEqual(attempt[0:3], ("failed", "provider unavailable", None))
+        self.assertEqual(json.loads(attempt[3]), [feedback["structured_feedback_id"]])
+        self.assertEqual([row["id"] for row in db.unapplied_structured_feedback(self.connection)], [feedback["structured_feedback_id"]])
 
     def test_feedback_profile_no_feedback_does_not_call_provider(self):
         calls = []
@@ -613,6 +648,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual([row["id"] for row in calls[0]["structured_feedback"]], [first["structured_feedback_id"], second["structured_feedback_id"]])
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_apply_attempts").fetchone()[0], 1)
 
     def test_feedback_profile_rebuild_apply_creates_new_active_profile_without_application_rows(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
@@ -643,6 +679,10 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(current["profile"]["interests"], ["rebuilt profile"])
         self.assertEqual(current["change_summary"], "Full profile rebuild.")
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 0)
+        attempt = self.connection.execute(
+            "SELECT status, profile_version_id FROM feedback_profile_apply_attempts"
+        ).fetchone()
+        self.assertEqual(attempt, ("succeeded", output["profile_version_id"]))
 
     def test_feedback_rebuild_profile_cli_no_feedback_exits_cleanly(self):
         self.connection.commit()
@@ -744,6 +784,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 0)
+        self.assertEqual(self.connection.execute("SELECT status, error FROM feedback_profile_apply_attempts").fetchone(), ("failed", "provider unavailable"))
+        self.assertEqual(len(db.unapplied_structured_feedback(self.connection)), 1)
 
     def test_review_queue_empty_feedback_does_not_apply_profile(self):
         paper_id, recommendation_id = self._seed_review_recommendation()

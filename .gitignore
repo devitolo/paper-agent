@@ -9,3 +9,4 @@ data/reviews/
 data/*.db
 data/*.db-*
 logs/
+backups/

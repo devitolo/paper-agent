@@ -65,6 +65,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     render_review_queue(
                         db_path,
                         saved=params.get("saved", [None])[0] == "1",
+                        profile_apply_failed=params.get("profile_apply_failed", [None])[0] == "1",
                         filter_value=params.get("filter", ["needs_review"])[0],
                         sort_value=params.get("sort", ["latest"])[0],
                         view_value=params.get("view", ["full"])[0],
@@ -102,7 +103,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback status")
                 return
 
-            save_feedback(
+            result = save_feedback(
                 db_path,
                 paper_id=paper_id,
                 status=status,
@@ -113,6 +114,8 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
             )
             return_to = form.get("return_to", ["/"])[0]
             redirect_to = add_query_param(return_to, "saved", "1")
+            if result.get("profile_apply_error"):
+                redirect_to = add_query_param(redirect_to, "profile_apply_failed", "1")
             self.send_response(HTTPStatus.SEE_OTHER)
             self.send_header("Location", redirect_to)
             self.end_headers()
@@ -179,6 +182,7 @@ def render_review_queue(
     db_path: Path,
     *,
     saved: bool = False,
+    profile_apply_failed: bool = False,
     filter_value: str = "needs_review",
     sort_value: str = "latest",
     view_value: str = "full",
@@ -187,7 +191,12 @@ def render_review_queue(
     sort_value = normalize_choice(sort_value, SORTS, "latest")
     view_value = normalize_choice(view_value, VIEWS, "full")
     cards = load_review_cards(db_path, filter_value=filter_value, sort_value=sort_value)
-    saved_banner = '<div class="banner">Feedback saved.</div>' if saved else ""
+    banners = []
+    if saved:
+        banners.append('<div class="banner">Feedback saved.</div>')
+    if profile_apply_failed:
+        banners.append('<div class="banner warning">Profile auto-apply failed. Feedback was saved; run feedback apply manually when ready.</div>')
+    saved_banner = "".join(banners)
     request_path = build_queue_href(filter_value, sort_value, view_value)
     card_html = "\n".join(render_card(card, view_value=view_value, return_to=request_path) for card in cards)
     if not card_html:
@@ -557,6 +566,8 @@ def save_feedback(
                 dry_run=False,
                 provider_fn=profile_provider_fn,
             )
+        if result["profile_apply"] and result["profile_apply"].get("status") == "failed":
+            result["profile_apply_error"] = result["profile_apply"].get("error") or "Profile auto-apply failed."
     except RuntimeError as error:
         result["profile_apply_error"] = str(error)
         print(f"feedback profile auto-apply failed: {error}")
@@ -607,6 +618,7 @@ button { cursor: pointer; }
 button.primary { background: #1f6feb; color: #ffffff; border-color: #1f6feb; }
 button.secondary { background: #f6f8fa; }
 .banner { padding: 7px 9px; border: 1px solid #2da44e; background: #dafbe1; border-radius: 5px; margin-bottom: 8px; }
+.banner.warning { border-color: #bf8700; background: #fff8c5; }
 .cards { display: grid; gap: 8px; }
 .paper-card, .empty { background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; padding: 10px; }
 .paper-form { display: grid; grid-template-columns: minmax(0, 1fr) 116px; gap: 12px; align-items: start; }
@@ -639,6 +651,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .links a, button, select, .paper-card, .empty, textarea { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
   .banner { background: #0f2a1a; border-color: #238636; }
+  .banner.warning { background: #2d2300; border-color: #9e6a03; }
 }
 @media (max-width: 720px) {
   main { padding: 10px; }

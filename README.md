@@ -235,6 +235,30 @@ Backfill missing triage summaries for already recommended papers without re-scou
 python3 -m paper_agents.cli review-backfill --quick
 ```
 
+Back up the SQLite database with the online backup API:
+
+```bash
+scripts/backup_db.sh
+```
+
+Recommended weekly cron entry on the Mac mini:
+
+```bash
+0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
+```
+
+Install log rotation for cron logs:
+
+```bash
+sudo cp deploy/project-paper.logrotate /etc/logrotate.d/project-paper
+```
+
+Tail local Project Paper logs:
+
+```bash
+scripts/tail_logs.sh
+```
+
 Install a simple daily 5:00 AM local-time cron job on the Mac mini:
 
 ```bash
