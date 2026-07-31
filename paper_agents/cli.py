@@ -4,12 +4,14 @@ import argparse
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from paper_agents.bootstrap import bootstrap_known_papers, import_legacy_scout_files
 from paper_agents.curator import ResearchCurator
 from paper_agents.db import (
     DEFAULT_DB_PATH,
     DEFAULT_SCHEMA_PATH,
+    connect_db,
     db_stats,
     init_db,
     list_papers,
@@ -17,7 +19,7 @@ from paper_agents.db import (
     reset_db,
     seen_source_ids,
 )
-from paper_agents.feedback import FeedbackAgent
+from paper_agents.feedback import FeedbackAgent, ingest_feedback_blob
 from paper_agents.local_extract import (
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
@@ -195,7 +197,7 @@ def main() -> None:
     review_parser.add_argument("--timeout", type=int, default=240)
 
     feedback_parser = subparsers.add_parser("feedback", help="Update preferences from feedback")
-    feedback_parser.add_argument("text", help="Natural-language feedback")
+    feedback_parser.add_argument("feedback_args", nargs=argparse.REMAINDER, help='Legacy text, or: add --paper-id ID [--status STATUS] [--file PATH] [text]')
 
     extract_parser = subparsers.add_parser("extract", help="Extract paper metadata with local Ollama")
     extract_parser.add_argument("source", type=Path, help="PDF or text file to extract")
@@ -345,10 +347,17 @@ def main() -> None:
         return
 
     if args.command == "feedback":
+        if not args.feedback_args:
+            raise SystemExit("Feedback text is required")
+        if args.feedback_args[0] == "add":
+            output = run_feedback_add(args.feedback_args[1:])
+            print_section("Feedback ingested", output)
+            return
+
         require_openai_api_key()
         profile = load_profile(args.profile)
         try:
-            updated_profile = FeedbackAgent().run(profile, args.text)
+            updated_profile = FeedbackAgent().run(profile, " ".join(args.feedback_args))
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
         save_profile(updated_profile, args.profile)
@@ -390,6 +399,37 @@ def resolve_pipeline_limit_chunks(quick: bool, limit_chunks: int | None) -> int:
     if quick:
         return 2
     return DEFAULT_PIPELINE_LIMIT_CHUNKS
+
+
+def run_feedback_add(argv: list[str]) -> dict[str, Any]:
+    parser = argparse.ArgumentParser(prog="paper_agents.cli feedback add")
+    parser.add_argument("--paper-id", type=int, required=True)
+    parser.add_argument("--recommendation-id", type=int)
+    parser.add_argument("--status", choices=["interested", "read_later", "not_interested", "reviewed"])
+    parser.add_argument("--file", type=Path)
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    parser.add_argument("text", nargs="*")
+    args = parser.parse_args(argv)
+
+    if args.file and args.text:
+        raise SystemExit("Use either --file or positional text, not both")
+    if args.file:
+        content = args.file.read_text(encoding="utf-8")
+    else:
+        content = " ".join(args.text)
+    if not content.strip():
+        raise SystemExit("Feedback content is required")
+
+    init_db(args.db)
+    with connect_db(args.db) as connection:
+        return ingest_feedback_blob(
+            connection,
+            paper_id=args.paper_id,
+            recommendation_id=args.recommendation_id,
+            content=content,
+            source="cli_feedback_add",
+            status=args.status,
+        )
 
 
 def print_section(title: str, payload: dict) -> None:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
 from paper_agents import db
+from paper_agents.feedback import ingest_feedback_blob
+from paper_agents.cli import run_feedback_add
 from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.scout import ScoutCandidate
@@ -307,6 +310,117 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(current["source_structured_feedback_id"], structured_id)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 2)
 
+    def test_feedback_blob_ingestion_stores_raw_blob_exactly_and_structured_parse(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        content = "Decision: keep\nScore: 5\nUseful because it studies real incidents.\n"
+
+        output = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content=content,
+            source="test",
+            status="not_interested",
+        )
+
+        raw = self.connection.execute(
+            "SELECT paper_id, recommendation_id, content FROM raw_feedback WHERE id = ?",
+            (output["raw_feedback_id"],),
+        ).fetchone()
+        parse_attempt = self.connection.execute(
+            "SELECT raw_feedback_id, parser_name, parser_version, status, output_json FROM feedback_parse_attempts WHERE id = ?",
+            (output["parse_attempt_id"],),
+        ).fetchone()
+        structured = self.connection.execute(
+            "SELECT paper_id, decision, score, observations_json, preference_signals_json FROM structured_feedback WHERE id = ?",
+            (output["structured_feedback_id"],),
+        ).fetchone()
+
+        self.assertEqual(raw, (paper_id, recommendation_id, content))
+        self.assertEqual(parse_attempt[:4], (output["raw_feedback_id"], "feedback-agent", "deterministic-v1", "succeeded"))
+        self.assertEqual(json.loads(parse_attempt[4])["decision"], "keep")
+        self.assertEqual(structured[0:3], (paper_id, "keep", 5))
+        self.assertEqual(json.loads(structured[3]), ["Useful because it studies real incidents."])
+        self.assertEqual(json.loads(structured[4]), [])
+
+    def test_feedback_blob_duplicate_dedupes_raw_feedback_but_records_attempt(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        content = "Decision: reject\nScore: 2\nToo theoretical."
+
+        first = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content=content,
+            source="test",
+            status=None,
+        )
+        second = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content=content,
+            source="test",
+            status=None,
+        )
+
+        self.assertTrue(first["raw_feedback_created"])
+        self.assertFalse(second["raw_feedback_created"])
+        self.assertEqual(first["raw_feedback_id"], second["raw_feedback_id"])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM raw_feedback").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_parse_attempts").fetchone()[0], 2)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM structured_feedback").fetchone()[0], 2)
+
+    def test_feedback_blob_derives_decision_from_status_when_blob_has_no_decision(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+
+        output = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="This is useful later, but not urgent.",
+            source="test",
+            status="read_later",
+        )
+
+        structured = self.connection.execute(
+            "SELECT decision, score FROM structured_feedback WHERE id = ?",
+            (output["structured_feedback_id"],),
+        ).fetchone()
+        self.assertEqual(structured, ("maybe", None))
+
+    def test_feedback_add_cli_ingests_file_content(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        feedback_path = Path(self.tmp.name) / "feedback.txt"
+        feedback_path.write_text("Decision: reject\nScore: 1\nNot useful.\n", encoding="utf-8")
+        self.connection.commit()
+
+        output = run_feedback_add(
+            [
+                "--db",
+                str(self.db_path),
+                "--paper-id",
+                str(paper_id),
+                "--recommendation-id",
+                str(recommendation_id),
+                "--status",
+                "not_interested",
+                "--file",
+                str(feedback_path),
+            ]
+        )
+
+        structured = self.connection.execute(
+            "SELECT decision, score FROM structured_feedback WHERE id = ?",
+            (output["structured_feedback_id"],),
+        ).fetchone()
+        raw = self.connection.execute(
+            "SELECT content FROM raw_feedback WHERE id = ?",
+            (output["raw_feedback_id"],),
+        ).fetchone()
+        self.assertEqual(structured, ("reject", 1))
+        self.assertEqual(raw[0], "Decision: reject\nScore: 1\nNot useful.\n")
+
     def test_review_queue_renders_dense_feedback_controls(self):
         self._seed_review_recommendation()
         self.connection.commit()
@@ -330,7 +444,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn(">Notes<textarea", html)
 
     def test_review_queue_feedback_save_still_inserts_status_and_notes(self):
-        paper_id = self._seed_review_recommendation()
+        paper_id, _ = self._seed_review_recommendation()
         self.connection.commit()
 
         web.save_feedback(self.db_path, paper_id=paper_id, status="reviewed", notes="Dense feedback blob")
@@ -341,13 +455,34 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, ("reviewed", "Dense feedback blob"))
 
+    def test_review_queue_feedback_save_ingests_non_empty_feedback_blob(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        self.connection.commit()
+
+        web.save_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            status="interested",
+            notes="Decision: keep\nScore: 4\nGood fit.",
+            feedback_content="Decision: keep\nScore: 4\nGood fit.\n",
+            source="review_queue_ui",
+        )
+
+        raw = self.connection.execute("SELECT content FROM raw_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
+        structured = self.connection.execute("SELECT decision, score FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
+        lightweight = self.connection.execute("SELECT status, notes FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()
+        self.assertEqual(raw[0], "Decision: keep\nScore: 4\nGood fit.\n")
+        self.assertEqual(structured, ("keep", 4))
+        self.assertEqual(lightweight, ("interested", "Decision: keep\nScore: 4\nGood fit."))
+
     def test_review_queue_logo_assets_are_checked_in(self):
         self.assertTrue((web.ASSET_DIR / "logo_light.png").is_file())
         self.assertTrue((web.ASSET_DIR / "logo_dark.png").is_file())
         self.assertIn("logo_light.png", web.LOGO_ASSETS)
         self.assertIn("logo_dark.png", web.LOGO_ASSETS)
 
-    def _seed_review_recommendation(self) -> int:
+    def _seed_review_recommendation(self) -> tuple[int, int]:
         paper_id, _ = db.upsert_paper(
             self.connection,
             {
@@ -379,14 +514,14 @@ class BackendV2Tests(unittest.TestCase):
             matched_signals=["incident", "automation"],
             quality_threshold_met=True,
         )
-        db.insert_recommendation(
+        recommendation_id = db.insert_recommendation(
             self.connection,
             curator_run_id=curator_run_id,
             paper_id=paper_id,
             recommendation_order=1,
             rationale="Strong match.",
         )
-        return paper_id
+        return paper_id, recommendation_id
 
 
 if __name__ == "__main__":

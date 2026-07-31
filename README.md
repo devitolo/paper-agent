@@ -2,7 +2,7 @@
 
 Project Paper is a system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
 
-The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent will ingest manual ChatGPT discussion summaries into immutable SQLite history and versioned profiles.
+The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent stores pasted ChatGPT discussion summaries in immutable SQLite history with deterministic v1 parsing.
 
 ## Overview
 
@@ -43,19 +43,19 @@ Implemented today:
 - SQLite stores canonical papers, alternate source records, Scout runs/candidates, Curator runs/evaluations/recommendations, versioned scouting guidance, immutable raw feedback tables, parse attempts, structured feedback, and profile versions.
 - `bootstrap known-papers` backfills important seed papers, including the Microsoft/arXiv cloud incident LLM paper.
 - `review-summary` creates a ChatGPT section-by-section Markdown review from a triage summary.
-- The review queue UI reads Curator recommendations from SQLite and lets the user mark lightweight review statuses.
+- The review queue UI reads Curator recommendations from SQLite, lets the user mark lightweight review statuses, and stores pasted feedback blobs in the V2 feedback tables.
 
 Still manual in this MVP:
 
 - The user manually copies a recommended paper/link into a ChatGPT Paper Discussion conversation.
-- The user manually copies ChatGPT's final discussion summary back into the future Feedback Agent flow.
-- Feedback parsing and profile-version updates are supported at the repository/schema layer but are not yet wired into a product-facing CLI/UI flow.
+- The user manually copies ChatGPT's final discussion summary back into Project Paper.
+- Feedback blobs are stored and deterministically parsed, but profile-version updates from structured feedback are not wired yet.
 
 Not implemented yet:
 
 - Gemini or other provider adapters.
 - General open-access PDF resolution beyond arXiv.
-- Shared CLI/UI V2 feedback ingestion from pasted ChatGPT feedback blobs.
+- Profile evolution from structured feedback.
 - systemd service and timer.
 - Benchmark recording and generated run reports.
 
@@ -115,6 +115,12 @@ Give feedback after reviewing the recommendations:
 
 ```bash
 docker compose run --rm paper-agents feedback "This was too theoretical. I want more practical real-world incident management papers."
+```
+
+Store a pasted ChatGPT discussion blob in the V2 feedback tables without updating the profile:
+
+```bash
+python3 -m paper_agents.cli feedback add --paper-id 12 --status interested --file /tmp/feedback.txt
 ```
 
 Inspect the stored preference profile:
@@ -205,7 +211,7 @@ Run the local review queue UI:
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, keeps quick review actions close to each paper, and provides a Feedback box for pasted ChatGPT discussion blobs.
+The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, keeps quick review actions close to each paper, and stores non-empty Feedback boxes as raw V2 feedback blobs with deterministic v1 structured parsing. This does not update `profile_versions` yet.
 
 Install a simple daily 5:00 AM local-time cron job on the Mac mini:
 
@@ -274,8 +280,8 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 
 The next work should build on the V2 Scout/Curator backend:
 
-1. Wire the Feedback Agent CLI/UI flow for immutable raw discussion summaries, parse attempts, structured feedback, and profile-version updates.
-2. Update the review queue UI around Curator recommendations and manual ChatGPT handoff status.
+1. Wire profile-version updates from structured feedback.
+2. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
 3. Add provider adapters for ChatGPT/Codex and Gemini behind one source interface.
 4. Add general open-access PDF resolution beyond arXiv.
 5. Add systemd scheduling, logs, and run reports.

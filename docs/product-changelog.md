@@ -42,6 +42,18 @@ Product direction:
 - Future V2 feedback ingestion should store the exact blob in `raw_feedback`, create a `feedback_parse_attempt`, and write normalized output into `structured_feedback`.
 - Do not require the V2 parser/profile update in the first UI redesign; capturing the blob cleanly comes first.
 
+### Feedback ingestion: deterministic V2 storage first
+
+Decision: The first V2 feedback ingestion step should capture and deterministically parse blobs without changing future recommendations yet.
+
+Product direction:
+
+- The review queue Feedback box and `feedback add` CLI command should share one ingestion backend.
+- Store exact pasted blobs in `raw_feedback` and dedupe by content hash.
+- Record every deterministic parse in `feedback_parse_attempts`.
+- Store normalized decisions and scores in `structured_feedback`.
+- Do not update `profile_versions`, ScoutAgent, or CuratorAgent from structured feedback until a later architecture step decides how those signals should influence recommendations.
+
 ### Operating model: split roles
 
 Decision: Project Paper work should be split across durable roles so product direction, implementation, operations, and planning do not blur together.

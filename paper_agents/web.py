@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, init_db
+from paper_agents.feedback import ingest_feedback_blob
 
 ASSET_DIR = Path(__file__).with_name("assets")
 LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
@@ -94,12 +95,22 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
 
             status = form.get("status", [""])[0]
-            notes = form.get("notes", [""])[0].strip()
+            feedback_content = form.get("notes", [""])[0]
+            notes = feedback_content.strip()
+            recommendation_id = parse_optional_int(form.get("recommendation_id", [""])[0])
             if status not in {value for value, _ in FEEDBACK_STATUSES}:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback status")
                 return
 
-            save_feedback(db_path, paper_id=paper_id, status=status, notes=notes)
+            save_feedback(
+                db_path,
+                paper_id=paper_id,
+                status=status,
+                notes=notes,
+                feedback_content=feedback_content,
+                recommendation_id=recommendation_id,
+                source="review_queue_ui",
+            )
             return_to = form.get("return_to", ["/"])[0]
             redirect_to = add_query_param(return_to, "saved", "1")
             self.send_response(HTTPStatus.SEE_OTHER)
@@ -239,6 +250,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     return f"""<article class="paper-card{compact_class}">
   <form method="post" action="/feedback" class="paper-form">
     <input type="hidden" name="paper_id" value="{card['id']}">
+    <input type="hidden" name="recommendation_id" value="{card['recommendation_id']}">
     <input type="hidden" name="return_to" value="{escape(return_to)}">
     <div class="paper-main">
       <div class="card-head">
@@ -358,6 +370,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
             )
             SELECT
                 papers.id,
+                latest_recommendation.recommendation_id,
                 primary_source.source,
                 primary_source.source_id,
                 papers.title,
@@ -388,16 +401,17 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
             cards.append(
                 {
                     "id": paper_id,
-                    "source": row[1] or "unknown",
-                    "source_id": row[2] or "unknown",
-                    "title": row[3],
-                    "published": row[4],
-                    "url": row[5],
-                    "score": float(row[6] or 0),
-                    "matched_keywords": decode_json(row[7], []),
-                    "ranking_reason": row[8],
-                    "feedback_status": row[9],
-                    "feedback_notes": row[10],
+                    "recommendation_id": row[1],
+                    "source": row[2] or "unknown",
+                    "source_id": row[3] or "unknown",
+                    "title": row[4],
+                    "published": row[5],
+                    "url": row[6],
+                    "score": float(row[7] or 0),
+                    "matched_keywords": decode_json(row[8], []),
+                    "ranking_reason": row[9],
+                    "feedback_status": row[10],
+                    "feedback_notes": row[11],
                     "artifacts": artifacts,
                     "summary": load_summary(artifacts.get("triage_summary")),
                 }
@@ -498,13 +512,31 @@ def load_summary(artifact: dict[str, Any] | None) -> dict[str, Any]:
     return data.get("merged", {}) if isinstance(data, dict) else {}
 
 
-def save_feedback(db_path: Path, *, paper_id: int, status: str, notes: str) -> None:
+def save_feedback(
+    db_path: Path,
+    *,
+    paper_id: int,
+    status: str,
+    notes: str,
+    feedback_content: str | None = None,
+    recommendation_id: int | None = None,
+    source: str = "review_queue_ui",
+) -> None:
     init_db(db_path)
     with connect_db(db_path) as connection:
         connection.execute(
             "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
             (paper_id, status, notes),
         )
+        if feedback_content and feedback_content.strip():
+            ingest_feedback_blob(
+                connection,
+                paper_id=paper_id,
+                recommendation_id=recommendation_id,
+                content=feedback_content,
+                source=source,
+                status=status,
+            )
 
 
 def decode_json(value: str | None, fallback: Any) -> Any:
@@ -518,6 +550,13 @@ def decode_json(value: str | None, fallback: Any) -> Any:
 
 def escape(value: Any) -> str:
     return html.escape(str(value or ""), quote=True)
+
+
+def parse_optional_int(value: str) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def page_css() -> str:
