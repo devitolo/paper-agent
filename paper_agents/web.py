@@ -527,8 +527,8 @@ body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", 
 main { max-width: 1180px; margin: 0 auto; padding: 14px; }
 .topbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 12px; align-items: end; border-bottom: 1px solid #d8dee4; padding-bottom: 8px; margin-bottom: 10px; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 650; }
-.brand-title { display: flex; gap: 7px; align-items: center; }
-.brand-logo { display: block; width: 26px; height: 26px; border-radius: 6px; }
+.brand-title { display: flex; gap: 10px; align-items: center; }
+.brand-logo { display: block; width: 42px; height: 42px; border-radius: 9px; }
 h2 { margin: 0 0 3px; font-size: 15px; font-weight: 650; line-height: 1.25; }
 h3 { margin: 0 0 3px; font-size: 12px; font-weight: 650; color: #57606a; }
 p { margin: 0; }
