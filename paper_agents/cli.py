@@ -39,6 +39,10 @@ from paper_agents.review import (
     DEFAULT_REVIEW_MAX_CHARS,
     review_summary,
 )
+from paper_agents.reviewer_agent import (
+    ReviewerConfig,
+    backfill_missing_triage_summaries,
+)
 from paper_agents.scout import (
     DEFAULT_ARXIV_REQUEST_DELAY,
     DEFAULT_ARXIV_RETRIES,
@@ -196,6 +200,18 @@ def main() -> None:
     review_parser.add_argument("--max-chars", type=int, default=DEFAULT_REVIEW_MAX_CHARS)
     review_parser.add_argument("--timeout", type=int, default=240)
 
+    backfill_parser = subparsers.add_parser("review-backfill", help="Extract missing triage summaries for recommended papers")
+    backfill_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    backfill_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
+    backfill_parser.add_argument("--model", default=DEFAULT_MODEL)
+    backfill_parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
+    backfill_parser.add_argument("--max-chars", type=int, default=DEFAULT_PIPELINE_MAX_CHARS)
+    backfill_parser.add_argument("--limit-chunks", type=int)
+    backfill_parser.add_argument("--quick", action="store_true", help="Extract only the first 2 chunks unless --limit-chunks is set")
+    backfill_parser.add_argument("--timeout", type=int, default=DEFAULT_PIPELINE_TIMEOUT)
+    backfill_parser.add_argument("--workers", type=int, default=DEFAULT_PIPELINE_WORKERS)
+    backfill_parser.add_argument("--limit", type=int, help="Maximum missing summaries to backfill")
+
     feedback_parser = subparsers.add_parser("feedback", help="Update preferences from feedback")
     feedback_parser.add_argument(
         "feedback_args",
@@ -348,6 +364,26 @@ def main() -> None:
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
         print_section("Paper review", output)
+        return
+
+    if args.command == "review-backfill":
+        limit_chunks = resolve_pipeline_limit_chunks(args.quick, args.limit_chunks)
+        init_db(args.db)
+        with connect_db(args.db) as connection:
+            output = backfill_missing_triage_summaries(
+                connection,
+                limit=args.limit,
+                config=ReviewerConfig(
+                    pdf_dir=args.pdf_dir,
+                    model=args.model,
+                    ollama_url=args.ollama_url,
+                    max_chars=args.max_chars,
+                    limit_chunks=limit_chunks,
+                    timeout=args.timeout,
+                    workers=args.workers,
+                ),
+            )
+        print_section("Review backfill", output)
         return
 
     if args.command == "feedback":

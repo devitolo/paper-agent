@@ -124,6 +124,12 @@ python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
+If older recommended papers have PDFs but no triage summaries, backfill those missing summaries without running Scout/Curator again:
+
+```bash
+python3 -m paper_agents.cli review-backfill --quick
+```
+
 ## Nightly Cron
 
 The current Mac mini setup uses cron at 5:00 AM local time:

@@ -14,6 +14,7 @@ from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.scout import ScoutCandidate
 from paper_agents.scout import run_daily_scout
 from paper_agents.reviewer_agent import card_from_recommendation
+from paper_agents.reviewer_agent import recommended_papers_missing_triage
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
 from paper_agents import web
 
@@ -220,6 +221,33 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(card["approach"], "Local triage extraction")
         self.assertEqual(card["merge_strategy"], "synthesis")
         self.assertEqual(card["chunk_count"], 3)
+
+    def test_reviewer_backfill_finds_recommended_papers_missing_triage(self):
+        missing_paper_id, missing_recommendation_id = self._seed_review_recommendation(source_id="2607.missingv1")
+        complete_paper_id, _ = self._seed_review_recommendation(source_id="2607.completev1")
+        db.insert_artifact(
+            self.connection,
+            missing_paper_id,
+            artifact_type="pdf",
+            path=Path("data/papers/arxiv/2607.missingv1.pdf"),
+        )
+        db.insert_artifact(
+            self.connection,
+            complete_paper_id,
+            artifact_type="pdf",
+            path=Path("data/papers/arxiv/2607.completev1.pdf"),
+        )
+        db.insert_artifact(
+            self.connection,
+            complete_paper_id,
+            artifact_type="triage_summary",
+            path=Path("data/extractions/arxiv/2607.completev1.summary.json"),
+        )
+
+        rows = recommended_papers_missing_triage(self.connection)
+
+        self.assertEqual([row["paper_id"] for row in rows], [missing_paper_id])
+        self.assertEqual(rows[0]["recommendation_id"], missing_recommendation_id)
 
 
     def test_legacy_scout_import_recovers_selected_recommendations(self):
@@ -562,7 +590,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('srcset="/assets/logo_dark.png"', html)
         self.assertIn('src="/assets/logo_light.png"', html)
         self.assertIn('<strong>72.5</strong>', html)
-        self.assertIn('data-copy-value="https://example.test/review-paper"', html)
+        self.assertIn('data-copy-value="https://example.test/2607.reviewv1"', html)
         self.assertIn("Feedback<textarea name=\"notes\">", html)
         self.assertNotIn("No ChatGPT review yet", html)
         self.assertNotIn("Copy prompt/link", html)
@@ -608,14 +636,14 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("logo_light.png", web.LOGO_ASSETS)
         self.assertIn("logo_dark.png", web.LOGO_ASSETS)
 
-    def _seed_review_recommendation(self) -> tuple[int, int]:
+    def _seed_review_recommendation(self, *, source_id: str = "2607.reviewv1") -> tuple[int, int]:
         paper_id, _ = db.upsert_paper(
             self.connection,
             {
                 "source": "arxiv",
-                "source_id": "2607.reviewv1",
+                "source_id": source_id,
                 "title": "Dense Review Paper",
-                "url": "https://example.test/review-paper",
+                "url": f"https://example.test/{source_id}",
                 "published": "2026-07-30",
                 "abstract": "Applied incident review automation.",
             },

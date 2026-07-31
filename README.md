@@ -220,6 +220,12 @@ python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 
 The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, keeps quick review actions close to each paper, and stores non-empty Feedback boxes as raw V2 feedback blobs with deterministic v1 structured parsing. Apply those feedback rows to the active profile separately with `feedback apply`; applied-feedback tracking prevents reusing the same structured row repeatedly.
 
+Backfill missing triage summaries for already recommended papers without re-scouting:
+
+```bash
+python3 -m paper_agents.cli review-backfill --quick
+```
+
 Install a simple daily 5:00 AM local-time cron job on the Mac mini:
 
 ```bash

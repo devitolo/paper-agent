@@ -108,6 +108,99 @@ class ReviewerAgent:
         )
 
 
+def backfill_missing_triage_summaries(
+    connection,
+    *,
+    config: ReviewerConfig,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    recommendations = recommended_papers_missing_triage(connection, limit=limit)
+    result = ReviewerAgent().run(connection, recommendations=recommendations, config=config)
+    return {
+        "candidate_count": len(recommendations),
+        "reviewed_count": result["reviewed_count"],
+        "cards": result["cards"],
+    }
+
+
+def recommended_papers_missing_triage(connection, *, limit: int | None = None) -> list[dict[str, Any]]:
+    limit_clause = "" if limit is None else "LIMIT ?"
+    params: tuple[Any, ...] = () if limit is None else (max(1, limit),)
+    rows = connection.execute(
+        f"""
+        WITH latest_recommendation AS (
+            SELECT
+                recommendations.id AS recommendation_id,
+                recommendations.paper_id,
+                recommendations.recommendation_order,
+                recommendations.rationale,
+                curator_evaluations.score,
+                curator_evaluations.matched_signals_json,
+                ROW_NUMBER() OVER (
+                    PARTITION BY recommendations.paper_id
+                    ORDER BY recommendations.curator_run_id DESC, recommendations.recommendation_order ASC
+                ) AS row_number
+            FROM recommendations
+            LEFT JOIN curator_evaluations
+              ON curator_evaluations.curator_run_id = recommendations.curator_run_id
+             AND curator_evaluations.paper_id = recommendations.paper_id
+        ), primary_source AS (
+            SELECT
+                paper_id,
+                source,
+                source_id,
+                url,
+                pdf_url,
+                ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id ASC) AS row_number
+            FROM paper_sources
+        )
+        SELECT
+            latest_recommendation.recommendation_id,
+            latest_recommendation.recommendation_order,
+            latest_recommendation.rationale,
+            papers.id,
+            papers.title,
+            papers.published,
+            papers.canonical_key,
+            primary_source.source,
+            primary_source.source_id,
+            primary_source.url,
+            primary_source.pdf_url,
+            latest_recommendation.score,
+            latest_recommendation.matched_signals_json
+        FROM latest_recommendation
+        JOIN papers ON papers.id = latest_recommendation.paper_id
+        LEFT JOIN primary_source ON primary_source.paper_id = papers.id AND primary_source.row_number = 1
+        LEFT JOIN artifacts AS triage
+          ON triage.paper_id = papers.id
+         AND triage.artifact_type = 'triage_summary'
+        WHERE latest_recommendation.row_number = 1
+          AND triage.id IS NULL
+        ORDER BY latest_recommendation.recommendation_id DESC
+        {limit_clause}
+        """,
+        params,
+    ).fetchall()
+    return [
+        {
+            "recommendation_id": row[0],
+            "recommendation_order": row[1],
+            "rationale": row[2],
+            "paper_id": row[3],
+            "title": row[4],
+            "published": row[5],
+            "canonical_key": row[6],
+            "source": row[7],
+            "source_id": row[8],
+            "url": row[9],
+            "pdf_url": row[10],
+            "score": row[11],
+            "matched_signals": db.decode_json(row[12], []),
+        }
+        for row in rows
+    ]
+
+
 def download_pdf_for_recommendation(recommendation: dict[str, Any], pdf_dir: Path, timeout: int = 60) -> Path | None:
     pdf_url = recommendation.get("pdf_url")
     if not pdf_url:
