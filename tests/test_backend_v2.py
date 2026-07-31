@@ -318,6 +318,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<select name="sort"', html)
         self.assertIn('<select name="view"', html)
         self.assertIn('class="action-rail"', html)
+        self.assertIn('<h1 class="brand-title">', html)
+        self.assertIn('srcset="/assets/logo_dark.png"', html)
+        self.assertIn('src="/assets/logo_light.png"', html)
         self.assertIn('<strong>72.5</strong>', html)
         self.assertIn('data-copy-value="https://example.test/review-paper"', html)
         self.assertIn("Feedback<textarea name=\"notes\">", html)
@@ -337,6 +340,12 @@ class BackendV2Tests(unittest.TestCase):
             (paper_id,),
         ).fetchone()
         self.assertEqual(row, ("reviewed", "Dense feedback blob"))
+
+    def test_review_queue_logo_assets_are_checked_in(self):
+        self.assertTrue((web.ASSET_DIR / "logo_light.png").is_file())
+        self.assertTrue((web.ASSET_DIR / "logo_dark.png").is_file())
+        self.assertIn("logo_light.png", web.LOGO_ASSETS)
+        self.assertIn("logo_dark.png", web.LOGO_ASSETS)
 
     def _seed_review_recommendation(self) -> int:
         paper_id, _ = db.upsert_paper(

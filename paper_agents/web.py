@@ -12,6 +12,9 @@ from typing import Any
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, init_db
 
+ASSET_DIR = Path(__file__).with_name("assets")
+LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
+
 FEEDBACK_STATUSES = [
     ("interested", "Interested"),
     ("read_later", "Read later"),
@@ -70,6 +73,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
             if parsed.path.startswith("/artifact/"):
                 self.serve_artifact(db_path, parsed.path.removeprefix("/artifact/"))
                 return
+            if parsed.path.startswith("/assets/"):
+                self.serve_asset(parsed.path.removeprefix("/assets/"))
+                return
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
         def do_POST(self) -> None:
@@ -125,6 +131,25 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
             with artifact_path.open("rb") as handle:
                 self.wfile.write(handle.read())
 
+        def serve_asset(self, asset_name: str) -> None:
+            if asset_name not in LOGO_ASSETS:
+                self.send_error(HTTPStatus.NOT_FOUND, "Asset not found")
+                return
+
+            asset_path = ASSET_DIR / asset_name
+            if not asset_path.exists() or not asset_path.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND, "Asset file not found")
+                return
+
+            content_type = mimetypes.guess_type(str(asset_path))[0] or "application/octet-stream"
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(asset_path.stat().st_size))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.end_headers()
+            with asset_path.open("rb") as handle:
+                self.wfile.write(handle.read())
+
         def respond_html(self, content: str) -> None:
             data = content.encode("utf-8")
             self.send_response(HTTPStatus.OK)
@@ -169,7 +194,7 @@ def render_review_queue(
   <main>
     <header class="topbar">
       <div>
-        <h1>Project Paper Review Queue</h1>
+        <h1 class="brand-title"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Review Queue</span></h1>
         <p>{len(cards)} papers | {escape(selected_label(FILTERS, filter_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}</p>
       </div>
       <form method="get" action="/" class="queue-controls">
@@ -502,6 +527,8 @@ body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", 
 main { max-width: 1180px; margin: 0 auto; padding: 14px; }
 .topbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 12px; align-items: end; border-bottom: 1px solid #d8dee4; padding-bottom: 8px; margin-bottom: 10px; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 650; }
+.brand-title { display: flex; gap: 7px; align-items: center; }
+.brand-logo { display: block; width: 26px; height: 26px; border-radius: 6px; }
 h2 { margin: 0 0 3px; font-size: 15px; font-weight: 650; line-height: 1.25; }
 h3 { margin: 0 0 3px; font-size: 12px; font-weight: 650; color: #57606a; }
 p { margin: 0; }
