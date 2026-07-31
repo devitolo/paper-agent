@@ -74,7 +74,7 @@ Scout source adapters translate a normalized scouting request into source-specif
 
 Curator reads the candidate pool, active profile version, history, and guidance. It stores evaluations for every candidate considered and writes at most three ordered recommendations.
 
-The paper registry stores canonical paper identifiers, alternate sources, workflow state, Scout telemetry, Curator evaluations, recommendation records, artifacts, immutable feedback inputs, parse attempts, structured feedback, profile versions, and active scouting guidance. SQLite is the initial store because the system is single-host and benefits from easy inspection and backup.
+The paper registry stores canonical paper identifiers, alternate sources, workflow state, Scout telemetry, Curator evaluations, recommendation records, artifacts, immutable feedback inputs, parse attempts, structured feedback, profile apply attempts, profile versions, and active scouting guidance. SQLite is the initial store because the system is single-host and benefits from easy inspection, online backup, and restore drills.
 
 Reviewer resolves and fetches open-access PDFs when available, registers PDF artifacts, runs local triage extraction, and stores summary artifacts. File transfer should be deterministic code, not an LLM responsibility.
 

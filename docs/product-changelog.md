@@ -2,6 +2,31 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-07-31
+
+### Operability: backups, apply attempts, and logs
+
+Status: Implemented in commit `0436c19`.
+
+Decision: The Mac mini runtime needs recoverable SQLite backups, visible Gemini profile-apply failures, and bounded cron logs before the feedback loop becomes routine.
+
+Completed behavior:
+
+- `scripts/backup_db.sh` creates timestamped online SQLite backups under `backups/` by default.
+- Backups use `sqlite3.Connection.backup()` and verify with `PRAGMA integrity_check`; failed backups are removed and exit nonzero.
+- `backups/` is ignored by git.
+- `feedback_profile_apply_attempts` records manual and automatic Gemini profile-apply successes and failures.
+- If Review Queue profile auto-apply fails, raw and structured feedback remain saved and unapplied for retry.
+- The Review Queue redirects with a warning banner telling the operator to run `feedback apply` manually when ready.
+- `deploy/project-paper.logrotate` provides weekly compressed rotation for `logs/*.log`.
+- `scripts/tail_logs.sh` tails local Project Paper logs.
+
+Operational guidance:
+
+- Run database backups weekly before the daily recommendation pipeline.
+- Use the apply-attempt table to inspect recent Gemini failures and recover with manual dry-run/apply.
+- Treat restore testing as an operator responsibility before relying on backups for disaster recovery.
+
 ## 2026-07-30
 
 ### Review Queue UI: denser review inbox

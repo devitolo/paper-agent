@@ -61,6 +61,7 @@ The V2 registry stores:
 - `feedback_parse_attempts`: repeatable parse attempts over raw feedback.
 - `structured_feedback`: parsed decisions, observations, scores, and preference signals.
 - `feedback_profile_applications`: applied-feedback tracking that links consumed structured feedback rows to generated profile versions.
+- `feedback_profile_apply_attempts`: durable success/failure records for manual apply, auto-apply, and rebuild attempts.
 - `profile_versions`: append-only long-term preference profile versions.
 - `artifacts`: PDFs, triage summaries, and generated reviews.
 - `feedback`: lightweight UI status rows for the review queue.
@@ -118,7 +119,13 @@ The same V2 storage path is available from the CLI:
 python3 -m paper_agents.cli feedback add --paper-id 12 --status interested --file /tmp/feedback.txt
 ```
 
-The Review Queue UI auto-applies the newly submitted structured feedback row to the active profile through Gemini after the feedback blob is safely stored. Manual profile apply remains available for testing and operations:
+The Review Queue UI auto-applies the newly submitted structured feedback row to the active profile through Gemini after the feedback blob is safely stored. If Gemini/provider/JSON handling fails, the saved feedback is retained, the structured row remains unapplied, and the UI shows a warning banner. Inspect recent attempts:
+
+```bash
+sqlite3 data/paper_agent.db "SELECT id, provider, status, error, profile_version_id, created_at FROM feedback_profile_apply_attempts ORDER BY id DESC LIMIT 10;"
+```
+
+Manual profile apply remains available for recovery, testing, and operations:
 
 ```bash
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
@@ -159,7 +166,7 @@ Back up SQLite weekly with the online backup API and verify the backup with `PRA
 0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
 ```
 
-Backups are written under `backups/` by default and are intentionally ignored by git.
+Backups are written under `backups/` by default, named `paper_agent-YYYYmmdd-HHMMSS.db`, verified after creation, and intentionally ignored by git. For restore, copy a selected backup into place only after checking `PRAGMA integrity_check`; keep restore drills manual until operations mature.
 
 Install weekly compressed log rotation for `logs/*.log`:
 

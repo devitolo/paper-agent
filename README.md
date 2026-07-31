@@ -224,7 +224,21 @@ Manual feedback apply and full profile rebuild remain available for testing and 
 
 ```bash
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
+python3 -m paper_agents.cli feedback apply --provider gemini
 python3 -m paper_agents.cli feedback rebuild-profile --provider gemini --dry-run
+```
+
+If Review Queue feedback saves but Gemini profile auto-apply fails, the UI shows a warning banner. The raw and structured feedback remain saved and unapplied for retry. Inspect recent apply attempts:
+
+```bash
+sqlite3 data/paper_agent.db "SELECT id, provider, status, error, profile_version_id, created_at FROM feedback_profile_apply_attempts ORDER BY id DESC LIMIT 10;"
+```
+
+Then retry manually:
+
+```bash
+python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
+python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
 Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
@@ -235,17 +249,19 @@ Backfill missing triage summaries for already recommended papers without re-scou
 python3 -m paper_agents.cli review-backfill --quick
 ```
 
-Back up the SQLite database with the online backup API:
+Back up the SQLite database with the online backup API. The script writes timestamped files under `backups/` and verifies each backup with `PRAGMA integrity_check`:
 
 ```bash
 scripts/backup_db.sh
 ```
 
-Recommended weekly cron entry on the Mac mini:
+Recommended weekly backup cron entry on the Mac mini:
 
 ```bash
 0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
 ```
+
+Restore expectation: restore from a copied backup only after checking it with `PRAGMA integrity_check`; keep restore drills manual until the operating model matures.
 
 Install log rotation for cron logs:
 

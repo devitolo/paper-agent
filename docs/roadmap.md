@@ -51,9 +51,9 @@ Status: Implemented as V2 backend.
 ## Phase 5: Scheduled Operation
 
 - Add systemd service and timer.
-- Add logs and run reports.
+- Add log tailing and rotation. First logrotate/tail helpers implemented.
 - Resume missed jobs.
-- Add safe failure recovery.
+- Add safe failure recovery. Backup script and feedback apply-attempt tracking implemented for first pass.
 
 ## Phase 6: Feedback-Driven Learning
 
