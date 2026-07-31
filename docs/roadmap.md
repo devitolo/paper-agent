@@ -63,8 +63,12 @@ Next major feature area.
 - Store immutable raw ChatGPT discussion summaries. Implemented for V2 blob ingestion.
 - Allow multiple parse attempts per raw summary. Implemented for deterministic parser v1.
 - Store structured feedback with parser/model provenance. Implemented for deterministic parser v1.
-- Decide how to track which `structured_feedback` rows have already been applied to profile evolution.
-- Create new profile versions from structured feedback.
+- Track which `structured_feedback` rows have already been applied to profile evolution. Implemented for manual apply.
+- Create new profile versions from structured feedback with Gemini. Implemented for manual CLI apply.
+- Auto-run Gemini incremental profile apply after Review Queue feedback submit.
+- Keep manual `feedback apply --dry-run` and `feedback apply` available for testing and operations.
+- Add a manual `feedback rebuild-profile` path that regenerates the compact profile from all structured feedback.
+- Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
 - Improve Curator ranking based on user feedback.
 
 ## Phase 7: Optimization

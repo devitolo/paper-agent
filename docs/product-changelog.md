@@ -99,23 +99,6 @@ Action item:
 
 - Review profile quality after 10 feedback items, or earlier if recommendation quality shows a clear downward trend.
 
-### Feedback profile evolution: auto-apply from review queue
-
-Decision: Once the Gemini profile update loop has been manually tested, Review Queue submissions should automatically apply only the newly submitted structured feedback row to the active profile.
-
-Completed behavior:
-
-- Non-empty Review Queue feedback saves lightweight status, raw feedback, parse attempt, and structured feedback before calling Gemini.
-- Gemini profile apply runs in a separate transaction so provider failure does not lose the saved feedback.
-- Auto-apply targets only the structured feedback row created by that submit, avoiding accidental consumption of older unapplied feedback.
-- Manual `feedback apply` remains available for testing and operations.
-- Add manual `feedback rebuild-profile` for periodic full profile compression from all structured feedback.
-
-Operational guidance:
-
-- Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
-- Keep full rebuild manual until the team has enough feedback history to judge whether it improves recommendation quality.
-
 ### Operating model: split roles
 
 Decision: Project Paper work should be split across durable roles so product direction, implementation, operations, and planning do not blur together.

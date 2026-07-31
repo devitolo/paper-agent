@@ -50,7 +50,7 @@ Still manual in this MVP:
 
 - The user manually copies a recommended paper/link into a ChatGPT Paper Discussion conversation.
 - The user manually copies ChatGPT's final discussion summary back into Project Paper.
-- Feedback profile evolution is currently a separate CLI step; the next fast-loop decision is to auto-apply Gemini profile updates after Review Queue feedback submit.
+- Feedback profile evolution is currently a separate CLI step; the next fast-loop decision is to auto-apply Gemini profile updates after Review Queue feedback submit while keeping manual CLI controls.
 
 Not implemented yet:
 

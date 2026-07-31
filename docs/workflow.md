@@ -118,14 +118,14 @@ The same V2 storage path is available from the CLI:
 python3 -m paper_agents.cli feedback add --paper-id 12 --status interested --file /tmp/feedback.txt
 ```
 
-The Review Queue UI auto-applies the newly submitted structured feedback row to the active profile through Gemini after the feedback blob is safely stored. Manual profile apply remains available for testing and operations:
+Planned fast-loop behavior: the Review Queue UI should auto-apply the newly submitted structured feedback row to the active profile through Gemini after the feedback blob is safely stored. Until that lands, manual profile apply remains the implemented testing and operations path:
 
 ```bash
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
-Full rebuild is a manual compression path that reads all structured feedback and creates a fresh compact profile. Do not run it automatically yet:
+Planned full rebuild behavior: a manual compression path should read all structured feedback and create a fresh compact profile. Do not run it automatically at first:
 
 ```bash
 python3 -m paper_agents.cli feedback rebuild-profile --provider gemini --dry-run
