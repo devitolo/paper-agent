@@ -76,24 +76,25 @@ Operational guidance:
 
 ### Feedback fast loop: auto incremental profile apply
 
-Status: Planned/in progress; manual `feedback apply` exists, but UI submit auto-apply and full rebuild CLI are not yet present in the current checkout.
+Status: Implemented in commit `894593b`.
 
 Decision: Feedback submission should become the fast learning loop. After the user pastes a feedback blob in the Review Queue UI, Project Paper should store raw and structured feedback, then automatically run a Gemini incremental profile update after submit.
 
-Product direction:
+Completed behavior:
 
-- Keep existing `profile_versions` rows; each successful apply creates a new profile version with a `change_summary`.
-- Keep manual CLI dry-run/apply available for testing and operations.
-- Keep the profile compact and human-editable; raw feedback may grow, but the active profile should remain compressed into durable preferences.
-- Use Gemini for low-volume profile synthesis to split provider/token usage.
-- Keep local Qwen focused on high-volume extraction and triage.
-- Keep ChatGPT focused on human paper discussion.
+- Review Queue feedback submit stores raw and structured feedback, then runs Gemini incremental profile apply.
+- Existing `profile_versions` rows remain; each successful apply creates a new profile version with a `change_summary`.
+- Manual CLI dry-run/apply remains available for testing and operations.
+- The profile stays compact and human-editable; raw feedback may grow, but the active profile remains compressed into durable preferences.
+- Gemini is used for low-volume profile synthesis to split provider/token usage.
+- Local Qwen remains focused on high-volume extraction and triage.
+- ChatGPT remains focused on human paper discussion.
 
 Full rebuild concept:
 
 - Incremental apply is like an incremental build: current profile plus new feedback produces the next profile.
 - Full rebuild is like a full build: all structured feedback regenerates a compact profile.
-- Full rebuild should be manual at first, roughly monthly, after about 10 new feedback items, or when recommendation quality obviously drifts.
+- Full rebuild is available as a manual path at first, roughly monthly, after about 10 new feedback items, or when recommendation quality obviously drifts.
 
 Action item:
 
