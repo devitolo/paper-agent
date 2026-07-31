@@ -17,7 +17,7 @@ Status: Partially complete.
 - Register pipeline-discovered papers in SQLite.
 - Extract text from PDFs for local-model triage.
 - Run a local-model benchmark.
-- Record user feedback. Not started.
+- Record user feedback. V2 blob storage complete; profile learning deferred.
 
 ## Phase 2: ArXiv Scout And Curator MVP
 
@@ -59,11 +59,11 @@ Status: Implemented as V2 backend.
 
 Next major feature area.
 
-- Redesign the Review Queue UI around dense paper triage and blob-first feedback capture.
-- Add the product-facing Feedback Agent command/UI flow.
-- Store immutable raw ChatGPT discussion summaries.
-- Allow multiple parse attempts per raw summary.
-- Store structured feedback with parser/model provenance.
+- Redesign the Review Queue UI around dense paper triage and blob-first feedback capture. Implemented for first UI pass.
+- Store immutable raw ChatGPT discussion summaries. Implemented for V2 blob ingestion.
+- Allow multiple parse attempts per raw summary. Implemented for deterministic parser v1.
+- Store structured feedback with parser/model provenance. Implemented for deterministic parser v1.
+- Decide how to track which `structured_feedback` rows have already been applied to profile evolution.
 - Create new profile versions from structured feedback.
 - Improve Curator ranking based on user feedback.
 

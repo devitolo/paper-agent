@@ -280,7 +280,7 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 
 The next work should build on the V2 Scout/Curator backend:
 
-1. Wire profile-version updates from structured feedback.
+1. Decide explicit applied-feedback tracking, then wire profile-version updates from structured feedback.
 2. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
 3. Add provider adapters for ChatGPT/Codex and Gemini behind one source interface.
 4. Add general open-access PDF resolution beyond arXiv.

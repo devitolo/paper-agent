@@ -17,7 +17,7 @@ Scout retrieves configured sources, normalizes candidate records, deduplicates s
 
 Curator reads the Scout candidate pool, the active profile version, historical state, and active guidance. It evaluates every eligible candidate, stores scores and rationales, recommends at most three papers, and writes active guidance for later Scout runs. Re-scout requests are bounded by the workflow cycle's maximum Scout attempt count.
 
-Feedback Agent uses a blob-first product path: the user pastes a final ChatGPT discussion summary into Project Paper, and the shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, and stores deterministic v1 structured feedback. Creating new profile versions from structured feedback is a later step.
+Feedback Agent uses a blob-first product path: the user pastes a final ChatGPT discussion summary into Project Paper, and the shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, and stores deterministic v1 structured feedback. Creating new profile versions from structured feedback is intentionally deferred until the architecture defines explicit applied-feedback tracking.
 
 ## Manual MVP Boundaries
 
@@ -107,7 +107,7 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, and appends lightweight status rows. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions` yet.
+The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, and appends lightweight status rows. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions`, ScoutAgent, or CuratorAgent yet.
 
 The same V2 storage path is available from the CLI:
 

@@ -44,15 +44,33 @@ Product direction:
 
 ### Feedback ingestion: deterministic V2 storage first
 
-Decision: The first V2 feedback ingestion step should capture and deterministically parse blobs without changing future recommendations yet.
+Status: Completed in commit `47c030b`.
 
-Product direction:
+Decision: The first V2 feedback ingestion step captures and deterministically parses blobs without changing future recommendations yet.
 
-- The review queue Feedback box and `feedback add` CLI command should share one ingestion backend.
-- Store exact pasted blobs in `raw_feedback` and dedupe by content hash.
-- Record every deterministic parse in `feedback_parse_attempts`.
-- Store normalized decisions and scores in `structured_feedback`.
-- Do not update `profile_versions`, ScoutAgent, or CuratorAgent from structured feedback until a later architecture step decides how those signals should influence recommendations.
+Completed behavior:
+
+- The review queue Feedback box stores non-empty pasted blobs through the shared V2 ingestion path.
+- Existing lightweight review status storage remains in place.
+- Exact pasted blobs are stored in `raw_feedback` and deduped by content hash.
+- Deterministic parser v1 records `feedback_parse_attempts` and writes normalized rows to `structured_feedback`.
+- Parser v1 recognizes simple lines such as `Decision: keep|maybe|reject|interested|read later|not interested|reviewed` and `Score: 1-5`.
+- `profile_versions`, ScoutAgent, and CuratorAgent do not consume structured feedback yet.
+
+### Feedback profile application tracking: decision pending
+
+Decision pending: Before profile evolution uses `structured_feedback`, Project Paper needs an explicit way to know which feedback rows have already been applied to profile updates.
+
+Why it matters:
+
+- Once FeedbackAgent creates a new `profile_versions` row from user feedback, the system must avoid applying the same structured signal repeatedly in future profile updates.
+- Single-feedback profile updates and batch profile updates may need different provenance shapes.
+
+Options to evaluate later:
+
+- Add a `feedback_profile_applications` table linking `structured_feedback` rows to generated `profile_versions` rows.
+- Add `applied_profile_version_id` and `applied_at` columns to `structured_feedback`.
+- Treat `profile_versions.source_structured_feedback_id` as enough only for single-feedback updates; this is probably insufficient for batch updates.
 
 ### Operating model: split roles
 
