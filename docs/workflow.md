@@ -17,7 +17,7 @@ Scout retrieves configured sources, normalizes candidate records, deduplicates s
 
 Curator reads the Scout candidate pool, the active profile version, historical state, and active guidance. It evaluates every eligible candidate, stores scores and rationales, recommends at most three papers, and writes active guidance for later Scout runs. Re-scout requests are bounded by the workflow cycle's maximum Scout attempt count.
 
-Feedback Agent uses a blob-first product path: the user pastes a final ChatGPT discussion summary into Project Paper, and the shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, and stores deterministic v1 structured feedback. A separate `feedback apply` CLI step uses Gemini to synthesize unapplied structured feedback into a new active profile version after a recommended dry run.
+Feedback Agent uses a blob-first product path: the user pastes a final ChatGPT discussion summary into Project Paper, and the shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, and stores deterministic v1 structured feedback. Today, a separate `feedback apply` CLI step uses Gemini to synthesize unapplied structured feedback into a new active profile version after a recommended dry run. The planned fast loop moves that incremental Gemini apply into the Review Queue submit path while keeping manual CLI dry-run/apply for testing and operations.
 
 ## Manual MVP Boundaries
 
@@ -40,8 +40,9 @@ Do not automate these handoffs until the manual loop is clearly useful.
 8. Reviewer downloads recommended PDFs when available.
 9. Reviewer runs local Ollama extraction and stores triage summary artifacts for recommended PDFs.
 10. The workflow waits for manual ChatGPT discussion.
-11. Later, the Feedback Agent ingests the final discussion summary into raw and structured feedback tables.
-12. The operator runs `feedback apply --dry-run`, reviews Gemini's proposed profile update, then runs `feedback apply` to create a new active profile version.
+11. The Feedback Agent ingests the final discussion summary into raw and structured feedback tables.
+12. Current implementation: the operator runs `feedback apply --dry-run`, reviews Gemini's proposed profile update, then runs `feedback apply` to create a new active profile version.
+13. Planned fast loop: Review Queue feedback submit automatically runs the Gemini incremental profile update after storing raw and structured feedback.
 
 ## SQLite Registry
 
@@ -117,12 +118,24 @@ The same V2 storage path is available from the CLI:
 python3 -m paper_agents.cli feedback add --paper-id 12 --status interested --file /tmp/feedback.txt
 ```
 
-Profile evolution is a separate low-volume Gemini synthesis step. Dry-run first:
+The Review Queue UI auto-applies the newly submitted structured feedback row to the active profile through Gemini after the feedback blob is safely stored. Manual profile apply remains available for testing and operations:
 
 ```bash
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 ```
+
+Full rebuild is a manual compression path that reads all structured feedback and creates a fresh compact profile. Do not run it automatically yet:
+
+```bash
+python3 -m paper_agents.cli feedback rebuild-profile --provider gemini --dry-run
+python3 -m paper_agents.cli feedback rebuild-profile --provider gemini
+```
+
+Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
+
+
+The next workflow step is automatic incremental profile apply after UI feedback submit. A future manual `feedback rebuild-profile` path should regenerate the compact profile from all structured feedback, initially for monthly use, after about 10 new feedback items, or when recommendation quality drifts.
 
 If older recommended papers have PDFs but no triage summaries, backfill those missing summaries without running Scout/Curator again:
 

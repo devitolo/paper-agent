@@ -165,13 +165,18 @@ def apply_feedback_to_profile(
     provider: str = "gemini",
     model: str | None = None,
     limit: int | None = None,
+    structured_feedback_ids: list[int] | None = None,
     dry_run: bool = True,
     provider_fn: ProfileProvider | None = None,
 ) -> dict[str, Any]:
     if provider != "gemini":
         raise ValueError(f"Unsupported feedback profile provider: {provider}")
 
-    feedback_rows = db.unapplied_structured_feedback(connection, limit=limit)
+    feedback_rows = (
+        db.structured_feedback_by_ids(connection, structured_feedback_ids)
+        if structured_feedback_ids is not None
+        else db.unapplied_structured_feedback(connection, limit=limit)
+    )
     feedback_ids = [row["id"] for row in feedback_rows]
     current = db.current_profile_version(connection)
     current_profile = current["profile"] if current else {}
@@ -183,7 +188,7 @@ def apply_feedback_to_profile(
             "model": model,
             "current_profile_version_id": current["id"] if current else None,
             "structured_feedback_ids": [],
-            "message": "No unapplied structured feedback rows found.",
+            "message": "No structured feedback rows found for profile apply.",
         }
 
     payload = {
@@ -217,6 +222,63 @@ def apply_feedback_to_profile(
     return output
 
 
+def rebuild_feedback_profile(
+    connection: sqlite3.Connection,
+    *,
+    provider: str = "gemini",
+    model: str | None = None,
+    limit: int | None = None,
+    dry_run: bool = True,
+    provider_fn: ProfileProvider | None = None,
+) -> dict[str, Any]:
+    if provider != "gemini":
+        raise ValueError(f"Unsupported feedback profile provider: {provider}")
+
+    feedback_rows = db.all_structured_feedback(connection, limit=limit)
+    feedback_ids = [row["id"] for row in feedback_rows]
+    current = db.current_profile_version(connection)
+    current_profile = current["profile"] if current else {}
+    if not feedback_rows:
+        return {
+            "status": "no_feedback",
+            "dry_run": dry_run,
+            "provider": provider,
+            "model": model,
+            "current_profile_version_id": current["id"] if current else None,
+            "structured_feedback_ids": [],
+            "message": "No structured feedback rows found for profile rebuild.",
+        }
+
+    payload = {
+        "mode": "full_rebuild",
+        "current_profile": current_profile,
+        "structured_feedback": feedback_rows,
+    }
+    profile_provider = provider_fn or call_gemini_json
+    proposed = normalize_profile_update(profile_provider(payload, model))
+    output = {
+        "status": "dry_run" if dry_run else "rebuilt",
+        "dry_run": dry_run,
+        "provider": provider,
+        "model": model,
+        "current_profile_version_id": current["id"] if current else None,
+        "structured_feedback_ids": feedback_ids,
+        "proposed_profile": proposed["profile"],
+        "change_summary": proposed["change_summary"],
+    }
+    if dry_run:
+        return output
+
+    profile_version_id = db.create_profile_version(
+        connection,
+        proposed["profile"],
+        source_structured_feedback_id=None,
+        change_summary=proposed["change_summary"],
+    )
+    output["profile_version_id"] = profile_version_id
+    return output
+
+
 def call_gemini_json(payload: dict[str, Any], model: str | None = None) -> dict[str, Any]:
     prompt = build_profile_update_prompt(payload)
     command = ["gemini"]
@@ -236,9 +298,15 @@ def call_gemini_json(payload: dict[str, Any], model: str | None = None) -> dict[
 
 
 def build_profile_update_prompt(payload: dict[str, Any]) -> str:
+    rebuild_note = (
+        "This is a full rebuild: compress all repeated feedback into durable preferences and avoid appending paper-specific details endlessly.\n"
+        if payload.get("mode") == "full_rebuild"
+        else ""
+    )
     return (
         "You are Project Paper's Feedback Agent.\n"
         "Update the user's small, human-editable research preference profile from structured feedback.\n"
+        f"{rebuild_note}"
         "Preserve useful existing preferences unless feedback clearly rejects them.\n"
         "Return valid JSON only in this exact shape:\n"
         "{\n"
@@ -266,7 +334,14 @@ def parse_json_object(value: str) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as error:
-        raise RuntimeError("Provider did not return valid JSON.") from error
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise RuntimeError("Provider did not return valid JSON.") from error
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError as second_error:
+            raise RuntimeError("Provider did not return valid JSON.") from second_error
     if not isinstance(parsed, dict):
         raise RuntimeError("Provider JSON response must be an object.")
     return parsed

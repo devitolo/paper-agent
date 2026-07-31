@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, init_db
-from paper_agents.feedback import ingest_feedback_blob
+from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob
 
 ASSET_DIR = Path(__file__).with_name("assets")
 LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
@@ -521,15 +521,17 @@ def save_feedback(
     feedback_content: str | None = None,
     recommendation_id: int | None = None,
     source: str = "review_queue_ui",
-) -> None:
+    profile_provider_fn: ProfileProvider | None = None,
+) -> dict[str, Any]:
     init_db(db_path)
+    ingest_output = None
     with connect_db(db_path) as connection:
         connection.execute(
             "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
             (paper_id, status, notes),
         )
         if feedback_content and feedback_content.strip():
-            ingest_feedback_blob(
+            ingest_output = ingest_feedback_blob(
                 connection,
                 paper_id=paper_id,
                 recommendation_id=recommendation_id,
@@ -537,6 +539,28 @@ def save_feedback(
                 source=source,
                 status=status,
             )
+    result: dict[str, Any] = {
+        "feedback_saved": True,
+        "feedback_ingested": ingest_output is not None,
+        "ingest": ingest_output,
+        "profile_apply": None,
+        "profile_apply_error": None,
+    }
+    if ingest_output is None:
+        return result
+
+    try:
+        with connect_db(db_path) as connection:
+            result["profile_apply"] = apply_feedback_to_profile(
+                connection,
+                structured_feedback_ids=[ingest_output["structured_feedback_id"]],
+                dry_run=False,
+                provider_fn=profile_provider_fn,
+            )
+    except RuntimeError as error:
+        result["profile_apply_error"] = str(error)
+        print(f"feedback profile auto-apply failed: {error}")
+    return result
 
 
 def decode_json(value: str | None, fallback: Any) -> Any:

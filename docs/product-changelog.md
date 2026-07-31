@@ -74,6 +74,48 @@ Operational guidance:
 - Run dry-run first, inspect the proposed profile and change summary, then apply.
 - Gemini is the first low-volume synthesis provider; other providers can be added behind the same provider boundary later.
 
+### Feedback fast loop: auto incremental profile apply
+
+Status: Planned/in progress; manual `feedback apply` exists, but UI submit auto-apply and full rebuild CLI are not yet present in the current checkout.
+
+Decision: Feedback submission should become the fast learning loop. After the user pastes a feedback blob in the Review Queue UI, Project Paper should store raw and structured feedback, then automatically run a Gemini incremental profile update after submit.
+
+Product direction:
+
+- Keep existing `profile_versions` rows; each successful apply creates a new profile version with a `change_summary`.
+- Keep manual CLI dry-run/apply available for testing and operations.
+- Keep the profile compact and human-editable; raw feedback may grow, but the active profile should remain compressed into durable preferences.
+- Use Gemini for low-volume profile synthesis to split provider/token usage.
+- Keep local Qwen focused on high-volume extraction and triage.
+- Keep ChatGPT focused on human paper discussion.
+
+Full rebuild concept:
+
+- Incremental apply is like an incremental build: current profile plus new feedback produces the next profile.
+- Full rebuild is like a full build: all structured feedback regenerates a compact profile.
+- Full rebuild should be manual at first, roughly monthly, after about 10 new feedback items, or when recommendation quality obviously drifts.
+
+Action item:
+
+- Review profile quality after 10 feedback items, or earlier if recommendation quality shows a clear downward trend.
+
+### Feedback profile evolution: auto-apply from review queue
+
+Decision: Once the Gemini profile update loop has been manually tested, Review Queue submissions should automatically apply only the newly submitted structured feedback row to the active profile.
+
+Completed behavior:
+
+- Non-empty Review Queue feedback saves lightweight status, raw feedback, parse attempt, and structured feedback before calling Gemini.
+- Gemini profile apply runs in a separate transaction so provider failure does not lose the saved feedback.
+- Auto-apply targets only the structured feedback row created by that submit, avoiding accidental consumption of older unapplied feedback.
+- Manual `feedback apply` remains available for testing and operations.
+- Add manual `feedback rebuild-profile` for periodic full profile compression from all structured feedback.
+
+Operational guidance:
+
+- Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
+- Keep full rebuild manual until the team has enough feedback history to judge whether it improves recommendation quality.
+
 ### Operating model: split roles
 
 Decision: Project Paper work should be split across durable roles so product direction, implementation, operations, and planning do not blur together.

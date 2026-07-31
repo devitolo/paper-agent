@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 
 from paper_agents import db
-from paper_agents.feedback import apply_feedback_to_profile, ingest_feedback_blob
-from paper_agents.cli import run_feedback_add, run_feedback_apply
+from paper_agents.feedback import apply_feedback_to_profile, ingest_feedback_blob, rebuild_feedback_profile
+from paper_agents.cli import run_feedback_add, run_feedback_apply, run_feedback_rebuild_profile
 from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.scout import ScoutCandidate
@@ -573,7 +573,84 @@ class BackendV2Tests(unittest.TestCase):
         output = run_feedback_apply(["--db", str(self.db_path), "--dry-run"])
 
         self.assertEqual(output["status"], "no_feedback")
-        self.assertEqual(output["message"], "No unapplied structured feedback rows found.")
+        self.assertEqual(output["message"], "No structured feedback rows found for profile apply.")
+
+    def test_feedback_profile_rebuild_dry_run_reads_all_feedback_without_writes(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        first = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nVery applied.",
+            source="test",
+        )
+        second = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: reject\nScore: 1\nToo synthetic.",
+            source="test",
+        )
+        db.create_feedback_profile_applications(self.connection, [first["structured_feedback_id"]], self.profile_id)
+        calls = []
+
+        def provider(payload, model):
+            calls.append(payload)
+            return {
+                "profile": {
+                    "interests": ["rebuilt profile"],
+                    "positive_signals": ["applied"],
+                    "negative_signals": ["synthetic"],
+                    "notes": "Compressed.",
+                },
+                "change_summary": "Rebuilt from all feedback.",
+            }
+
+        output = rebuild_feedback_profile(self.connection, dry_run=True, provider_fn=provider)
+
+        self.assertEqual(output["status"], "dry_run")
+        self.assertEqual(output["structured_feedback_ids"], [first["structured_feedback_id"], second["structured_feedback_id"]])
+        self.assertEqual([row["id"] for row in calls[0]["structured_feedback"]], [first["structured_feedback_id"], second["structured_feedback_id"]])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 1)
+
+    def test_feedback_profile_rebuild_apply_creates_new_active_profile_without_application_rows(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nVery applied.",
+            source="test",
+        )
+
+        def provider(payload, model):
+            return {
+                "profile": {
+                    "interests": ["rebuilt profile"],
+                    "positive_signals": ["applied"],
+                    "negative_signals": ["synthetic"],
+                    "notes": "Compressed.",
+                },
+                "change_summary": "Full profile rebuild.",
+            }
+
+        output = rebuild_feedback_profile(self.connection, dry_run=False, provider_fn=provider)
+
+        current = db.current_profile_version(self.connection)
+        self.assertEqual(output["status"], "rebuilt")
+        self.assertEqual(current["id"], output["profile_version_id"])
+        self.assertEqual(current["profile"]["interests"], ["rebuilt profile"])
+        self.assertEqual(current["change_summary"], "Full profile rebuild.")
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 0)
+
+    def test_feedback_rebuild_profile_cli_no_feedback_exits_cleanly(self):
+        self.connection.commit()
+
+        output = run_feedback_rebuild_profile(["--db", str(self.db_path), "--dry-run"])
+
+        self.assertEqual(output["status"], "no_feedback")
+        self.assertEqual(output["message"], "No structured feedback rows found for profile rebuild.")
 
     def test_review_queue_renders_dense_feedback_controls(self):
         self._seed_review_recommendation()
@@ -613,7 +690,7 @@ class BackendV2Tests(unittest.TestCase):
         paper_id, recommendation_id = self._seed_review_recommendation()
         self.connection.commit()
 
-        web.save_feedback(
+        result = web.save_feedback(
             self.db_path,
             paper_id=paper_id,
             recommendation_id=recommendation_id,
@@ -621,14 +698,73 @@ class BackendV2Tests(unittest.TestCase):
             notes="Decision: keep\nScore: 4\nGood fit.",
             feedback_content="Decision: keep\nScore: 4\nGood fit.\n",
             source="review_queue_ui",
+            profile_provider_fn=lambda payload, model: {
+                "profile": {
+                    "interests": ["auto-applied"],
+                    "positive_signals": ["good fit"],
+                    "negative_signals": [],
+                    "notes": "Applied from UI.",
+                },
+                "change_summary": "Auto-applied UI feedback.",
+            },
         )
 
         raw = self.connection.execute("SELECT content FROM raw_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
         structured = self.connection.execute("SELECT decision, score FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
         lightweight = self.connection.execute("SELECT status, notes FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()
+        current = db.current_profile_version(self.connection)
         self.assertEqual(raw[0], "Decision: keep\nScore: 4\nGood fit.\n")
         self.assertEqual(structured, ("keep", 4))
         self.assertEqual(lightweight, ("interested", "Decision: keep\nScore: 4\nGood fit."))
+        self.assertEqual(result["profile_apply"]["status"], "applied")
+        self.assertEqual(current["profile"]["interests"], ["auto-applied"])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 1)
+
+    def test_review_queue_feedback_save_preserves_feedback_when_profile_apply_fails(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        self.connection.commit()
+
+        def provider(payload, model):
+            raise RuntimeError("provider unavailable")
+
+        result = web.save_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            status="interested",
+            notes="Decision: keep\nScore: 4\nGood fit.",
+            feedback_content="Decision: keep\nScore: 4\nGood fit.\n",
+            source="review_queue_ui",
+            profile_provider_fn=provider,
+        )
+
+        self.assertEqual(result["profile_apply_error"], "provider unavailable")
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM raw_feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 0)
+
+    def test_review_queue_empty_feedback_does_not_apply_profile(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        self.connection.commit()
+        calls = []
+
+        result = web.save_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            status="reviewed",
+            notes="",
+            feedback_content="",
+            profile_provider_fn=lambda payload, model: calls.append(payload),
+        )
+
+        self.assertTrue(result["feedback_saved"])
+        self.assertFalse(result["feedback_ingested"])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM structured_feedback").fetchone()[0], 0)
 
     def test_review_queue_logo_assets_are_checked_in(self):
         self.assertTrue((web.ASSET_DIR / "logo_light.png").is_file())

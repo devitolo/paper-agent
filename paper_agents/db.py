@@ -735,6 +735,73 @@ def unapplied_structured_feedback(connection: sqlite3.Connection, limit: int | N
     ]
 
 
+def structured_feedback_by_ids(connection: sqlite3.Connection, structured_feedback_ids: list[int]) -> list[dict[str, Any]]:
+    if not structured_feedback_ids:
+        return []
+    placeholders = ",".join("?" for _ in structured_feedback_ids)
+    rows = connection.execute(
+        f"""
+        SELECT
+            id,
+            paper_id,
+            decision,
+            score,
+            observations_json,
+            preference_signals_json,
+            created_at
+        FROM structured_feedback
+        WHERE id IN ({placeholders})
+        ORDER BY id ASC
+        """,
+        tuple(structured_feedback_ids),
+    ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "paper_id": row[1],
+            "decision": row[2],
+            "score": row[3],
+            "observations": decode_json(row[4], []),
+            "preference_signals": decode_json(row[5], []),
+            "created_at": row[6],
+        }
+        for row in rows
+    ]
+
+
+def all_structured_feedback(connection: sqlite3.Connection, limit: int | None = None) -> list[dict[str, Any]]:
+    limit_clause = "" if limit is None else "LIMIT ?"
+    params: tuple[Any, ...] = () if limit is None else (max(1, limit),)
+    rows = connection.execute(
+        f"""
+        SELECT
+            id,
+            paper_id,
+            decision,
+            score,
+            observations_json,
+            preference_signals_json,
+            created_at
+        FROM structured_feedback
+        ORDER BY id ASC
+        {limit_clause}
+        """,
+        params,
+    ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "paper_id": row[1],
+            "decision": row[2],
+            "score": row[3],
+            "observations": decode_json(row[4], []),
+            "preference_signals": decode_json(row[5], []),
+            "created_at": row[6],
+        }
+        for row in rows
+    ]
+
+
 def create_feedback_profile_applications(
     connection: sqlite3.Connection,
     structured_feedback_ids: list[int],

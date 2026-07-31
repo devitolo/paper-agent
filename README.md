@@ -50,7 +50,7 @@ Still manual in this MVP:
 
 - The user manually copies a recommended paper/link into a ChatGPT Paper Discussion conversation.
 - The user manually copies ChatGPT's final discussion summary back into Project Paper.
-- Feedback profile evolution is a separate CLI step; the UI does not update profile versions directly.
+- Feedback profile evolution is currently a separate CLI step; the next fast-loop decision is to auto-apply Gemini profile updates after Review Queue feedback submit.
 
 Not implemented yet:
 
@@ -218,7 +218,16 @@ Run the local review queue UI:
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, keeps quick review actions close to each paper, and stores non-empty Feedback boxes as raw V2 feedback blobs with deterministic v1 structured parsing. Apply those feedback rows to the active profile separately with `feedback apply`; applied-feedback tracking prevents reusing the same structured row repeatedly.
+The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, keeps quick review actions close to each paper, stores non-empty Feedback boxes as raw V2 feedback blobs with deterministic v1 structured parsing, and auto-applies the newly submitted structured feedback to the active profile through Gemini. Applied-feedback tracking prevents reusing the same structured row repeatedly.
+
+Manual feedback apply and full profile rebuild remain available for testing and operations:
+
+```bash
+python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
+python3 -m paper_agents.cli feedback rebuild-profile --provider gemini --dry-run
+```
+
+Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
 
 Backfill missing triage summaries for already recommended papers without re-scouting:
 
@@ -293,12 +302,12 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 
 The next work should build on the V2 Scout/Curator backend:
 
-1. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
-2. Add provider adapters beyond Gemini for profile synthesis.
-3. Decide whether `feedback apply` should become scheduled, remain manual, or gain an operator approval UI.
-4. Add general open-access PDF resolution beyond arXiv.
-5. Add systemd scheduling, logs, and run reports.
-6. Record benchmark runs and generated reports.
+1. Auto-apply Gemini incremental profile updates after Review Queue feedback submit while keeping manual dry-run/apply for testing and operations.
+2. Add a manual full rebuild path that regenerates the compact profile from all structured feedback.
+3. Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
+4. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
+5. Add provider adapters beyond Gemini for profile synthesis.
+6. Add general open-access PDF resolution beyond arXiv.
 
 See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
 
