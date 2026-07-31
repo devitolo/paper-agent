@@ -699,6 +699,60 @@ def create_structured_feedback(
     return int(cursor.lastrowid)
 
 
+def unapplied_structured_feedback(connection: sqlite3.Connection, limit: int | None = None) -> list[dict[str, Any]]:
+    limit_clause = "" if limit is None else "LIMIT ?"
+    params: tuple[Any, ...] = () if limit is None else (max(1, limit),)
+    rows = connection.execute(
+        f"""
+        SELECT
+            structured_feedback.id,
+            structured_feedback.paper_id,
+            structured_feedback.decision,
+            structured_feedback.score,
+            structured_feedback.observations_json,
+            structured_feedback.preference_signals_json,
+            structured_feedback.created_at
+        FROM structured_feedback
+        LEFT JOIN feedback_profile_applications
+          ON feedback_profile_applications.structured_feedback_id = structured_feedback.id
+        WHERE feedback_profile_applications.id IS NULL
+        ORDER BY structured_feedback.id ASC
+        {limit_clause}
+        """,
+        params,
+    ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "paper_id": row[1],
+            "decision": row[2],
+            "score": row[3],
+            "observations": decode_json(row[4], []),
+            "preference_signals": decode_json(row[5], []),
+            "created_at": row[6],
+        }
+        for row in rows
+    ]
+
+
+def create_feedback_profile_applications(
+    connection: sqlite3.Connection,
+    structured_feedback_ids: list[int],
+    profile_version_id: int,
+) -> list[int]:
+    application_ids = []
+    for structured_feedback_id in structured_feedback_ids:
+        cursor = connection.execute(
+            """
+            INSERT INTO feedback_profile_applications (structured_feedback_id, profile_version_id)
+            VALUES (?, ?)
+            """,
+            (structured_feedback_id, profile_version_id),
+        )
+        application_ids.append(int(cursor.lastrowid))
+    return application_ids
+
+
 def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     init_db(db_path)
     tracked = [
@@ -714,6 +768,7 @@ def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
         "raw_feedback",
         "feedback_parse_attempts",
         "structured_feedback",
+        "feedback_profile_applications",
         "profile_versions",
         "feedback",
     ]

@@ -19,7 +19,7 @@ from paper_agents.db import (
     reset_db,
     seen_source_ids,
 )
-from paper_agents.feedback import FeedbackAgent, ingest_feedback_blob
+from paper_agents.feedback import FeedbackAgent, apply_feedback_to_profile, ingest_feedback_blob
 from paper_agents.local_extract import (
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
@@ -197,7 +197,11 @@ def main() -> None:
     review_parser.add_argument("--timeout", type=int, default=240)
 
     feedback_parser = subparsers.add_parser("feedback", help="Update preferences from feedback")
-    feedback_parser.add_argument("feedback_args", nargs=argparse.REMAINDER, help='Legacy text, or: add --paper-id ID [--status STATUS] [--file PATH] [text]')
+    feedback_parser.add_argument(
+        "feedback_args",
+        nargs=argparse.REMAINDER,
+        help="Legacy text, or: add/apply feedback subcommands",
+    )
 
     extract_parser = subparsers.add_parser("extract", help="Extract paper metadata with local Ollama")
     extract_parser.add_argument("source", type=Path, help="PDF or text file to extract")
@@ -353,6 +357,10 @@ def main() -> None:
             output = run_feedback_add(args.feedback_args[1:])
             print_section("Feedback ingested", output)
             return
+        if args.feedback_args[0] == "apply":
+            output = run_feedback_apply(args.feedback_args[1:])
+            print_section("Feedback profile apply", output)
+            return
 
         require_openai_api_key()
         profile = load_profile(args.profile)
@@ -429,6 +437,26 @@ def run_feedback_add(argv: list[str]) -> dict[str, Any]:
             content=content,
             source="cli_feedback_add",
             status=args.status,
+        )
+
+
+def run_feedback_apply(argv: list[str]) -> dict[str, Any]:
+    parser = argparse.ArgumentParser(prog="paper_agents.cli feedback apply")
+    parser.add_argument("--provider", choices=["gemini"], default="gemini")
+    parser.add_argument("--model")
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    args = parser.parse_args(argv)
+
+    init_db(args.db)
+    with connect_db(args.db) as connection:
+        return apply_feedback_to_profile(
+            connection,
+            provider=args.provider,
+            model=args.model,
+            limit=args.limit,
+            dry_run=args.dry_run,
         )
 
 

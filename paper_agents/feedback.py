@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 from datetime import datetime, timezone
 import sqlite3
-from typing import Any
+from typing import Any, Callable
 
 from paper_agents import db
 from paper_agents.openai_helpers import call_openai_json
@@ -32,6 +34,7 @@ STATUS_DECISIONS = {
 
 DECISION_RE = re.compile(r"^\s*decision\s*:\s*(keep|maybe|reject|interested|read\s+later|not\s+interested|reviewed)\s*$", re.IGNORECASE)
 SCORE_RE = re.compile(r"^\s*score\s*:\s*([1-5])\s*$", re.IGNORECASE)
+ProfileProvider = Callable[[dict[str, Any], str | None], dict[str, Any]]
 
 
 class FeedbackAgent:
@@ -154,3 +157,138 @@ def parse_feedback_blob(content: str, *, status: str | None = None) -> dict[str,
 def normalize_decision(value: str) -> str | None:
     key = " ".join(value.strip().lower().replace("_", " ").split())
     return DECISION_ALIASES.get(key)
+
+
+def apply_feedback_to_profile(
+    connection: sqlite3.Connection,
+    *,
+    provider: str = "gemini",
+    model: str | None = None,
+    limit: int | None = None,
+    dry_run: bool = True,
+    provider_fn: ProfileProvider | None = None,
+) -> dict[str, Any]:
+    if provider != "gemini":
+        raise ValueError(f"Unsupported feedback profile provider: {provider}")
+
+    feedback_rows = db.unapplied_structured_feedback(connection, limit=limit)
+    feedback_ids = [row["id"] for row in feedback_rows]
+    current = db.current_profile_version(connection)
+    current_profile = current["profile"] if current else {}
+    if not feedback_rows:
+        return {
+            "status": "no_feedback",
+            "dry_run": dry_run,
+            "provider": provider,
+            "model": model,
+            "current_profile_version_id": current["id"] if current else None,
+            "structured_feedback_ids": [],
+            "message": "No unapplied structured feedback rows found.",
+        }
+
+    payload = {
+        "current_profile": current_profile,
+        "structured_feedback": feedback_rows,
+    }
+    profile_provider = provider_fn or call_gemini_json
+    proposed = normalize_profile_update(profile_provider(payload, model))
+    output = {
+        "status": "dry_run" if dry_run else "applied",
+        "dry_run": dry_run,
+        "provider": provider,
+        "model": model,
+        "current_profile_version_id": current["id"] if current else None,
+        "structured_feedback_ids": feedback_ids,
+        "proposed_profile": proposed["profile"],
+        "change_summary": proposed["change_summary"],
+    }
+    if dry_run:
+        return output
+
+    profile_version_id = db.create_profile_version(
+        connection,
+        proposed["profile"],
+        source_structured_feedback_id=feedback_ids[0],
+        change_summary=proposed["change_summary"],
+    )
+    application_ids = db.create_feedback_profile_applications(connection, feedback_ids, profile_version_id)
+    output["profile_version_id"] = profile_version_id
+    output["feedback_profile_application_ids"] = application_ids
+    return output
+
+
+def call_gemini_json(payload: dict[str, Any], model: str | None = None) -> dict[str, Any]:
+    prompt = build_profile_update_prompt(payload)
+    command = ["gemini"]
+    if model:
+        command.extend(["--model", model])
+    command.extend(["-p", prompt])
+    try:
+        result = subprocess.run(command, text=True, capture_output=True, check=True, timeout=120)
+    except FileNotFoundError as error:
+        raise RuntimeError("Gemini CLI was not found. Install and authenticate `gemini`, then retry.") from error
+    except subprocess.CalledProcessError as error:
+        details = error.stderr.strip() or error.stdout.strip()
+        raise RuntimeError(f"Gemini CLI failed: {details}") from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Gemini CLI timed out while updating the feedback profile.") from error
+    return parse_json_object(result.stdout)
+
+
+def build_profile_update_prompt(payload: dict[str, Any]) -> str:
+    return (
+        "You are Project Paper's Feedback Agent.\n"
+        "Update the user's small, human-editable research preference profile from structured feedback.\n"
+        "Preserve useful existing preferences unless feedback clearly rejects them.\n"
+        "Return valid JSON only in this exact shape:\n"
+        "{\n"
+        '  "profile": {\n'
+        '    "interests": ["..."],\n'
+        '    "positive_signals": ["..."],\n'
+        '    "negative_signals": ["..."],\n'
+        '    "notes": "..."\n'
+        "  },\n"
+        '  "change_summary": "short human-readable summary"\n'
+        "}\n\n"
+        f"Input:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
+
+
+def parse_json_object(value: str) -> dict[str, Any]:
+    text = value.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Provider did not return valid JSON.") from error
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Provider JSON response must be an object.")
+    return parsed
+
+
+def normalize_profile_update(value: dict[str, Any]) -> dict[str, Any]:
+    profile = value.get("profile")
+    if not isinstance(profile, dict):
+        raise RuntimeError("Provider JSON response must include a profile object.")
+    normalized_profile = {
+        "interests": normalize_string_list(profile.get("interests")),
+        "positive_signals": normalize_string_list(profile.get("positive_signals")),
+        "negative_signals": normalize_string_list(profile.get("negative_signals")),
+        "notes": str(profile.get("notes") or "").strip(),
+    }
+    change_summary = str(value.get("change_summary") or "").strip()
+    if not change_summary:
+        change_summary = "Updated profile from structured feedback."
+    return {"profile": normalized_profile, "change_summary": change_summary}
+
+
+def normalize_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]

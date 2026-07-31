@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 
 from paper_agents import db
-from paper_agents.feedback import ingest_feedback_blob
-from paper_agents.cli import run_feedback_add
+from paper_agents.feedback import apply_feedback_to_profile, ingest_feedback_blob
+from paper_agents.cli import run_feedback_add, run_feedback_apply
 from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.scout import ScoutCandidate
@@ -420,6 +420,132 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(structured, ("reject", 1))
         self.assertEqual(raw[0], "Decision: reject\nScore: 1\nNot useful.\n")
+
+    def test_unapplied_structured_feedback_excludes_applied_rows(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        first = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nUseful.",
+            source="test",
+        )
+        second = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: maybe\nScore: 3\nMaybe useful.",
+            source="test",
+        )
+
+        rows = db.unapplied_structured_feedback(self.connection)
+        self.assertEqual([row["id"] for row in rows], [first["structured_feedback_id"], second["structured_feedback_id"]])
+
+        db.create_feedback_profile_applications(self.connection, [first["structured_feedback_id"]], self.profile_id)
+        rows = db.unapplied_structured_feedback(self.connection)
+        self.assertEqual([row["id"] for row in rows], [second["structured_feedback_id"]])
+
+    def test_feedback_profile_dry_run_does_not_write_profile_or_applications(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        feedback = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nVery applied.",
+            source="test",
+        )
+        calls = []
+
+        def provider(payload, model):
+            calls.append((payload, model))
+            return {
+                "profile": {
+                    "interests": ["incident management"],
+                    "positive_signals": ["real incidents"],
+                    "negative_signals": ["toy benchmarks"],
+                    "notes": "Prefers applied work.",
+                },
+                "change_summary": "Added applied incident preference.",
+            }
+
+        output = apply_feedback_to_profile(self.connection, dry_run=True, model="gemini-test", provider_fn=provider)
+
+        self.assertEqual(output["status"], "dry_run")
+        self.assertEqual(output["structured_feedback_ids"], [feedback["structured_feedback_id"]])
+        self.assertEqual(output["change_summary"], "Added applied incident preference.")
+        self.assertEqual(calls[0][1], "gemini-test")
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 0)
+
+    def test_feedback_profile_apply_creates_profile_version_and_application_rows(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        first = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nVery applied.",
+            source="test",
+        )
+        second = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: reject\nScore: 1\nToo synthetic.",
+            source="test",
+        )
+
+        def provider(payload, model):
+            self.assertEqual([row["id"] for row in payload["structured_feedback"]], [first["structured_feedback_id"], second["structured_feedback_id"]])
+            return {
+                "profile": {
+                    "interests": ["production incidents"],
+                    "positive_signals": ["field evidence"],
+                    "negative_signals": ["synthetic-only evaluation"],
+                    "notes": "Updated from two feedback rows.",
+                },
+                "change_summary": "Prefer field evidence and reject synthetic-only work.",
+            }
+
+        output = apply_feedback_to_profile(self.connection, dry_run=False, provider_fn=provider)
+
+        self.assertEqual(output["status"], "applied")
+        self.assertEqual(output["structured_feedback_ids"], [first["structured_feedback_id"], second["structured_feedback_id"]])
+        current = db.current_profile_version(self.connection)
+        applications = self.connection.execute(
+            "SELECT structured_feedback_id, profile_version_id FROM feedback_profile_applications ORDER BY structured_feedback_id"
+        ).fetchall()
+        self.assertEqual(current["id"], output["profile_version_id"])
+        self.assertEqual(current["profile"]["interests"], ["production incidents"])
+        self.assertEqual(current["change_summary"], "Prefer field evidence and reject synthetic-only work.")
+        self.assertEqual(
+            applications,
+            [
+                (first["structured_feedback_id"], output["profile_version_id"]),
+                (second["structured_feedback_id"], output["profile_version_id"]),
+            ],
+        )
+        self.assertEqual(db.unapplied_structured_feedback(self.connection), [])
+
+    def test_feedback_profile_no_feedback_does_not_call_provider(self):
+        calls = []
+
+        def provider(payload, model):
+            calls.append(payload)
+            return {"profile": {}, "change_summary": "Should not happen"}
+
+        output = apply_feedback_to_profile(self.connection, dry_run=True, provider_fn=provider)
+
+        self.assertEqual(output["status"], "no_feedback")
+        self.assertEqual(output["structured_feedback_ids"], [])
+        self.assertEqual(calls, [])
+
+    def test_feedback_apply_cli_no_feedback_exits_cleanly(self):
+        self.connection.commit()
+
+        output = run_feedback_apply(["--db", str(self.db_path), "--dry-run"])
+
+        self.assertEqual(output["status"], "no_feedback")
+        self.assertEqual(output["message"], "No unapplied structured feedback rows found.")
 
     def test_review_queue_renders_dense_feedback_controls(self):
         self._seed_review_recommendation()

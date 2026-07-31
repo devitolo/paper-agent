@@ -17,7 +17,7 @@ Scout retrieves configured sources, normalizes candidate records, deduplicates s
 
 Curator reads the Scout candidate pool, the active profile version, historical state, and active guidance. It evaluates every eligible candidate, stores scores and rationales, recommends at most three papers, and writes active guidance for later Scout runs. Re-scout requests are bounded by the workflow cycle's maximum Scout attempt count.
 
-Feedback Agent uses a blob-first product path: the user pastes a final ChatGPT discussion summary into Project Paper, and the shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, and stores deterministic v1 structured feedback. Creating new profile versions from structured feedback is intentionally deferred until the architecture defines explicit applied-feedback tracking.
+Feedback Agent uses a blob-first product path: the user pastes a final ChatGPT discussion summary into Project Paper, and the shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, and stores deterministic v1 structured feedback. A separate `feedback apply` CLI step uses Gemini to synthesize unapplied structured feedback into a new active profile version after a recommended dry run.
 
 ## Manual MVP Boundaries
 
@@ -41,6 +41,7 @@ Do not automate these handoffs until the manual loop is clearly useful.
 9. Reviewer runs local Ollama extraction and stores triage summary artifacts for recommended PDFs.
 10. The workflow waits for manual ChatGPT discussion.
 11. Later, the Feedback Agent ingests the final discussion summary into raw and structured feedback tables.
+12. The operator runs `feedback apply --dry-run`, reviews Gemini's proposed profile update, then runs `feedback apply` to create a new active profile version.
 
 ## SQLite Registry
 
@@ -58,6 +59,7 @@ The V2 registry stores:
 - `raw_feedback`: immutable manually submitted discussion summaries, deduped by content hash.
 - `feedback_parse_attempts`: repeatable parse attempts over raw feedback.
 - `structured_feedback`: parsed decisions, observations, scores, and preference signals.
+- `feedback_profile_applications`: applied-feedback tracking that links consumed structured feedback rows to generated profile versions.
 - `profile_versions`: append-only long-term preference profile versions.
 - `artifacts`: PDFs, triage summaries, and generated reviews.
 - `feedback`: lightweight UI status rows for the review queue.
@@ -107,12 +109,19 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, and appends lightweight status rows. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions`, ScoutAgent, or CuratorAgent yet.
+The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, and appends lightweight status rows. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions`, ScoutAgent, or CuratorAgent directly.
 
 The same V2 storage path is available from the CLI:
 
 ```bash
 python3 -m paper_agents.cli feedback add --paper-id 12 --status interested --file /tmp/feedback.txt
+```
+
+Profile evolution is a separate low-volume Gemini synthesis step. Dry-run first:
+
+```bash
+python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
+python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
 ## Nightly Cron

@@ -57,20 +57,22 @@ Completed behavior:
 - Parser v1 recognizes simple lines such as `Decision: keep|maybe|reject|interested|read later|not interested|reviewed` and `Score: 1-5`.
 - `profile_versions`, ScoutAgent, and CuratorAgent do not consume structured feedback yet.
 
-### Feedback profile application tracking: decision pending
+### Feedback profile evolution: Gemini apply step
 
-Decision pending: Before profile evolution uses `structured_feedback`, Project Paper needs an explicit way to know which feedback rows have already been applied to profile updates.
+Decision: Profile evolution from structured feedback should be explicit, reviewable, and tracked.
 
-Why it matters:
+Completed behavior:
 
-- Once FeedbackAgent creates a new `profile_versions` row from user feedback, the system must avoid applying the same structured signal repeatedly in future profile updates.
-- Single-feedback profile updates and batch profile updates may need different provenance shapes.
+- Add `feedback_profile_applications` to link consumed `structured_feedback` rows to generated `profile_versions` rows.
+- Add `feedback apply --provider gemini --dry-run` so the operator can preview Gemini's proposed profile update.
+- Add `feedback apply --provider gemini` to create a new active profile version and mark the consumed structured feedback rows as applied.
+- Keep profile evolution out of the review queue POST path.
+- Keep ScoutAgent and CuratorAgent reading active `profile_versions` rather than consuming `structured_feedback` directly.
 
-Options to evaluate later:
+Operational guidance:
 
-- Add a `feedback_profile_applications` table linking `structured_feedback` rows to generated `profile_versions` rows.
-- Add `applied_profile_version_id` and `applied_at` columns to `structured_feedback`.
-- Treat `profile_versions.source_structured_feedback_id` as enough only for single-feedback updates; this is probably insufficient for batch updates.
+- Run dry-run first, inspect the proposed profile and change summary, then apply.
+- Gemini is the first low-volume synthesis provider; other providers can be added behind the same provider boundary later.
 
 ### Operating model: split roles
 

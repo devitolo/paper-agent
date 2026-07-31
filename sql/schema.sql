@@ -213,6 +213,15 @@ CREATE TABLE IF NOT EXISTS profile_versions (
 
 CREATE INDEX IF NOT EXISTS idx_profile_versions_active ON profile_versions (active, version);
 
+CREATE TABLE IF NOT EXISTS feedback_profile_applications (
+    id INTEGER PRIMARY KEY,
+    structured_feedback_id INTEGER NOT NULL UNIQUE REFERENCES structured_feedback(id) ON DELETE CASCADE,
+    profile_version_id INTEGER NOT NULL REFERENCES profile_versions(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_profile_applications_profile ON feedback_profile_applications (profile_version_id);
+
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY,
     paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
