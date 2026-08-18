@@ -150,7 +150,7 @@ python3 -m paper_agents.cli scout-daily
 
 Scout uses arXiv by default, including for nightly cron. Semantic Scholar and OpenAlex are opt-in source adapters selected with `--source semantic_scholar` or `--source openalex`. Scout stores source candidate metadata in `data/scout/YYYY-MM-DD.jsonl` without preference scores, recommendation ranks, or final selection decisions. Ranking and recommendations belong to Curator inside `pipeline-daily`.
 
-Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage. Non-arXiv sources are opt-in and are not part of the nightly cron default yet.
+Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage. OpenAlex remains outside the daily arXiv cron path; run it with the separate weekly rotating script so stable search results do not exhaust the same tiny topic pool every day.
 
 Default Scout topics cover practical operations clusters such as AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, program repair, software maintenance, SRE, cloud operations, and production engineering. Curator also penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, power grid, smart grid, and transportation incidents.
 
@@ -315,6 +315,18 @@ Install a simple daily 5:00 AM local-time cron job on the Mac mini:
 
 ```bash
 (crontab -l 2>/dev/null; echo "0 5 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1") | crontab -
+```
+
+Add a separate weekly OpenAlex discovery job. It rotates across practical operations topics, fetches deeper than a manual smoke test, and caps Scout attempts at one because OpenAlex search is stable for repeated queries:
+
+```bash
+(crontab -l 2>/dev/null; echo "30 6 * * 1 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1") | crontab -
+```
+
+Override the weekly topic for a one-off run:
+
+```bash
+PAPER_AGENT_OPENALEX_TOPIC="AIOps root cause analysis cloud incidents" scripts/openalex_pipeline.sh
 ```
 
 

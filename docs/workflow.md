@@ -109,7 +109,7 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 
 `--keep` is capped at three recommendations. `--max-scout-attempts` controls the bounded re-scout loop.
 
-arXiv remains the default Scout source and the nightly cron source. Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. Non-arXiv sources are opt-in and are not part of the nightly cron default yet.
+arXiv remains the default Scout source and the daily cron source. Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. OpenAlex is available through a separate weekly rotating script rather than the daily arXiv path.
 
 Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
 
@@ -168,6 +168,18 @@ The current Mac mini setup uses cron at 5:00 AM local time:
 
 ```bash
 (crontab -l 2>/dev/null; echo "0 5 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1") | crontab -
+```
+
+OpenAlex search results are more stable for a given query than arXiv, so run OpenAlex separately with rotating topics, deeper fetches, and one Scout attempt:
+
+```bash
+(crontab -l 2>/dev/null; echo "30 6 * * 1 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1") | crontab -
+```
+
+The script rotates across practical operations topics. Override one run with:
+
+```bash
+PAPER_AGENT_OPENALEX_TOPIC="AIOps root cause analysis cloud incidents" scripts/openalex_pipeline.sh
 ```
 
 systemd timers remain the preferred later option once logging and failure recovery are more mature.
