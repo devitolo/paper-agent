@@ -164,17 +164,14 @@ python3 -m paper_agents.cli review-backfill --quick
 
 ## Nightly Cron
 
-The current Mac mini setup uses cron at 5:00 AM local time:
+The current intended Mac mini pipeline crontab has exactly two pipeline jobs: daily arXiv at 5:00 AM and weekly Monday OpenAlex at 6:30 AM via the rotating topic script.
 
-```bash
-(crontab -l 2>/dev/null; echo "0 5 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1") | crontab -
+```cron
+0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+30 6 * * 1 cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
 ```
 
-OpenAlex search results are more stable for a given query than arXiv, so run OpenAlex separately with rotating topics, deeper fetches, and one Scout attempt:
-
-```bash
-(crontab -l 2>/dev/null; echo "30 6 * * 1 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1") | crontab -
-```
+The old one-off Sunday OpenAlex cron that called `pipeline-daily --source openalex` directly has been removed. Do not document or reinstall it; `scripts/openalex_pipeline.sh` is the supported OpenAlex cron entry.
 
 The script rotates across practical operations topics. Override one run with:
 

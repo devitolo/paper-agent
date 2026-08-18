@@ -311,17 +311,14 @@ Tail local Project Paper logs:
 scripts/tail_logs.sh
 ```
 
-Install a simple daily 5:00 AM local-time cron job on the Mac mini:
+The current intended Mac mini pipeline crontab has two entries: daily arXiv at 5:00 AM and weekly Monday OpenAlex at 6:30 AM via the rotating topic script.
 
-```bash
-(crontab -l 2>/dev/null; echo "0 5 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1") | crontab -
+```cron
+0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+30 6 * * 1 cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
 ```
 
-Add a separate weekly OpenAlex discovery job. It rotates across practical operations topics, fetches deeper than a manual smoke test, and caps Scout attempts at one because OpenAlex search is stable for repeated queries:
-
-```bash
-(crontab -l 2>/dev/null; echo "30 6 * * 1 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1") | crontab -
-```
+Do not install the old one-off direct `pipeline-daily --source openalex ...` cron line; it is superseded by `scripts/openalex_pipeline.sh`, which rotates practical operations topics, fetches 30, keeps 2, and caps Scout attempts at one because OpenAlex search is stable for repeated queries.
 
 Override the weekly topic for a one-off run:
 
