@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import io
 import sqlite3
 import tempfile
 import unittest
+import urllib.error
+import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +21,7 @@ from paper_agents.scout import DEFAULT_SCOUT_TOPICS
 from paper_agents.scout import OpenAlexSource
 from paper_agents.scout import SemanticScholarSource
 from paper_agents.scout import ScoutCandidate
+from paper_agents.scout import openalex_http_error_message
 from paper_agents.scout import openalex_work_to_candidate
 from paper_agents.scout import semantic_scholar_paper_to_candidate
 from paper_agents.scout import rank_candidates
@@ -298,8 +302,28 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(candidates[0].pdf_url, "https://example.test/openalex.pdf")
         self.assertEqual(candidates[0].metadata["query_topic"], "AIOps")
         self.assertIn("api.openalex.org", captured["url"])
-        self.assertIn("search=AIOps", captured["url"])
+        parsed = urllib.parse.urlparse(captured["url"])
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(query["search"], ["AIOps"])
+        self.assertEqual(query["per_page"], ["3"])
+        self.assertEqual(query["sort"], ["-publication_date"])
+        self.assertIn("from_publication_date:", query["filter"][0])
+        self.assertNotIn("select", query)
         self.assertEqual(captured["timeout"], 14)
+
+    def test_openalex_http_error_message_includes_response_body(self):
+        error = urllib.error.HTTPError(
+            "https://api.openalex.org/works",
+            400,
+            "Bad Request",
+            {},
+            io.BytesIO(b'{"message":"Invalid query parameter: select"}'),
+        )
+
+        try:
+            self.assertIn("Invalid query parameter", openalex_http_error_message(error))
+        finally:
+            error.close()
 
     def test_scout_daily_cli_selects_openalex_source(self):
         captured = {}

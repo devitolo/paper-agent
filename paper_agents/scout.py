@@ -414,25 +414,6 @@ class OpenAlexSource:
                 "per_page": max_results,
                 "sort": "-publication_date",
                 "filter": f"from_publication_date:{cutoff.isoformat()}",
-                "select": ",".join(
-                    [
-                        "id",
-                        "doi",
-                        "title",
-                        "display_name",
-                        "abstract_inverted_index",
-                        "authorships",
-                        "publication_year",
-                        "publication_date",
-                        "primary_location",
-                        "open_access",
-                        "best_oa_location",
-                        "concepts",
-                        "keywords",
-                        "primary_topic",
-                        "locations",
-                    ]
-                ),
             }
         )
         request = urllib.request.Request(f"{self.api_url}?{params}", headers={"User-Agent": "paper-agent/0.1"})
@@ -445,12 +426,12 @@ class OpenAlexSource:
                 works = payload.get("results") or []
                 return [work for work in works if isinstance(work, dict)]
             except urllib.error.HTTPError as error:
-                last_error = error
+                last_error = OSError(openalex_http_error_message(error))
                 if error.code not in {429, 500, 502, 503, 504} or attempt >= self.retries:
-                    raise
+                    raise last_error
                 delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After"))
                 if self.verbose:
-                    print(f"OpenAlex request failed for topic '{topic}' ({error.code}), retrying in {delay:.0f}s")
+                    print(f"OpenAlex request failed for topic '{topic}' ({last_error}), retrying in {delay:.0f}s")
                 time.sleep(delay)
             except (urllib.error.URLError, TimeoutError, SocketTimeout, json.JSONDecodeError) as error:
                 last_error = error if isinstance(error, OSError) else OSError(str(error))
@@ -820,6 +801,30 @@ def openalex_named_items(value: Any) -> list[str]:
         if name and name not in names:
             names.append(name)
     return names
+
+
+def openalex_http_error_message(error: urllib.error.HTTPError) -> str:
+    detail = ""
+    try:
+        raw = error.read(4096)
+    except OSError:
+        raw = b""
+    if raw:
+        text = raw.decode("utf-8", errors="replace").strip()
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            detail = text
+        else:
+            if isinstance(payload, dict):
+                message = payload.get("message") or payload.get("error")
+                detail = str(message or payload).strip()
+            else:
+                detail = str(payload).strip()
+    base = f"HTTP Error {error.code}: {error.reason}"
+    if detail:
+        return f"{base} - {detail[:500]}"
+    return base
 
 
 def dedupe_candidates(candidates: list[ScoutCandidate]) -> list[ScoutCandidate]:
