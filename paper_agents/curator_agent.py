@@ -5,6 +5,7 @@ from typing import Any
 
 from paper_agents import db
 from paper_agents.scout import count_phrase, normalize_text, scout_keywords
+from paper_agents.scout import OFF_DOMAIN_TERMS
 
 DEFAULT_MAX_RECOMMENDATIONS = 3
 DEFAULT_MIN_QUALITY_SCORE = 25.0
@@ -126,6 +127,10 @@ def evaluate_candidate(candidate: dict[str, Any], profile: dict[str, Any]) -> di
             negative_hits.append(signal)
             score -= 10.0
 
+    off_domain_hits = [term for term in OFF_DOMAIN_TERMS if count_phrase(text, term)]
+    if off_domain_hits:
+        score -= min(len(off_domain_hits), 5) * 12.0
+
     score = round(max(score, 0.0), 2)
     if matches:
         rationale = "Matched " + ", ".join(matches[:8]) + "."
@@ -133,6 +138,8 @@ def evaluate_candidate(candidate: dict[str, Any], profile: dict[str, Any]) -> di
         rationale = "No strong profile signals matched."
     if negative_hits:
         rationale += " Penalized for negative signals: " + ", ".join(negative_hits[:4]) + "."
+    if off_domain_hits:
+        rationale += " Penalized for off-domain signals: " + ", ".join(off_domain_hits[:4]) + "."
     return {
         **candidate,
         "score": score,

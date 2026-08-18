@@ -11,8 +11,12 @@ from paper_agents.feedback import apply_feedback_to_profile, ingest_feedback_blo
 from paper_agents.cli import run_feedback_add, run_feedback_apply, run_feedback_rebuild_profile
 from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
+from paper_agents.curator_agent import evaluate_candidate
+from paper_agents.scout import DEFAULT_SCOUT_TOPICS
 from paper_agents.scout import ScoutCandidate
+from paper_agents.scout import rank_candidates
 from paper_agents.scout import run_daily_scout
+from paper_agents.scout import scout_candidate_record
 from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
@@ -74,6 +78,89 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn("ranking_reason", columns)
         self.assertNotIn("selected", columns)
 
+    def test_default_scout_topics_cover_practical_ops_clusters(self):
+        topics = {topic.lower() for topic in DEFAULT_SCOUT_TOPICS}
+        expected = {
+            "aiops",
+            "ai for it operations",
+            "llm for operations",
+            "agentic operations",
+            "incident response",
+            "failure diagnosis",
+            "observability",
+            "telemetry analysis",
+            "log analysis",
+            "trace analysis",
+            "developer productivity",
+            "software maintenance",
+            "automated debugging",
+            "program repair",
+            "software reliability engineering",
+            "cloud operations",
+            "microservice diagnosis",
+            "distributed systems debugging",
+            "production engineering",
+        }
+        self.assertTrue(expected.issubset(topics))
+
+    def test_domain_filter_penalizes_physical_incident_domains(self):
+        software = ScoutCandidate(
+            source="arxiv",
+            source_id="2601.softwarev1",
+            title="LLM failure diagnosis for microservice incident response",
+            abstract="Telemetry analysis and log analysis for cloud operations and production engineering.",
+            authors=[],
+            published="2026-01-01",
+            updated=None,
+            url="https://example.test/software",
+            pdf_url=None,
+            categories=["cs.SE"],
+        )
+        physical = ScoutCandidate(
+            source="arxiv",
+            source_id="2601.physicalv1",
+            title="Root cause analysis for railway traffic incident management",
+            abstract="Vehicular transportation incident mitigation for road and smart grid operations.",
+            authors=[],
+            published="2026-01-01",
+            updated=None,
+            url="https://example.test/physical",
+            pdf_url=None,
+            categories=["cs.CY"],
+        )
+
+        ranked = rank_candidates([physical, software], DEFAULT_SCOUT_TOPICS)
+
+        self.assertEqual(ranked[0].source_id, "2601.softwarev1")
+        self.assertLess(physical.score, software.score)
+        self.assertIn("penalized off-domain terms", physical.ranking_reason or "")
+
+    def test_curator_penalizes_off_domain_incident_papers(self):
+        profile = {
+            "interests": ["incident management", "root cause analysis", "failure diagnosis"],
+            "positive_signals": ["cloud operations", "microservice diagnosis"],
+            "negative_signals": [],
+        }
+        software = evaluate_candidate(
+            {
+                "paper_id": 1,
+                "title": "Microservice root cause analysis for cloud incident response",
+                "abstract": "LLM failure diagnosis over logs, traces, and telemetry for production engineering.",
+            },
+            profile,
+        )
+        physical = evaluate_candidate(
+            {
+                "paper_id": 2,
+                "title": "Railway traffic incident root cause analysis",
+                "abstract": "Vehicular transportation incident mitigation for road operations and smart grid failures.",
+            },
+            profile,
+        )
+
+        self.assertGreater(software["score"], 0)
+        self.assertLess(physical["score"], software["score"])
+        self.assertIn("off-domain signals", physical["rationale"])
 
     def test_legacy_scout_daily_output_has_no_preference_scores(self):
         output_dir = Path(self.tmp.name) / "scout"
@@ -88,6 +175,16 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn("selected", output)
         record = output["candidates"][0]
         self.assertNotIn("score", record)
+        self.assertNotIn("ranking_reason", record)
+        self.assertNotIn("selected", record)
+
+    def test_scout_candidate_record_shape_stays_metadata_only(self):
+        ranked = rank_candidates([candidate("2601.shapev1", "Debugging shape check")], DEFAULT_SCOUT_TOPICS)
+        record = scout_candidate_record(ranked[0])
+        self.assertIn("source_id", record)
+        self.assertIn("metadata", record)
+        self.assertNotIn("score", record)
+        self.assertNotIn("matched_keywords", record)
         self.assertNotIn("ranking_reason", record)
         self.assertNotIn("selected", record)
 
