@@ -8,7 +8,7 @@ import urllib.parse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob
@@ -382,16 +382,25 @@ def render_warnings(warnings: list[dict[str, str]]) -> str:
 
 
 def render_health_graphs(summary: dict[str, Any]) -> str:
-    daily_rows = daily_funnel_rows(summary)
+    daily_rows = sorted(daily_funnel_rows(summary), key=lambda row: row["day"])
     source_rows = source_funnel_rows(summary)
+    feedback_rows = feedback_activity_rows(summary)
     return f"""<section class="health-graphs">
-      <div class="health-graph">
-        <div class="graph-head"><h2>Daily Funnel</h2><span>Candidates -> eligible -> recommendations</span></div>
-        {render_daily_funnel_chart(daily_rows)}
+      <div class="health-graph health-graph-wide">
+        <div class="graph-head"><h2>Daily Trend</h2><span>Candidates -> eligible -> recommendations</span></div>
+        {render_daily_trend_svg(daily_rows)}
       </div>
       <div class="health-graph">
         <div class="graph-head"><h2>Source Breakdown</h2><span>Candidates, eligible, recommendations</span></div>
-        {render_source_funnel_chart(source_rows)}
+        {render_source_breakdown_svg(source_rows)}
+      </div>
+      <div class="health-graph">
+        <div class="graph-head"><h2>Recommendation Gap</h2><span>Eligible papers without recommendations</span></div>
+        {render_recommendation_gap_svg(daily_rows)}
+      </div>
+      <div class="health-graph">
+        <div class="graph-head"><h2>Feedback/Profile Activity</h2><span>Feedback submissions and profile updates</span></div>
+        {render_feedback_activity_svg(feedback_rows)}
       </div>
     </section>"""
 
@@ -427,60 +436,253 @@ def source_funnel_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(by_source.values(), key=lambda item: (item["candidate_count"], item["eligible_count"], item["recommendation_count"]), reverse=True)
 
 
-def render_daily_funnel_chart(rows: list[dict[str, Any]]) -> str:
+def feedback_activity_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(
+        [
+            {
+                "day": str(row["day"]),
+                "raw_feedback_count": int(row["raw_feedback_count"] or 0),
+                "profile_version_count": int(row["profile_version_count"] or 0),
+            }
+            for row in summary["daily"]["feedback"]
+        ],
+        key=lambda row: row["day"],
+    )
+
+
+def recent_chart_rows(rows: list[dict[str, Any]], limit: int = 21) -> list[dict[str, Any]]:
+    return rows[-limit:] if len(rows) > limit else rows
+
+
+def render_chart_legend(items: list[tuple[str, str]]) -> str:
+    return '<div class="chart-legend">' + "".join(
+        f'<span class="legend-item"><span class="legend-swatch {escape(class_name)}"></span>{escape(label)}</span>'
+        for label, class_name in items
+    ) + "</div>"
+
+
+def render_daily_trend_svg(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<div class="empty graph-empty">No daily funnel data in this range.</div>'
-    max_value = max(max(row["candidate_count"], row["eligible_count"], row["recommendation_count"]) for row in rows) or 1
-    return '<div class="bar-chart daily-chart">' + "".join(
-        render_bar_row(
-            row["day"],
-            [
-                ("Candidates", row["candidate_count"], "bar-candidates"),
-                ("Eligible", row["eligible_count"], "bar-eligible"),
-                ("Recommendations", row["recommendation_count"], "bar-recommendations"),
-            ],
-            max_value,
-            empty_warning=row["candidate_count"] == 0 or row["eligible_count"] == 0 or row["recommendation_count"] == 0,
-        )
-        for row in rows[:14]
-    ) + "</div>"
+    rows = recent_chart_rows(rows)
+    series = [
+        ("Candidates", "candidate_count", "chart-candidates"),
+        ("Eligible", "eligible_count", "chart-eligible"),
+        ("Recommendations", "recommendation_count", "chart-recommendations"),
+    ]
+    max_value = max(max(int(row[key] or 0) for _, key, _ in series) for row in rows) or 1
+    width, height = 760, 250
+    left, right, top, bottom = 46, 16, 24, 36
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+
+    def x_at(index: int) -> float:
+        if len(rows) == 1:
+            return left + plot_width / 2
+        return left + (plot_width * index / (len(rows) - 1))
+
+    def y_at(value: int) -> float:
+        return top + plot_height - (plot_height * value / max_value)
+
+    grid = render_svg_grid(width, height, left, right, top, bottom, max_value)
+    labels = render_svg_day_labels(rows, left, plot_width, height - 12)
+    paths = []
+    points = []
+    for label, key, class_name in series:
+        coords = [(x_at(index), y_at(int(row[key] or 0))) for index, row in enumerate(rows)]
+        point_text = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        paths.append(f'<polyline class="chart-line {class_name}" points="{point_text}" />')
+        for (x, y), row in zip(coords, rows):
+            value = int(row[key] or 0)
+            points.append(
+                f'<circle class="chart-point {class_name}" cx="{x:.1f}" cy="{y:.1f}" r="3">'
+                f"<title>{escape(label)} {escape(row['day'])}: {value}</title></circle>"
+            )
+    legend = render_chart_legend([("Candidates", "chart-candidates"), ("Eligible", "chart-eligible"), ("Recommendations", "chart-recommendations")])
+    return f"""{legend}<svg class="health-svg daily-trend-svg" viewBox="0 0 {width} {height}" role="img" aria-label="Daily funnel trend">
+      {grid}
+      <line class="chart-axis" x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" />
+      <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" />
+      {''.join(paths)}
+      {''.join(points)}
+      {labels}
+    </svg>"""
 
 
-def render_source_funnel_chart(rows: list[dict[str, Any]]) -> str:
+def render_source_breakdown_svg(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<div class="empty graph-empty">No source data in this range.</div>'
-    max_value = max(max(row["candidate_count"], row["eligible_count"], row["recommendation_count"]) for row in rows) or 1
-    return '<div class="bar-chart source-chart">' + "".join(
-        render_bar_row(
-            source_display_name(row["source"]),
-            [
-                ("Candidates", row["candidate_count"], "bar-candidates"),
-                ("Eligible", row["eligible_count"], "bar-eligible"),
-                ("Recommendations", row["recommendation_count"], "bar-recommendations"),
-            ],
-            max_value,
-            empty_warning=row["candidate_count"] == 0 or row["eligible_count"] == 0,
+    rows = rows[:8]
+    return render_grouped_bar_svg(
+        rows,
+        [
+            ("Candidates", "candidate_count", "chart-candidates"),
+            ("Eligible", "eligible_count", "chart-eligible"),
+            ("Recommendations", "recommendation_count", "chart-recommendations"),
+        ],
+        lambda row: source_display_name(row["source"]),
+        "Source funnel breakdown",
+        "source-breakdown-svg",
+    )
+
+
+def render_recommendation_gap_svg(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<div class="empty graph-empty">No daily funnel data in this range.</div>'
+    gap_rows = [
+        {**row, "gap_count": max(0, int(row["eligible_count"] or 0) - int(row["recommendation_count"] or 0))}
+        for row in recent_chart_rows(rows)
+    ]
+    return render_single_bar_svg(
+        gap_rows,
+        "gap_count",
+        "chart-gap",
+        lambda row: row["day"],
+        "Eligible papers without recommendations",
+        "recommendation-gap-svg",
+        zero_message="No eligible-to-recommendation gaps in this range.",
+    )
+
+
+def render_feedback_activity_svg(rows: list[dict[str, Any]]) -> str:
+    rows = recent_chart_rows(rows)
+    if not rows or not any((row["raw_feedback_count"] or row["profile_version_count"]) for row in rows):
+        return '<div class="empty graph-empty">No feedback/profile activity in this range.</div>'
+    return render_grouped_bar_svg(
+        rows,
+        [
+            ("Feedback", "raw_feedback_count", "chart-feedback"),
+            ("Profile", "profile_version_count", "chart-profile"),
+        ],
+        lambda row: row["day"],
+        "Feedback and profile activity",
+        "feedback-activity-svg",
+    )
+
+
+def render_grouped_bar_svg(
+    rows: list[dict[str, Any]],
+    series: list[tuple[str, str, str]],
+    label_for_row: Callable[[dict[str, Any]], str],
+    aria_label: str,
+    class_name: str,
+) -> str:
+    max_value = max(max(int(row[key] or 0) for _, key, _ in series) for row in rows) or 1
+    width, height = 760, 250
+    left, right, top, bottom = 46, 16, 24, 44
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    group_width = plot_width / max(1, len(rows))
+    bar_width = min(18, max(5, (group_width - 10) / max(1, len(series))))
+    grid = render_svg_grid(width, height, left, right, top, bottom, max_value)
+    bars = []
+    labels = []
+    for row_index, row in enumerate(rows):
+        center = left + group_width * row_index + group_width / 2
+        start = center - (bar_width * len(series) + 2 * (len(series) - 1)) / 2
+        row_label = label_for_row(row)
+        for series_index, (series_label, key, series_class) in enumerate(series):
+            value = int(row[key] or 0)
+            bar_height = plot_height * value / max_value
+            x = start + series_index * (bar_width + 2)
+            y = top + plot_height - bar_height
+            bars.append(
+                f'<rect class="chart-bar {series_class}" x="{x:.1f}" y="{y:.1f}" width="{bar_width:.1f}" height="{bar_height:.1f}">'
+                f"<title>{escape(series_label)} {escape(row_label)}: {value}</title></rect>"
+            )
+        if should_render_axis_label(row_index, len(rows)):
+            labels.append(f'<text class="chart-label" x="{center:.1f}" y="{height - 14}" text-anchor="middle">{escape(short_chart_label(row_label))}</text>')
+    legend = render_chart_legend([(label, class_name) for label, _, class_name in series])
+    return f"""{legend}<svg class="health-svg {escape(class_name)}" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(aria_label)}">
+      {grid}
+      <line class="chart-axis" x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" />
+      <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" />
+      {''.join(bars)}
+      {''.join(labels)}
+    </svg>"""
+
+
+def render_single_bar_svg(
+    rows: list[dict[str, Any]],
+    value_key: str,
+    series_class: str,
+    label_for_row: Callable[[dict[str, Any]], str],
+    aria_label: str,
+    class_name: str,
+    *,
+    zero_message: str,
+) -> str:
+    max_value = max(int(row[value_key] or 0) for row in rows) if rows else 0
+    if not rows:
+        return f'<div class="empty graph-empty">{escape(zero_message)}</div>'
+    has_values = max_value > 0
+    max_value = max_value or 1
+    width, height = 760, 230
+    left, right, top, bottom = 46, 16, 24, 38
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    bar_width = max(4, min(18, (plot_width / max(1, len(rows))) * 0.55))
+    grid = render_svg_grid(width, height, left, right, top, bottom, max_value)
+    bars = []
+    labels = []
+    for index, row in enumerate(rows):
+        value = int(row[value_key] or 0)
+        center = left + (plot_width * (index + 0.5) / len(rows))
+        bar_height = plot_height * value / max_value
+        x = center - bar_width / 2
+        y = top + plot_height - bar_height
+        row_label = label_for_row(row)
+        bars.append(
+            f'<rect class="chart-bar {escape(series_class)}" x="{x:.1f}" y="{y:.1f}" width="{bar_width:.1f}" height="{bar_height:.1f}">'
+            f"<title>{escape(row_label)}: {value}</title></rect>"
         )
-        for row in rows
-    ) + "</div>"
+        if should_render_axis_label(index, len(rows)):
+            labels.append(f'<text class="chart-label" x="{center:.1f}" y="{height - 12}" text-anchor="middle">{escape(short_chart_label(row_label))}</text>')
+    zero_note = "" if has_values else f'<text class="chart-label chart-empty-label" x="{left + plot_width / 2:.1f}" y="{top + 22}" text-anchor="middle">{escape(zero_message)}</text>'
+    return f"""<svg class="health-svg {escape(class_name)}" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(aria_label)}">
+      {grid}
+      <line class="chart-axis" x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" />
+      <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" />
+      {zero_note}
+      {''.join(bars)}
+      {''.join(labels)}
+    </svg>"""
 
 
-def render_bar_row(label: str, bars: list[tuple[str, int, str]], max_value: int, *, empty_warning: bool) -> str:
-    bar_html = "".join(render_bar(label, value, class_name, max_value) for label, value, class_name in bars)
-    warning = '<span class="empty-dot" title="One or more funnel stages are empty"></span>' if empty_warning else ""
-    return f"""<div class="bar-row">
-        <div class="bar-label">{warning}{escape(label)}</div>
-        <div class="bar-stack">{bar_html}</div>
-      </div>"""
+def render_svg_grid(width: int, height: int, left: int, right: int, top: int, bottom: int, max_value: int) -> str:
+    plot_height = height - top - bottom
+    rows = []
+    for index in range(5):
+        value = round(max_value * (4 - index) / 4)
+        y = top + plot_height * index / 4
+        rows.append(f'<line class="chart-grid" x1="{left}" y1="{y:.1f}" x2="{width - right}" y2="{y:.1f}" />')
+        label = value if max_value >= 4 or index in {0, 4} else ""
+        rows.append(f'<text class="chart-label chart-y-label" x="{left - 8}" y="{y + 4:.1f}" text-anchor="end">{label}</text>')
+    return "".join(rows)
 
 
-def render_bar(label: str, value: int, class_name: str, max_value: int) -> str:
-    width = max(2 if value else 0, round((value / max_value) * 100))
-    return f"""<div class="bar-item">
-        <span class="bar-name">{escape(label)}</span>
-        <div class="bar-track"><span class="bar-fill {escape(class_name)}" style="width: {width}%"></span></div>
-        <span class="bar-value">{value}</span>
-      </div>"""
+def render_svg_day_labels(rows: list[dict[str, Any]], left: int, plot_width: int, y: int) -> str:
+    labels = []
+    for index, row in enumerate(rows):
+        if not should_render_axis_label(index, len(rows)):
+            continue
+        x = left + (plot_width / 2 if len(rows) == 1 else plot_width * index / (len(rows) - 1))
+        labels.append(f'<text class="chart-label" x="{x:.1f}" y="{y}" text-anchor="middle">{escape(short_chart_label(row["day"]))}</text>')
+    return "".join(labels)
+
+
+def should_render_axis_label(index: int, count: int) -> bool:
+    if count <= 7:
+        return True
+    step = max(1, count // 6)
+    return index == 0 or index == count - 1 or index % step == 0
+
+
+def short_chart_label(label: str) -> str:
+    label = str(label)
+    if len(label) == 10 and label[4] == "-" and label[7] == "-":
+        return label[5:]
+    return label if len(label) <= 13 else f"{label[:12]}..."
 
 
 def render_health_table(title: str, rows: list[dict[str, Any]], columns: list[str]) -> str:
@@ -967,24 +1169,28 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-card h2 { color: #57606a; font-size: 11px; margin-bottom: 5px; text-transform: uppercase; }
 .health-card strong { display: block; font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; }
 .health-card span { color: #57606a; font-size: 11px; }
-.health-graphs { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.8fr); gap: 10px; margin: 10px 0 12px; }
+.health-graphs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 10px 0 12px; }
 .health-graph { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 9px; min-width: 0; }
+.health-graph-wide { grid-column: 1 / -1; }
 .graph-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 8px; }
 .graph-head h2 { margin: 0; font-size: 14px; }
 .graph-head span { color: #57606a; font-size: 11px; }
-.bar-chart { display: grid; gap: 8px; }
-.bar-row { display: grid; grid-template-columns: minmax(92px, 128px) minmax(0, 1fr); gap: 8px; align-items: start; }
-.bar-label { color: #57606a; font-size: 11px; line-height: 1.2; padding-top: 16px; overflow-wrap: anywhere; }
-.empty-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 999px; background: #bf8700; vertical-align: 1px; }
-.bar-stack { display: grid; gap: 3px; min-width: 0; }
-.bar-item { display: grid; grid-template-columns: 92px minmax(44px, 1fr) 32px; gap: 6px; align-items: center; min-width: 0; }
-.bar-name { color: #57606a; font-size: 10px; white-space: nowrap; }
-.bar-track { height: 9px; border-radius: 999px; background: #eaeef2; overflow: hidden; }
-.bar-fill { display: block; height: 100%; min-width: 0; border-radius: inherit; }
-.bar-candidates { background: #0969da; }
-.bar-eligible { background: #1a7f37; }
-.bar-recommendations { background: #9a6700; }
-.bar-value { color: #57606a; font-size: 11px; text-align: right; }
+.chart-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 5px; color: #57606a; font-size: 11px; }
+.legend-item { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+.legend-swatch { width: 9px; height: 9px; border-radius: 999px; display: inline-block; }
+.health-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-axis { stroke: #8c959f; stroke-width: 1; }
+.chart-grid { stroke: #d8dee4; stroke-width: 1; opacity: 0.8; }
+.chart-label { fill: #57606a; font-size: 11px; }
+.chart-line { fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.chart-point { stroke: #ffffff; stroke-width: 1.5; }
+.chart-bar { rx: 3px; ry: 3px; }
+.chart-candidates { stroke: #0969da; fill: #0969da; background: #0969da; }
+.chart-eligible { stroke: #1a7f37; fill: #1a7f37; background: #1a7f37; }
+.chart-recommendations { stroke: #9a6700; fill: #9a6700; background: #9a6700; }
+.chart-gap { stroke: #cf222e; fill: #cf222e; background: #cf222e; }
+.chart-feedback { stroke: #8250df; fill: #8250df; background: #8250df; }
+.chart-profile { stroke: #bf3989; fill: #bf3989; background: #bf3989; }
 .graph-empty { padding: 8px; font-size: 12px; }
 .health-warnings { border: 1px solid #bf8700; background: #fff8c5; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
 .health-warnings h2, .health-section h2 { margin: 0 0 6px; font-size: 14px; }
@@ -1003,12 +1209,15 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .graph-head span, .bar-label, .bar-name, .bar-value, .health-table th, .health-kv dt { color: #8b949e; }
+  .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
   .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-graph, .health-table table, .health-kv { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
-  .bar-track { background: #30363d; }
+  .chart-axis { stroke: #8b949e; }
+  .chart-grid { stroke: #30363d; opacity: 1; }
+  .chart-label { fill: #8b949e; }
+  .chart-point { stroke: #161b22; }
   .banner { background: #0f2a1a; border-color: #238636; }
   .banner.warning { background: #2d2300; border-color: #9e6a03; }
   .health-warnings { background: #2d2300; border-color: #9e6a03; }
@@ -1025,8 +1234,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .feedback-state { text-align: left; grid-column: 1 / -1; }
   .health-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .health-graphs { grid-template-columns: 1fr; }
-  .bar-row { grid-template-columns: 1fr; gap: 3px; }
-  .bar-label { padding-top: 0; }
+  .health-graph-wide { grid-column: auto; }
   .health-kv { grid-template-columns: 1fr; }
 }
 """
