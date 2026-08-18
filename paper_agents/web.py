@@ -239,6 +239,7 @@ def render_review_queue(
         {render_select(SORTS, "sort", sort_value, "Sort")}
         {render_select(VIEWS, "view", view_value, "View")}
         <button type="submit" class="secondary">Apply</button>
+        <a class="secondary-link" href="/health">Health</a>
       </form>
     </header>
     {saved_banner}
@@ -321,6 +322,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
         f'<section class="health-card"><h2>{escape(title)}</h2><strong>{escape(value)}</strong><span>{escape(detail)}</span></section>'
         for title, value, detail in cards
     )
+    graph_html = render_health_graphs(summary)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -345,6 +347,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     </header>
     {warning_html}
     <div class="health-cards">{card_html}</div>
+    {graph_html}
     <section class="health-section">
       <h2>Daily Funnel</h2>
       {render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}
@@ -376,6 +379,108 @@ def render_warnings(warnings: list[dict[str, str]]) -> str:
         for warning in warnings
     )
     return f'<section class="health-warnings"><h2>Warnings</h2><ul>{items}</ul></section>'
+
+
+def render_health_graphs(summary: dict[str, Any]) -> str:
+    daily_rows = daily_funnel_rows(summary)
+    source_rows = source_funnel_rows(summary)
+    return f"""<section class="health-graphs">
+      <div class="health-graph">
+        <div class="graph-head"><h2>Daily Funnel</h2><span>Candidates -> eligible -> recommendations</span></div>
+        {render_daily_funnel_chart(daily_rows)}
+      </div>
+      <div class="health-graph">
+        <div class="graph-head"><h2>Source Breakdown</h2><span>Candidates, eligible, recommendations</span></div>
+        {render_source_funnel_chart(source_rows)}
+      </div>
+    </section>"""
+
+
+def daily_funnel_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    by_day: dict[str, dict[str, Any]] = {}
+    for row in summary["daily"]["scout"]:
+        day = str(row["day"])
+        bucket = by_day.setdefault(day, {"day": day, "candidate_count": 0, "eligible_count": 0, "recommendation_count": 0})
+        bucket["candidate_count"] += int(row["candidate_count"] or 0)
+        bucket["eligible_count"] += int(row["eligible_count"] or 0)
+    for row in summary["daily"]["curator"]:
+        day = str(row["day"])
+        bucket = by_day.setdefault(day, {"day": day, "candidate_count": 0, "eligible_count": 0, "recommendation_count": 0})
+        bucket["recommendation_count"] += int(row["recommendation_count"] or 0)
+    return [by_day[day] for day in sorted(by_day.keys(), reverse=True)]
+
+
+def source_funnel_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    by_source = {
+        str(row["source"]): {
+            "source": str(row["source"]),
+            "candidate_count": int(row["candidate_count"] or 0),
+            "eligible_count": int(row["eligible_count"] or 0),
+            "recommendation_count": 0,
+        }
+        for row in summary["source_breakdown"]["funnel"]
+    }
+    for row in summary["source_breakdown"]["recommendations"]:
+        source = str(row["source"])
+        bucket = by_source.setdefault(source, {"source": source, "candidate_count": 0, "eligible_count": 0, "recommendation_count": 0})
+        bucket["recommendation_count"] += int(row["recommendation_count"] or 0)
+    return sorted(by_source.values(), key=lambda item: (item["candidate_count"], item["eligible_count"], item["recommendation_count"]), reverse=True)
+
+
+def render_daily_funnel_chart(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<div class="empty graph-empty">No daily funnel data in this range.</div>'
+    max_value = max(max(row["candidate_count"], row["eligible_count"], row["recommendation_count"]) for row in rows) or 1
+    return '<div class="bar-chart daily-chart">' + "".join(
+        render_bar_row(
+            row["day"],
+            [
+                ("Candidates", row["candidate_count"], "bar-candidates"),
+                ("Eligible", row["eligible_count"], "bar-eligible"),
+                ("Recommendations", row["recommendation_count"], "bar-recommendations"),
+            ],
+            max_value,
+            empty_warning=row["candidate_count"] == 0 or row["eligible_count"] == 0 or row["recommendation_count"] == 0,
+        )
+        for row in rows[:14]
+    ) + "</div>"
+
+
+def render_source_funnel_chart(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<div class="empty graph-empty">No source data in this range.</div>'
+    max_value = max(max(row["candidate_count"], row["eligible_count"], row["recommendation_count"]) for row in rows) or 1
+    return '<div class="bar-chart source-chart">' + "".join(
+        render_bar_row(
+            source_display_name(row["source"]),
+            [
+                ("Candidates", row["candidate_count"], "bar-candidates"),
+                ("Eligible", row["eligible_count"], "bar-eligible"),
+                ("Recommendations", row["recommendation_count"], "bar-recommendations"),
+            ],
+            max_value,
+            empty_warning=row["candidate_count"] == 0 or row["eligible_count"] == 0,
+        )
+        for row in rows
+    ) + "</div>"
+
+
+def render_bar_row(label: str, bars: list[tuple[str, int, str]], max_value: int, *, empty_warning: bool) -> str:
+    bar_html = "".join(render_bar(label, value, class_name, max_value) for label, value, class_name in bars)
+    warning = '<span class="empty-dot" title="One or more funnel stages are empty"></span>' if empty_warning else ""
+    return f"""<div class="bar-row">
+        <div class="bar-label">{warning}{escape(label)}</div>
+        <div class="bar-stack">{bar_html}</div>
+      </div>"""
+
+
+def render_bar(label: str, value: int, class_name: str, max_value: int) -> str:
+    width = max(2 if value else 0, round((value / max_value) * 100))
+    return f"""<div class="bar-item">
+        <span class="bar-name">{escape(label)}</span>
+        <div class="bar-track"><span class="bar-fill {escape(class_name)}" style="width: {width}%"></span></div>
+        <span class="bar-value">{value}</span>
+      </div>"""
 
 
 def render_health_table(title: str, rows: list[dict[str, Any]], columns: list[str]) -> str:
@@ -862,6 +967,25 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-card h2 { color: #57606a; font-size: 11px; margin-bottom: 5px; text-transform: uppercase; }
 .health-card strong { display: block; font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; }
 .health-card span { color: #57606a; font-size: 11px; }
+.health-graphs { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.8fr); gap: 10px; margin: 10px 0 12px; }
+.health-graph { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 9px; min-width: 0; }
+.graph-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 8px; }
+.graph-head h2 { margin: 0; font-size: 14px; }
+.graph-head span { color: #57606a; font-size: 11px; }
+.bar-chart { display: grid; gap: 8px; }
+.bar-row { display: grid; grid-template-columns: minmax(92px, 128px) minmax(0, 1fr); gap: 8px; align-items: start; }
+.bar-label { color: #57606a; font-size: 11px; line-height: 1.2; padding-top: 16px; overflow-wrap: anywhere; }
+.empty-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 999px; background: #bf8700; vertical-align: 1px; }
+.bar-stack { display: grid; gap: 3px; min-width: 0; }
+.bar-item { display: grid; grid-template-columns: 92px minmax(44px, 1fr) 32px; gap: 6px; align-items: center; min-width: 0; }
+.bar-name { color: #57606a; font-size: 10px; white-space: nowrap; }
+.bar-track { height: 9px; border-radius: 999px; background: #eaeef2; overflow: hidden; }
+.bar-fill { display: block; height: 100%; min-width: 0; border-radius: inherit; }
+.bar-candidates { background: #0969da; }
+.bar-eligible { background: #1a7f37; }
+.bar-recommendations { background: #9a6700; }
+.bar-value { color: #57606a; font-size: 11px; text-align: right; }
+.graph-empty { padding: 8px; font-size: 12px; }
 .health-warnings { border: 1px solid #bf8700; background: #fff8c5; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
 .health-warnings h2, .health-section h2 { margin: 0 0 6px; font-size: 14px; }
 .health-warnings ul { margin: 0; padding-left: 18px; }
@@ -879,11 +1003,12 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .health-table th, .health-kv dt { color: #8b949e; }
+  .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .graph-head span, .bar-label, .bar-name, .bar-value, .health-table th, .health-kv dt { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-table table, .health-kv { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-graph, .health-table table, .health-kv { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
+  .bar-track { background: #30363d; }
   .banner { background: #0f2a1a; border-color: #238636; }
   .banner.warning { background: #2d2300; border-color: #9e6a03; }
   .health-warnings { background: #2d2300; border-color: #9e6a03; }
@@ -899,6 +1024,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .feedback-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .feedback-state { text-align: left; grid-column: 1 / -1; }
   .health-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .health-graphs { grid-template-columns: 1fr; }
+  .bar-row { grid-template-columns: 1fr; gap: 3px; }
+  .bar-label { padding-top: 0; }
   .health-kv { grid-template-columns: 1fr; }
 }
 """

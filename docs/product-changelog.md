@@ -17,6 +17,7 @@ Completed behavior:
 - Compute DB integrity, latest workflow cycle age/state, days since last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, feedback/profile status, and operator warnings directly from SQLite.
 - Include source breakdowns for Scout candidates, eligible/excluded candidates, recommendations, and exclusion reasons.
 - Surface stale workflow cycles, zero-candidate/zero-eligible Scout runs, missing triage summaries, unapplied structured feedback, recent Gemini/profile apply failures, and DB integrity failures.
+- Add compact navigation between the Review Queue and `/health`, plus lightweight bar charts for daily funnel and source breakdown.
 
 Future consideration:
 

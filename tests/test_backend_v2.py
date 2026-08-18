@@ -1123,6 +1123,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<select name="view"', html)
         self.assertIn("All sources", html)
         self.assertIn("arXiv", html)
+        self.assertIn('href="/health"', html)
         self.assertIn('class="source-badge"', html)
         self.assertIn('class="action-rail"', html)
         self.assertIn('<h1 class="brand-title">', html)
@@ -1368,8 +1369,13 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("Project Paper Health", html)
         self.assertIn('<form method="get" action="/health"', html)
+        self.assertIn('href="/">Review queue</a>', html)
         self.assertIn('<select name="days"', html)
         self.assertIn('<option value="openalex" selected>OpenAlex</option>', html)
+        self.assertIn('class="health-graphs"', html)
+        self.assertIn('class="bar-chart daily-chart"', html)
+        self.assertIn('class="bar-chart source-chart"', html)
+        self.assertIn("Candidates -> eligible -> recommendations", html)
         self.assertIn("Daily Funnel", html)
         self.assertIn("Source Breakdown", html)
 
