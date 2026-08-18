@@ -57,7 +57,7 @@ DEFAULT_PDF_DIR = Path("data/papers")
 DEFAULT_ARXIV_REQUEST_DELAY = 3.0
 DEFAULT_ARXIV_RETRIES = 3
 DEFAULT_ARXIV_TIMEOUT = 60
-SCOUT_SOURCES = ("arxiv", "semantic_scholar")
+SCOUT_SOURCES = ("arxiv", "semantic_scholar", "openalex")
 
 
 @dataclass
@@ -353,6 +353,124 @@ class SemanticScholarSource:
         return self.request_delay * (2 ** attempt)
 
 
+class OpenAlexSource:
+    name = "openalex"
+    api_url = "https://api.openalex.org/works"
+
+    def __init__(
+        self,
+        request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
+        retries: int = DEFAULT_ARXIV_RETRIES,
+        timeout: int = DEFAULT_ARXIV_TIMEOUT,
+        verbose: bool = True,
+    ):
+        self.request_delay = request_delay
+        self.retries = retries
+        self.timeout = timeout
+        self.verbose = verbose
+
+    def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
+        terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
+        per_topic = max(1, min(10, (max_results + len(terms) - 1) // len(terms)))
+        cutoff = date.today() - timedelta(days=freshness_months * 31)
+        candidates: list[ScoutCandidate] = []
+        errors: list[str] = []
+
+        for index, topic in enumerate(terms):
+            if index:
+                time.sleep(self.request_delay)
+            if self.verbose:
+                print(f"fetching OpenAlex topic {index + 1}/{len(terms)}: {topic} ({per_topic} requested)")
+            try:
+                works = self._fetch_topic(topic, per_topic, cutoff)
+            except OSError as error:
+                errors.append(f"{topic}: {error}")
+                if self.verbose:
+                    print(f"OpenAlex topic failed: {topic}: {error}")
+                continue
+            if self.verbose:
+                print(f"received {len(works)} OpenAlex entries for topic: {topic}")
+
+            for work in works:
+                candidate = openalex_work_to_candidate(work)
+                candidate.metadata["query_topic"] = topic
+                if not candidate.title or not candidate.source_id:
+                    continue
+                candidates.append(candidate)
+
+        if errors and self.verbose:
+            print(f"OpenAlex partial failures: {len(errors)}/{len(terms)} topics failed")
+        if not candidates and errors:
+            raise RuntimeError(
+                "OpenAlex fetch returned 0 candidates because every topic failed: "
+                + "; ".join(errors[:3])
+            )
+        return dedupe_candidates(candidates)[:max_results]
+
+    def _fetch_topic(self, topic: str, max_results: int, cutoff: date) -> list[dict[str, Any]]:
+        params = urllib.parse.urlencode(
+            {
+                "search": topic,
+                "per_page": max_results,
+                "sort": "-publication_date",
+                "filter": f"from_publication_date:{cutoff.isoformat()}",
+                "select": ",".join(
+                    [
+                        "id",
+                        "doi",
+                        "title",
+                        "display_name",
+                        "abstract_inverted_index",
+                        "authorships",
+                        "publication_year",
+                        "publication_date",
+                        "primary_location",
+                        "open_access",
+                        "best_oa_location",
+                        "concepts",
+                        "keywords",
+                        "primary_topic",
+                        "locations",
+                    ]
+                ),
+            }
+        )
+        request = urllib.request.Request(f"{self.api_url}?{params}", headers={"User-Agent": "paper-agent/0.1"})
+
+        last_error: OSError | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                works = payload.get("results") or []
+                return [work for work in works if isinstance(work, dict)]
+            except urllib.error.HTTPError as error:
+                last_error = error
+                if error.code not in {429, 500, 502, 503, 504} or attempt >= self.retries:
+                    raise
+                delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After"))
+                if self.verbose:
+                    print(f"OpenAlex request failed for topic '{topic}' ({error.code}), retrying in {delay:.0f}s")
+                time.sleep(delay)
+            except (urllib.error.URLError, TimeoutError, SocketTimeout, json.JSONDecodeError) as error:
+                last_error = error if isinstance(error, OSError) else OSError(str(error))
+                if attempt >= self.retries:
+                    raise last_error
+                delay = self._retry_delay(attempt)
+                if self.verbose:
+                    print(f"OpenAlex request failed for topic '{topic}' ({error}), retrying in {delay:.0f}s")
+                time.sleep(delay)
+
+        if last_error:
+            raise last_error
+        return []
+
+    def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
+        if retry_after and retry_after.isdigit():
+            return float(retry_after)
+        return self.request_delay * (2 ** attempt)
+
+
 def create_scout_source(
     source_name: str,
     *,
@@ -365,6 +483,8 @@ def create_scout_source(
         return ArxivSource(request_delay=request_delay, retries=retries, timeout=timeout, verbose=verbose)
     if source_name == "semantic_scholar":
         return SemanticScholarSource(request_delay=request_delay, retries=retries, timeout=timeout, verbose=verbose)
+    if source_name == "openalex":
+        return OpenAlexSource(request_delay=request_delay, retries=retries, timeout=timeout, verbose=verbose)
     raise ValueError(f"Unsupported Scout source: {source_name}")
 
 
@@ -593,6 +713,113 @@ def semantic_scholar_paper_to_candidate(paper: dict[str, Any]) -> ScoutCandidate
         primary_category=categories[0] if categories else None,
         metadata=metadata,
     )
+
+
+def openalex_work_to_candidate(work: dict[str, Any]) -> ScoutCandidate:
+    work_id = openalex_work_id(work.get("id"))
+    title = _clean(str(work.get("title") or work.get("display_name") or ""))
+    abstract = _clean(reconstruct_openalex_abstract(work.get("abstract_inverted_index")))
+    authors = openalex_authors(work.get("authorships"))
+    concepts = openalex_named_items(work.get("concepts"))
+    keywords = openalex_named_items(work.get("keywords"))
+    categories = concepts + [keyword for keyword in keywords if keyword not in concepts]
+    publication_date = str(work.get("publication_date") or "").strip()
+    year = work.get("publication_year")
+    published = publication_date or (str(year) if year else "")
+    primary_location = work.get("primary_location") if isinstance(work.get("primary_location"), dict) else {}
+    best_oa_location = work.get("best_oa_location") if isinstance(work.get("best_oa_location"), dict) else {}
+    open_access = work.get("open_access") if isinstance(work.get("open_access"), dict) else {}
+    source = primary_location.get("source") if isinstance(primary_location.get("source"), dict) else {}
+    url = (
+        str(primary_location.get("landing_page_url") or "").strip()
+        or str(work.get("doi") or "").strip()
+        or str(work.get("id") or "").strip()
+    )
+    pdf_url = (
+        str(primary_location.get("pdf_url") or "").strip()
+        or str(best_oa_location.get("pdf_url") or "").strip()
+        or str(open_access.get("oa_url") or "").strip()
+        or None
+    )
+    primary_topic = work.get("primary_topic") if isinstance(work.get("primary_topic"), dict) else {}
+    metadata = {
+        "source_metadata": {
+            "openalex_id": work.get("id"),
+            "primary_location": primary_location,
+            "best_oa_location": best_oa_location,
+            "open_access": open_access,
+            "source": source,
+            "primary_topic": primary_topic,
+            "locations": work.get("locations") or [],
+        },
+        "concepts": concepts,
+        "keywords": keywords,
+        "venue": source.get("display_name") if isinstance(source, dict) else None,
+    }
+
+    return ScoutCandidate(
+        source="openalex",
+        source_id=work_id,
+        title=title,
+        abstract=abstract,
+        authors=authors,
+        published=published,
+        updated=None,
+        url=url,
+        pdf_url=pdf_url,
+        doi=str(work.get("doi") or "").strip() or None,
+        arxiv_id=None,
+        categories=categories,
+        primary_category=categories[0] if categories else None,
+        metadata=metadata,
+    )
+
+
+def openalex_work_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text.rstrip("/").rsplit("/", 1)[-1]
+
+
+def reconstruct_openalex_abstract(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    positioned: list[tuple[int, str]] = []
+    for token, positions in value.items():
+        if not isinstance(positions, list):
+            continue
+        for position in positions:
+            if isinstance(position, int):
+                positioned.append((position, str(token)))
+    return " ".join(token for _, token in sorted(positioned))
+
+
+def openalex_authors(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    authors: list[str] = []
+    for authorship in value:
+        if not isinstance(authorship, dict):
+            continue
+        author = authorship.get("author") if isinstance(authorship.get("author"), dict) else {}
+        name = _clean(str(author.get("display_name") or ""))
+        if name:
+            authors.append(name)
+    return authors
+
+
+def openalex_named_items(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    names: list[str] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        name = _clean(str(item.get("display_name") or item.get("name") or ""))
+        if name and name not in names:
+            names.append(name)
+    return names
 
 
 def dedupe_candidates(candidates: list[ScoutCandidate]) -> list[ScoutCandidate]:

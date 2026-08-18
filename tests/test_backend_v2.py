@@ -15,8 +15,10 @@ from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.curator_agent import evaluate_candidate
 from paper_agents.scout import DEFAULT_SCOUT_TOPICS
+from paper_agents.scout import OpenAlexSource
 from paper_agents.scout import SemanticScholarSource
 from paper_agents.scout import ScoutCandidate
+from paper_agents.scout import openalex_work_to_candidate
 from paper_agents.scout import semantic_scholar_paper_to_candidate
 from paper_agents.scout import rank_candidates
 from paper_agents.scout import run_daily_scout
@@ -212,6 +214,119 @@ class BackendV2Tests(unittest.TestCase):
                     cli.main()
 
         self.assertEqual(captured["source"].name, "semantic_scholar")
+
+    def test_openalex_normalizes_abstract_metadata_and_pdf(self):
+        candidate = openalex_work_to_candidate(
+            {
+                "id": "https://openalex.org/W123456789",
+                "doi": "https://doi.org/10.1234/openalex",
+                "title": "OpenAlex Microservice Diagnosis",
+                "abstract_inverted_index": {
+                    "Root": [0],
+                    "cause": [1],
+                    "analysis": [2],
+                    "for": [3],
+                    "microservices": [4],
+                },
+                "authorships": [
+                    {"author": {"display_name": "Ada Lovelace"}},
+                    {"author": {"display_name": "Grace Hopper"}},
+                ],
+                "publication_year": 2026,
+                "publication_date": "2026-08-02",
+                "primary_location": {
+                    "landing_page_url": "https://example.test/openalex-paper",
+                    "pdf_url": "https://example.test/openalex-paper.pdf",
+                    "source": {"display_name": "Example Venue"},
+                },
+                "open_access": {"is_oa": True, "oa_url": "https://example.test/oa"},
+                "concepts": [{"display_name": "Software engineering"}],
+                "keywords": [{"display_name": "microservice diagnosis"}],
+                "primary_topic": {"display_name": "Computer science"},
+                "locations": [{"landing_page_url": "https://example.test/alternate"}],
+            }
+        )
+
+        self.assertEqual(candidate.source, "openalex")
+        self.assertEqual(candidate.source_id, "W123456789")
+        self.assertEqual(candidate.doi, "https://doi.org/10.1234/openalex")
+        self.assertEqual(candidate.abstract, "Root cause analysis for microservices")
+        self.assertEqual(candidate.authors, ["Ada Lovelace", "Grace Hopper"])
+        self.assertEqual(candidate.published, "2026-08-02")
+        self.assertEqual(candidate.url, "https://example.test/openalex-paper")
+        self.assertEqual(candidate.pdf_url, "https://example.test/openalex-paper.pdf")
+        self.assertEqual(candidate.categories, ["Software engineering", "microservice diagnosis"])
+        self.assertEqual(candidate.metadata["venue"], "Example Venue")
+        self.assertEqual(candidate.metadata["source_metadata"]["openalex_id"], "https://openalex.org/W123456789")
+
+    def test_openalex_fetch_uses_mocked_api_response(self):
+        payload = {
+            "results": [
+                {
+                    "id": "https://openalex.org/W123456789",
+                    "doi": "https://doi.org/10.5555/openalex",
+                    "display_name": "OpenAlex AIOps Paper",
+                    "abstract_inverted_index": {"AIOps": [0], "observability": [1]},
+                    "authorships": [{"author": {"display_name": "Example Author"}}],
+                    "publication_year": 2026,
+                    "primary_location": {
+                        "landing_page_url": "https://example.test/openalex",
+                        "pdf_url": None,
+                    },
+                    "best_oa_location": {"pdf_url": "https://example.test/openalex.pdf"},
+                    "open_access": {"is_oa": True, "oa_url": "https://example.test/oa"},
+                    "concepts": [{"display_name": "Computer science"}],
+                    "keywords": [{"display_name": "AIOps"}],
+                }
+            ]
+        }
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["timeout"] = timeout
+            return FakeHttpResponse(payload)
+
+        source = OpenAlexSource(request_delay=0, retries=0, timeout=14, verbose=False)
+        with patch("paper_agents.scout.urllib.request.urlopen", fake_urlopen):
+            candidates = source.fetch(["AIOps"], max_results=3, freshness_months=24)
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].source, "openalex")
+        self.assertEqual(candidates[0].source_id, "W123456789")
+        self.assertEqual(candidates[0].doi, "https://doi.org/10.5555/openalex")
+        self.assertEqual(candidates[0].pdf_url, "https://example.test/openalex.pdf")
+        self.assertEqual(candidates[0].metadata["query_topic"], "AIOps")
+        self.assertIn("api.openalex.org", captured["url"])
+        self.assertIn("search=AIOps", captured["url"])
+        self.assertEqual(captured["timeout"], 14)
+
+    def test_scout_daily_cli_selects_openalex_source(self):
+        captured = {}
+
+        def fake_run_daily_scout(**kwargs):
+            captured["source"] = kwargs["source"]
+            return {"source": kwargs["source"].name, "candidates": []}
+
+        with patch("paper_agents.cli.run_daily_scout", fake_run_daily_scout):
+            with patch("paper_agents.cli.print_section"):
+                with patch(
+                    "sys.argv",
+                    [
+                        "paper_agents.cli",
+                        "scout-daily",
+                        "--source",
+                        "openalex",
+                        "--fetch",
+                        "1",
+                        "--no-download",
+                        "--db",
+                        str(self.db_path),
+                    ],
+                ):
+                    cli.main()
+
+        self.assertEqual(captured["source"].name, "openalex")
 
     def test_domain_filter_penalizes_physical_incident_domains(self):
         software = ScoutCandidate(
