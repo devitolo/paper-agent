@@ -54,6 +54,8 @@ from paper_agents.scout import (
     DEFAULT_SCOUT_DIR,
     DEFAULT_SCOUT_TOPICS,
     ResearchScout,
+    SCOUT_SOURCES,
+    create_scout_source,
     run_daily_scout,
 )
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile, save_profile
@@ -115,30 +117,31 @@ def main() -> None:
     run_parser = subparsers.add_parser("run", help="Run Scout, then Curator")
     run_parser.add_argument("--max-results", type=int, default=10, help="Number of arXiv results to fetch")
 
-    daily_parser = subparsers.add_parser("scout-daily", help="Run deterministic daily arXiv scout MVP")
+    daily_parser = subparsers.add_parser("scout-daily", help="Run deterministic daily paper Scout MVP")
     daily_parser.add_argument("--freshness-months", type=int, default=DEFAULT_FRESHNESS_MONTHS)
     daily_parser.add_argument("--fetch", type=int, default=DEFAULT_FETCH_LIMIT, help="Maximum candidates to fetch")
     daily_parser.add_argument("--keep", type=int, default=DEFAULT_KEEP_LIMIT, help="Number of top candidates to select")
     daily_parser.add_argument("--scout-dir", type=Path, default=DEFAULT_SCOUT_DIR)
     daily_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
+    daily_parser.add_argument("--source", choices=SCOUT_SOURCES, default="arxiv", help="Scout source adapter")
     daily_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
     daily_parser.add_argument(
         "--request-delay",
         type=float,
         default=DEFAULT_ARXIV_REQUEST_DELAY,
-        help="Seconds to wait between arXiv topic requests",
+        help="Seconds to wait between source topic requests",
     )
     daily_parser.add_argument(
         "--retries",
         type=int,
         default=DEFAULT_ARXIV_RETRIES,
-        help="Retries per arXiv topic request",
+        help="Retries per source topic request",
     )
     daily_parser.add_argument(
         "--source-timeout",
         type=int,
         default=DEFAULT_ARXIV_TIMEOUT,
-        help="Timeout seconds per arXiv request",
+        help="Timeout seconds per source request",
     )
     daily_parser.add_argument(
         "--db",
@@ -159,6 +162,7 @@ def main() -> None:
     pipeline_parser.add_argument("--keep", type=int, default=3, help="Maximum recommendations to curate and extract; capped at 3")
     pipeline_parser.add_argument("--scout-dir", type=Path, default=DEFAULT_SCOUT_DIR)
     pipeline_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
+    pipeline_parser.add_argument("--source", choices=SCOUT_SOURCES, default="arxiv", help="Scout source adapter")
     pipeline_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
     pipeline_parser.add_argument("--model", default=DEFAULT_MODEL)
     pipeline_parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
@@ -171,19 +175,19 @@ def main() -> None:
         "--request-delay",
         type=float,
         default=DEFAULT_ARXIV_REQUEST_DELAY,
-        help="Seconds to wait between arXiv topic requests",
+        help="Seconds to wait between source topic requests",
     )
     pipeline_parser.add_argument(
         "--retries",
         type=int,
         default=DEFAULT_ARXIV_RETRIES,
-        help="Retries per arXiv topic request",
+        help="Retries per source topic request",
     )
     pipeline_parser.add_argument(
         "--source-timeout",
         type=int,
         default=DEFAULT_ARXIV_TIMEOUT,
-        help="Timeout seconds per arXiv request",
+        help="Timeout seconds per source request",
     )
     pipeline_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
     pipeline_parser.add_argument("--max-scout-attempts", type=int, default=DEFAULT_MAX_SCOUT_ATTEMPTS)
@@ -298,10 +302,16 @@ def main() -> None:
 
     if args.command == "scout-daily":
         topics = args.topics or DEFAULT_SCOUT_TOPICS
-        source_seen_ids = seen_source_ids(args.db, source="arxiv") if not args.include_seen else set()
+        source_seen_ids = seen_source_ids(args.db, source=args.source) if not args.include_seen else set()
         try:
             output = run_daily_scout(
                 topics=topics,
+                source=create_scout_source(
+                    args.source,
+                    request_delay=args.request_delay,
+                    retries=args.retries,
+                    timeout=args.source_timeout,
+                ),
                 freshness_months=args.freshness_months,
                 fetch_limit=args.fetch,
                 keep_limit=args.keep,
@@ -339,6 +349,7 @@ def main() -> None:
                 workers=args.workers,
                 db_path=args.db,
                 mode=mode,
+                source_name=args.source,
                 request_delay=args.request_delay,
                 scout_retries=args.retries,
                 scout_timeout=args.source_timeout,

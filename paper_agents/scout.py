@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import os
 import re
 import time
 import urllib.error
@@ -56,6 +57,7 @@ DEFAULT_PDF_DIR = Path("data/papers")
 DEFAULT_ARXIV_REQUEST_DELAY = 3.0
 DEFAULT_ARXIV_RETRIES = 3
 DEFAULT_ARXIV_TIMEOUT = 60
+SCOUT_SOURCES = ("arxiv", "semantic_scholar")
 
 
 @dataclass
@@ -89,6 +91,8 @@ class ScoutCandidate:
     updated: str | None
     url: str
     pdf_url: str | None
+    doi: str | None = None
+    arxiv_id: str | None = None
     categories: list[str] = field(default_factory=list)
     primary_category: str | None = None
     score: float = 0.0
@@ -220,6 +224,148 @@ class ArxivSource:
         if retry_after and retry_after.isdigit():
             return float(retry_after)
         return self.request_delay * (2 ** attempt)
+
+
+class SemanticScholarSource:
+    name = "semantic_scholar"
+    api_url = "https://api.semanticscholar.org/graph/v1/paper/search"
+
+    def __init__(
+        self,
+        request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
+        retries: int = DEFAULT_ARXIV_RETRIES,
+        timeout: int = DEFAULT_ARXIV_TIMEOUT,
+        verbose: bool = True,
+        api_key: str | None = None,
+    ):
+        self.request_delay = request_delay
+        self.retries = retries
+        self.timeout = timeout
+        self.verbose = verbose
+        self.api_key = api_key if api_key is not None else os.getenv("SEMANTIC_SCHOLAR_API_KEY")
+
+    def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
+        terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
+        per_topic = max(1, min(10, (max_results + len(terms) - 1) // len(terms)))
+        cutoff_year = (date.today() - timedelta(days=freshness_months * 31)).year
+        candidates: list[ScoutCandidate] = []
+        errors: list[str] = []
+
+        for index, topic in enumerate(terms):
+            if index:
+                time.sleep(self.request_delay)
+            if self.verbose:
+                print(f"fetching Semantic Scholar topic {index + 1}/{len(terms)}: {topic} ({per_topic} requested)")
+            try:
+                papers = self._fetch_topic(topic, per_topic)
+            except OSError as error:
+                errors.append(f"{topic}: {error}")
+                if self.verbose:
+                    print(f"Semantic Scholar topic failed: {topic}: {error}")
+                continue
+            if self.verbose:
+                print(f"received {len(papers)} Semantic Scholar entries for topic: {topic}")
+
+            for paper in papers:
+                candidate = semantic_scholar_paper_to_candidate(paper)
+                candidate.metadata["query_topic"] = topic
+                if not candidate.title or not candidate.source_id:
+                    continue
+                if candidate.published:
+                    try:
+                        if int(candidate.published[:4]) < cutoff_year:
+                            continue
+                    except ValueError:
+                        pass
+                candidates.append(candidate)
+
+        if errors and self.verbose:
+            print(f"Semantic Scholar partial failures: {len(errors)}/{len(terms)} topics failed")
+        if not candidates and errors:
+            raise RuntimeError(
+                "Semantic Scholar fetch returned 0 candidates because every topic failed: "
+                + "; ".join(errors[:3])
+            )
+        return dedupe_candidates(candidates)[:max_results]
+
+    def _fetch_topic(self, topic: str, max_results: int) -> list[dict[str, Any]]:
+        params = urllib.parse.urlencode(
+            {
+                "query": topic,
+                "limit": max_results,
+                "fields": ",".join(
+                    [
+                        "paperId",
+                        "title",
+                        "abstract",
+                        "authors",
+                        "year",
+                        "publicationDate",
+                        "url",
+                        "openAccessPdf",
+                        "externalIds",
+                        "fieldsOfStudy",
+                        "publicationTypes",
+                        "venue",
+                    ]
+                ),
+            }
+        )
+        request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
+
+        last_error: OSError | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                papers = payload.get("data") or []
+                return [paper for paper in papers if isinstance(paper, dict)]
+            except urllib.error.HTTPError as error:
+                last_error = error
+                if error.code not in {429, 500, 502, 503, 504} or attempt >= self.retries:
+                    raise
+                delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After"))
+                if self.verbose:
+                    print(f"Semantic Scholar request failed for topic '{topic}' ({error.code}), retrying in {delay:.0f}s")
+                time.sleep(delay)
+            except (urllib.error.URLError, TimeoutError, SocketTimeout, json.JSONDecodeError) as error:
+                last_error = error if isinstance(error, OSError) else OSError(str(error))
+                if attempt >= self.retries:
+                    raise last_error
+                delay = self._retry_delay(attempt)
+                if self.verbose:
+                    print(f"Semantic Scholar request failed for topic '{topic}' ({error}), retrying in {delay:.0f}s")
+                time.sleep(delay)
+
+        if last_error:
+            raise last_error
+        return []
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"User-Agent": "paper-agent/0.1"}
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
+        return headers
+
+    def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
+        if retry_after and retry_after.isdigit():
+            return float(retry_after)
+        return self.request_delay * (2 ** attempt)
+
+
+def create_scout_source(
+    source_name: str,
+    *,
+    request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
+    retries: int = DEFAULT_ARXIV_RETRIES,
+    timeout: int = DEFAULT_ARXIV_TIMEOUT,
+    verbose: bool = True,
+) -> PaperSource:
+    if source_name == "arxiv":
+        return ArxivSource(request_delay=request_delay, retries=retries, timeout=timeout, verbose=verbose)
+    if source_name == "semantic_scholar":
+        return SemanticScholarSource(request_delay=request_delay, retries=retries, timeout=timeout, verbose=verbose)
+    raise ValueError(f"Unsupported Scout source: {source_name}")
 
 
 class ResearchScout:
@@ -398,6 +544,54 @@ def arxiv_entry_to_candidate(entry: ET.Element) -> ScoutCandidate:
         pdf_url=pdf_url,
         categories=categories,
         primary_category=primary_category,
+    )
+
+
+def semantic_scholar_paper_to_candidate(paper: dict[str, Any]) -> ScoutCandidate:
+    external_ids = paper.get("externalIds") if isinstance(paper.get("externalIds"), dict) else {}
+    open_access_pdf = paper.get("openAccessPdf") if isinstance(paper.get("openAccessPdf"), dict) else {}
+    paper_id = str(paper.get("paperId") or "").strip()
+    title = _clean(str(paper.get("title") or ""))
+    abstract = _clean(str(paper.get("abstract") or ""))
+    authors = [
+        _clean(str(author.get("name") or ""))
+        for author in paper.get("authors") or []
+        if isinstance(author, dict)
+    ]
+    publication_date = str(paper.get("publicationDate") or "").strip()
+    year = paper.get("year")
+    published = publication_date or (str(year) if year else "")
+    url = str(paper.get("url") or "").strip()
+    if not url and paper_id:
+        url = f"https://www.semanticscholar.org/paper/{paper_id}"
+    fields = paper.get("fieldsOfStudy") or []
+    categories = [str(field).strip() for field in fields if str(field).strip()]
+    publication_types = paper.get("publicationTypes") or []
+    pdf_url = str(open_access_pdf.get("url") or "").strip() or None
+    doi = external_ids.get("DOI") or external_ids.get("Doi")
+    arxiv_id = external_ids.get("ArXiv") or external_ids.get("ARXIV") or external_ids.get("arXiv")
+
+    metadata = {
+        "external_ids": external_ids,
+        "venue": paper.get("venue"),
+        "publication_types": publication_types,
+    }
+
+    return ScoutCandidate(
+        source="semantic_scholar",
+        source_id=paper_id,
+        title=title,
+        abstract=abstract,
+        authors=[author for author in authors if author],
+        published=published,
+        updated=None,
+        url=url,
+        pdf_url=pdf_url,
+        doi=str(doi).strip() if doi else None,
+        arxiv_id=str(arxiv_id).strip() if arxiv_id else None,
+        categories=categories,
+        primary_category=categories[0] if categories else None,
+        metadata=metadata,
     )
 
 

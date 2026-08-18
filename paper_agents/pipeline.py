@@ -28,6 +28,7 @@ from paper_agents.scout import (
     DEFAULT_PDF_DIR,
     DEFAULT_SCOUT_DIR,
     DEFAULT_SCOUT_TOPICS,
+    create_scout_source,
 )
 from paper_agents.scout_agent import DEFAULT_TARGET_CANDIDATES, ScoutAgent, ScoutConfig
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile
@@ -55,6 +56,7 @@ def run_daily_pipeline(
     workers: int = DEFAULT_PIPELINE_WORKERS,
     db_path: Path | None = db.DEFAULT_DB_PATH,
     mode: str = "full",
+    source_name: str = "arxiv",
     request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
     scout_retries: int = DEFAULT_ARXIV_RETRIES,
     scout_timeout: int = DEFAULT_ARXIV_TIMEOUT,
@@ -72,6 +74,12 @@ def run_daily_pipeline(
     max_recommendations = min(max(1, keep_limit), DEFAULT_MAX_RECOMMENDATIONS)
     max_scout_attempts = max(1, max_scout_attempts)
     profile = load_profile(profile_path)
+    source = create_scout_source(
+        source_name,
+        request_delay=request_delay,
+        retries=scout_retries,
+        timeout=scout_timeout,
+    )
 
     scout_results: list[dict[str, Any]] = []
     curator_result: dict[str, Any] | None = None
@@ -84,6 +92,7 @@ def run_daily_pipeline(
             max_scout_attempts=max_scout_attempts,
             metadata={
                 "topics": topics_for_run,
+                "source": source.name,
                 "fetch_limit": fetch_limit,
                 "max_recommendations": max_recommendations,
             },
@@ -92,7 +101,7 @@ def run_daily_pipeline(
         profile_version = db.current_profile_version(connection)
 
         for attempt in range(1, max_scout_attempts + 1):
-            scout_result = ScoutAgent().run(
+            scout_result = ScoutAgent(source=source).run(
                 connection,
                 workflow_cycle_id=cycle_id,
                 attempt_number=attempt,
@@ -159,4 +168,3 @@ def run_daily_pipeline(
         "workers": workers,
         "cards": cards,
     }
-

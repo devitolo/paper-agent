@@ -103,7 +103,7 @@ Full scheduled run:
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-`--keep` is capped at three recommendations. `--max-scout-attempts` controls the bounded re-scout loop. Default Scout topics are intentionally broad across AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, software maintenance, SRE, cloud operations, and production engineering. Curator penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, grid, and transportation incidents.
+`--keep` is capped at three recommendations. `--max-scout-attempts` controls the bounded re-scout loop. arXiv remains the default Scout source; Semantic Scholar can be selected with `--source semantic_scholar` for `scout-daily` or `pipeline-daily`, optionally using `SEMANTIC_SCHOLAR_API_KEY`. Default Scout topics are intentionally broad across AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, software maintenance, SRE, cloud operations, and production engineering. Curator penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, grid, and transportation incidents.
 
 ## Review Queue UI
 

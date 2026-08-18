@@ -5,7 +5,9 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from paper_agents import cli
 from paper_agents import db
 from paper_agents.feedback import apply_feedback_to_profile, ingest_feedback_blob, rebuild_feedback_profile
 from paper_agents.cli import run_feedback_add, run_feedback_apply, run_feedback_rebuild_profile
@@ -13,7 +15,9 @@ from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
 from paper_agents.curator_agent import evaluate_candidate
 from paper_agents.scout import DEFAULT_SCOUT_TOPICS
+from paper_agents.scout import SemanticScholarSource
 from paper_agents.scout import ScoutCandidate
+from paper_agents.scout import semantic_scholar_paper_to_candidate
 from paper_agents.scout import rank_candidates
 from paper_agents.scout import run_daily_scout
 from paper_agents.scout import scout_candidate_record
@@ -31,6 +35,20 @@ class FakeSource:
 
     def fetch(self, topics, max_results, freshness_months):
         return self.candidates[:max_results]
+
+
+class FakeHttpResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
 
 
 def candidate(source_id: str, title: str, *, source: str = "arxiv", arxiv_id: str | None = None) -> ScoutCandidate:
@@ -102,6 +120,98 @@ class BackendV2Tests(unittest.TestCase):
             "production engineering",
         }
         self.assertTrue(expected.issubset(topics))
+
+    def test_semantic_scholar_normalizes_external_ids_and_pdf(self):
+        candidate = semantic_scholar_paper_to_candidate(
+            {
+                "paperId": "abc123",
+                "title": "LLM Incident Response",
+                "abstract": "Root cause analysis for cloud operations.",
+                "authors": [{"name": "Ada Lovelace"}, {"name": "Grace Hopper"}],
+                "year": 2026,
+                "publicationDate": "2026-08-01",
+                "url": "https://www.semanticscholar.org/paper/abc123",
+                "openAccessPdf": {"url": "https://example.test/paper.pdf"},
+                "externalIds": {"DOI": "10.1234/example", "ArXiv": "2608.12345"},
+                "fieldsOfStudy": ["Computer Science"],
+                "publicationTypes": ["JournalArticle"],
+                "venue": "ExampleConf",
+            }
+        )
+
+        self.assertEqual(candidate.source, "semantic_scholar")
+        self.assertEqual(candidate.source_id, "abc123")
+        self.assertEqual(candidate.doi, "10.1234/example")
+        self.assertEqual(candidate.arxiv_id, "2608.12345")
+        self.assertEqual(candidate.pdf_url, "https://example.test/paper.pdf")
+        self.assertEqual(candidate.authors, ["Ada Lovelace", "Grace Hopper"])
+        self.assertEqual(candidate.published, "2026-08-01")
+        self.assertEqual(candidate.categories, ["Computer Science"])
+        self.assertEqual(candidate.metadata["external_ids"]["DOI"], "10.1234/example")
+
+    def test_semantic_scholar_fetch_uses_mocked_api_response(self):
+        payload = {
+            "data": [
+                {
+                    "paperId": "abc123",
+                    "title": "Semantic Scholar AIOps Paper",
+                    "abstract": "AIOps for incident response.",
+                    "authors": [{"name": "Example Author"}],
+                    "year": 2026,
+                    "url": "https://www.semanticscholar.org/paper/abc123",
+                    "openAccessPdf": {"url": "https://example.test/abc123.pdf"},
+                    "externalIds": {"DOI": "10.5555/abc123"},
+                    "fieldsOfStudy": ["Computer Science"],
+                }
+            ]
+        }
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.header_items())
+            captured["timeout"] = timeout
+            return FakeHttpResponse(payload)
+
+        source = SemanticScholarSource(request_delay=0, retries=0, timeout=12, verbose=False, api_key="test-key")
+        with patch("paper_agents.scout.urllib.request.urlopen", fake_urlopen):
+            candidates = source.fetch(["AIOps"], max_results=3, freshness_months=24)
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].source, "semantic_scholar")
+        self.assertEqual(candidates[0].source_id, "abc123")
+        self.assertEqual(candidates[0].doi, "10.5555/abc123")
+        self.assertEqual(candidates[0].metadata["query_topic"], "AIOps")
+        self.assertIn("api.semanticscholar.org", captured["url"])
+        self.assertEqual(captured["timeout"], 12)
+        self.assertEqual(captured["headers"].get("X-api-key"), "test-key")
+
+    def test_scout_daily_cli_selects_semantic_scholar_source(self):
+        captured = {}
+
+        def fake_run_daily_scout(**kwargs):
+            captured["source"] = kwargs["source"]
+            return {"source": kwargs["source"].name, "candidates": []}
+
+        with patch("paper_agents.cli.run_daily_scout", fake_run_daily_scout):
+            with patch("paper_agents.cli.print_section"):
+                with patch(
+                    "sys.argv",
+                    [
+                        "paper_agents.cli",
+                        "scout-daily",
+                        "--source",
+                        "semantic_scholar",
+                        "--fetch",
+                        "1",
+                        "--no-download",
+                        "--db",
+                        str(self.db_path),
+                    ],
+                ):
+                    cli.main()
+
+        self.assertEqual(captured["source"].name, "semantic_scholar")
 
     def test_domain_filter_penalizes_physical_incident_domains(self):
         software = ScoutCandidate(
