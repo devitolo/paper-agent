@@ -32,6 +32,8 @@ FILTERS = [
     ("not_interested", "Not interested"),
 ]
 
+SOURCE_FILTER_ALL = "all"
+
 SORTS = [
     ("latest", "Latest"),
     ("score", "Score"),
@@ -67,6 +69,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         saved=params.get("saved", [None])[0] == "1",
                         profile_apply_failed=params.get("profile_apply_failed", [None])[0] == "1",
                         filter_value=params.get("filter", ["needs_review"])[0],
+                        source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
                         sort_value=params.get("sort", ["latest"])[0],
                         view_value=params.get("view", ["full"])[0],
                     )
@@ -184,20 +187,23 @@ def render_review_queue(
     saved: bool = False,
     profile_apply_failed: bool = False,
     filter_value: str = "needs_review",
+    source_value: str = SOURCE_FILTER_ALL,
     sort_value: str = "latest",
     view_value: str = "full",
 ) -> str:
     filter_value = normalize_choice(filter_value, FILTERS, "needs_review")
+    source_choices = load_source_filter_choices(db_path)
+    source_value = normalize_choice(source_value, source_choices, SOURCE_FILTER_ALL)
     sort_value = normalize_choice(sort_value, SORTS, "latest")
     view_value = normalize_choice(view_value, VIEWS, "full")
-    cards = load_review_cards(db_path, filter_value=filter_value, sort_value=sort_value)
+    cards = load_review_cards(db_path, filter_value=filter_value, source_value=source_value, sort_value=sort_value)
     banners = []
     if saved:
         banners.append('<div class="banner">Feedback saved.</div>')
     if profile_apply_failed:
         banners.append('<div class="banner warning">Profile auto-apply failed. Feedback was saved; run feedback apply manually when ready.</div>')
     saved_banner = "".join(banners)
-    request_path = build_queue_href(filter_value, sort_value, view_value)
+    request_path = build_queue_href(filter_value, source_value, sort_value, view_value)
     card_html = "\n".join(render_card(card, view_value=view_value, return_to=request_path) for card in cards)
     if not card_html:
         card_html = '<section class="empty">No selected papers are waiting in the registry yet.</section>'
@@ -215,10 +221,11 @@ def render_review_queue(
     <header class="topbar">
       <div>
         <h1 class="brand-title"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Review Queue</span></h1>
-        <p>{len(cards)} papers | {escape(selected_label(FILTERS, filter_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}</p>
+        <p>{len(cards)} papers | {escape(selected_label(FILTERS, filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}</p>
       </div>
       <form method="get" action="/" class="queue-controls">
         {render_select(FILTERS, "filter", filter_value, "Status")}
+        {render_select(source_choices, "source", source_value, "Source")}
         {render_select(SORTS, "sort", sort_value, "Sort")}
         {render_select(VIEWS, "view", view_value, "View")}
         <button type="submit" class="secondary">Apply</button>
@@ -253,6 +260,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     feedback_label = f'<span class="feedback-state">Current: {escape(feedback_status)}</span>' if feedback_status else ""
     summary = card["summary"]
     source_controls = render_source_controls(card)
+    source_badge = f'<span class="source-badge">{escape(card["source_label"])}</span>'
     compact_class = " compact" if view_value == "compact" else ""
     summary_html = render_summary(summary, compact=view_value == "compact")
 
@@ -265,7 +273,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
       <div class="card-head">
         <div>
           <h2>{escape(card["title"])}</h2>
-          <p>{escape(card.get("published") or "date unknown")} | {escape(card["source"])} | {escape(card["source_id"])} | {source_controls}</p>
+          <p>{source_badge} {escape(card.get("published") or "date unknown")} | {escape(card["source_id"])} | {source_controls}</p>
         </div>
       </div>
       <div class="tags">{tags}</div>
@@ -325,15 +333,19 @@ def button_class(card: dict[str, Any], status: str) -> str:
     return "primary" if card.get("feedback_status") == status else "secondary"
 
 
-def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> list[dict[str, Any]]:
+def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, sort_value: str) -> list[dict[str, Any]]:
     init_db(db_path)
-    where_clause = ""
-    params: tuple[Any, ...] = ()
+    where_clauses = []
+    params: list[Any] = []
     if filter_value == "needs_review":
-        where_clause = "WHERE latest_feedback.status IS NULL"
+        where_clauses.append("latest_feedback.status IS NULL")
     elif filter_value != "all":
-        where_clause = "WHERE latest_feedback.status = ?"
-        params = (filter_value,)
+        where_clauses.append("latest_feedback.status = ?")
+        params.append(filter_value)
+    if source_value != SOURCE_FILTER_ALL:
+        where_clauses.append("EXISTS (SELECT 1 FROM paper_sources source_filter WHERE source_filter.paper_id = papers.id AND source_filter.source = ?)")
+        params.append(source_value)
+    where_clause = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
     order_clause = (
         "ORDER BY latest_recommendation.score DESC, latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
@@ -376,6 +388,16 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
                     url,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id ASC) AS row_number
                 FROM paper_sources
+            ), source_rollup AS (
+                SELECT
+                    paper_id,
+                    GROUP_CONCAT(source, ',') AS sources
+                FROM (
+                    SELECT DISTINCT paper_id, source
+                    FROM paper_sources
+                    ORDER BY paper_id, source
+                )
+                GROUP BY paper_id
             )
             SELECT
                 papers.id,
@@ -389,18 +411,20 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
                 latest_recommendation.matched_signals_json,
                 latest_recommendation.rationale,
                 latest_feedback.status,
-                latest_feedback.notes
+                latest_feedback.notes,
+                source_rollup.sources
             FROM papers
             JOIN latest_recommendation
               ON latest_recommendation.paper_id = papers.id
              AND latest_recommendation.row_number = 1
             LEFT JOIN primary_source ON primary_source.paper_id = papers.id AND primary_source.row_number = 1
+            LEFT JOIN source_rollup ON source_rollup.paper_id = papers.id
             LEFT JOIN latest_feedback ON latest_feedback.paper_id = papers.id AND latest_feedback.row_number = 1
             {where_clause}
             {order_clause}
             LIMIT 50
             """,
-            params,
+            tuple(params),
         ).fetchall()
 
         cards = []
@@ -413,6 +437,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, sort_value: str) -> l
                     "recommendation_id": row[1],
                     "source": row[2] or "unknown",
                     "source_id": row[3] or "unknown",
+                    "source_label": source_label(row[2] or "unknown", parse_sources(row[12])),
                     "title": row[4],
                     "published": row[5],
                     "url": row[6],
@@ -445,8 +470,8 @@ def render_select(
     )
 
 
-def build_queue_href(filter_value: str, sort_value: str, view_value: str) -> str:
-    return "/?" + urllib.parse.urlencode({"filter": filter_value, "sort": sort_value, "view": view_value})
+def build_queue_href(filter_value: str, source_value: str, sort_value: str, view_value: str) -> str:
+    return "/?" + urllib.parse.urlencode({"filter": filter_value, "source": source_value, "sort": sort_value, "view": view_value})
 
 
 def add_query_param(path: str, key: str, value: str) -> str:
@@ -463,6 +488,46 @@ def normalize_choice(value: str, choices: list[tuple[str, str]], default: str) -
 
 def selected_label(choices: list[tuple[str, str]], value: str) -> str:
     return dict(choices).get(value, value)
+
+
+def load_source_filter_choices(db_path: Path) -> list[tuple[str, str]]:
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT paper_sources.source
+            FROM paper_sources
+            JOIN recommendations ON recommendations.paper_id = paper_sources.paper_id
+            WHERE paper_sources.source IS NOT NULL
+            ORDER BY paper_sources.source
+            """
+        ).fetchall()
+    choices = [(SOURCE_FILTER_ALL, "All sources")]
+    choices.extend((row[0], source_display_name(row[0])) for row in rows if row[0])
+    return choices
+
+
+def parse_sources(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [source for source in value.split(",") if source]
+
+
+def source_label(primary_source: str, sources: list[str]) -> str:
+    unique = sorted(set(sources))
+    if len(unique) > 1:
+        return f"{source_display_name(primary_source)} +{len(unique) - 1}"
+    return source_display_name(primary_source)
+
+
+def source_display_name(source: str) -> str:
+    labels = {
+        "arxiv": "arXiv",
+        "semantic_scholar": "Semantic Scholar",
+        "openalex": "OpenAlex",
+        "unknown": "Unknown",
+    }
+    return labels.get(source, source.replace("_", " ").title())
 
 
 def load_artifacts_for_paper(connection: sqlite3.Connection, paper_id: int) -> dict[str, dict[str, Any]]:

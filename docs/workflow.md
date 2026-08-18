@@ -111,7 +111,7 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, and appends lightweight status rows. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions`, ScoutAgent, or CuratorAgent directly.
+The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, shows source badges, filters by source when multiple Scout sources are present, and appends lightweight status rows. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions`, ScoutAgent, or CuratorAgent directly.
 
 The same V2 storage path is available from the CLI:
 

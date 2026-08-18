@@ -248,7 +248,7 @@ Run the local review queue UI:
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, keeps quick review actions close to each paper, stores non-empty Feedback boxes as raw V2 feedback blobs with deterministic v1 structured parsing, and auto-applies the newly submitted structured feedback to the active profile through Gemini. Applied-feedback tracking prevents reusing the same structured row repeatedly.
+The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, shows source badges, filters by source when multiple Scout sources are present, keeps quick review actions close to each paper, stores non-empty Feedback boxes as raw V2 feedback blobs with deterministic v1 structured parsing, and auto-applies the newly submitted structured feedback to the active profile through Gemini. Applied-feedback tracking prevents reusing the same structured row repeatedly.
 
 Manual feedback apply and full profile rebuild remain available for testing and operations:
 

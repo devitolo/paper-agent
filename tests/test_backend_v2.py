@@ -1046,8 +1046,12 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn('<form method="get" action="/" class="queue-controls">', html)
         self.assertIn('<select name="filter"', html)
+        self.assertIn('<select name="source"', html)
         self.assertIn('<select name="sort"', html)
         self.assertIn('<select name="view"', html)
+        self.assertIn("All sources", html)
+        self.assertIn("arXiv", html)
+        self.assertIn('class="source-badge"', html)
         self.assertIn('class="action-rail"', html)
         self.assertIn('<h1 class="brand-title">', html)
         self.assertIn('srcset="/assets/logo_dark.png"', html)
@@ -1059,6 +1063,36 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn("Copy prompt/link", html)
         self.assertNotIn("<span>score</span>", html)
         self.assertNotIn(">Notes<textarea", html)
+
+    def test_review_queue_filters_by_source_and_shows_multi_source_label(self):
+        paper_id, _ = self._seed_review_recommendation()
+        db.upsert_paper_source(
+            self.connection,
+            paper_id,
+            {
+                "source": "openalex",
+                "source_id": "W123",
+                "url": "https://openalex.org/W123",
+            },
+        )
+        other_paper_id, _ = self._seed_review_recommendation(source_id="2607.semanticv1")
+        db.upsert_paper_source(
+            self.connection,
+            other_paper_id,
+            {
+                "source": "semantic_scholar",
+                "source_id": "S123",
+                "url": "https://www.semanticscholar.org/paper/S123",
+            },
+        )
+        self.connection.commit()
+
+        html = web.render_review_queue(self.db_path, source_value="openalex")
+
+        self.assertIn('<option value="openalex" selected>OpenAlex</option>', html)
+        self.assertIn("arXiv +1", html)
+        self.assertIn("Dense Review Paper", html)
+        self.assertNotIn("2607.semanticv1", html)
 
     def test_review_queue_feedback_save_still_inserts_status_and_notes(self):
         paper_id, _ = self._seed_review_recommendation()
