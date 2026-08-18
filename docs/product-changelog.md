@@ -13,9 +13,9 @@ Decision: Project Paper needs a compact health view that shows whether the Mac m
 Completed behavior:
 
 - Add `python3 -m paper_agents.cli db health` with `--days`, `--source`, and `--json`.
-- Add `/health` to the existing Review Queue web server.
-- Compute DB integrity, latest workflow cycle age/state, days since last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, feedback/profile status, and operator warnings directly from SQLite.
-- Include source breakdowns for Scout candidates, eligible/excluded candidates, recommendations, and exclusion reasons.
+- Add `/health` to the existing Review Queue web server, with links between the review queue and health dashboard.
+- Compute DB integrity, latest workflow cycle age/state, days since last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, feedback/profile status, and operator warnings directly from raw SQLite facts instead of materialized aggregate tables.
+- Include lightweight charts and tables for daily candidates, eligible papers, recommendations, source breakdowns, feedback/profile activity, and exclusion reasons.
 - Surface stale workflow cycles, zero-candidate/zero-eligible Scout runs, missing triage summaries, unapplied structured feedback, recent Gemini/profile apply failures, and DB integrity failures.
 - Add compact navigation between the Review Queue and `/health`.
 - Add inline SVG charts for daily funnel trends, source breakdown, recommendation gaps, and feedback/profile activity.
@@ -33,7 +33,7 @@ Decision: Project Paper can support multiple Scout sources as opt-in adapters wh
 Completed behavior:
 
 - Semantic Scholar can be selected with `--source semantic_scholar`.
-- Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` header; use `--request-delay 2` or higher because approved key guidance is 1 request per second cumulatively across endpoints.
+- Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` header; use `--request-delay 2` or higher because approved key guidance is 1 request per second cumulatively across endpoints. Keep it opt-in until API-key behavior is reliable enough for scheduled use.
 - OpenAlex can be selected with `--source openalex` and does not require an API key.
 - Non-arXiv sources are opt-in and are not part of nightly cron yet.
 - Review Queue cards show source badges, and the source filter composes with status, sort, and view controls.
@@ -41,7 +41,7 @@ Completed behavior:
 Follow-up implementation:
 
 - OpenAlex now narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
-- Review Queue cards show a clearly labeled source abstract when local triage extraction is missing.
+- Review Queue cards show a clearly labeled source abstract from stored source metadata when local triage extraction is missing.
 - Same-cycle Scout rediscoveries remain eligible during bounded rescouts; older-cycle discoveries are still excluded as `previously_discovered`.
 - OpenAlex has a separate Monday 6:30 AM rotating cron script, `scripts/openalex_pipeline.sh`, with fetch 30, keep 2, and `--max-scout-attempts 1` so stable OpenAlex queries do not exhaust the same tiny pool every day.
 - The old direct one-off Sunday `pipeline-daily --source openalex` cron has been removed and is superseded by the script.

@@ -87,7 +87,7 @@ python3 -m paper_agents.cli db health --days 21
 python3 -m paper_agents.cli db health --days 21 --source openalex --json
 ```
 
-`db health` computes operational rollups directly from SQLite. It reports DB path/size/integrity, latest workflow cycle age/state, days since the last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, unapplied structured feedback, recent profile apply failures, and warnings for stale cycles or unhealthy sources.
+`db health` computes operational rollups directly from raw SQLite facts, without materialized aggregate tables. It reports DB path/size/integrity, latest workflow cycle age/state, days since the last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, unapplied structured feedback, recent profile apply failures, and warnings for stale cycles or unhealthy sources. Use `--days`, `--source`, and `--json` for range, source, and machine-readable output.
 
 ## Repository Path
 
@@ -111,7 +111,7 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 
 arXiv remains the default Scout source and the daily cron source. Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. OpenAlex is available through a separate weekly rotating script rather than the daily arXiv path.
 
-Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
+Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. Keep Semantic Scholar opt-in until API-key behavior is reliable enough for scheduled use. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
 
 During bounded rescouts inside one workflow cycle, papers rediscovered earlier in the same cycle remain eligible instead of being marked `previously_discovered`; older-cycle discoveries are still excluded.
 
@@ -125,7 +125,7 @@ python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 
 The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, shows source badges, filters by source when multiple Scout sources are present, and appends lightweight status rows. When local extraction is missing, the card shows a clearly labeled `Source Abstract` from stored source metadata instead of pretending it has a triage summary. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions`, ScoutAgent, or CuratorAgent directly.
 
-The same server exposes `/health`, a compact source-aware operations dashboard for the last 7/21/30/90 days. It shows top operational cards, warning banners, daily funnel tables, source breakdowns, exclusion reasons, artifact coverage, feedback/profile activity, and source filters without adding aggregate tables.
+The review queue links to `/health`, and `/health` links back to the review queue. The health page is a compact source-aware operations dashboard for the last 7/21/30/90 days. It computes from raw SQLite facts and shows top operational cards, warning banners, lightweight charts, daily funnel tables, source breakdowns, exclusion reasons, artifact coverage, feedback/profile activity, and source filters without adding aggregate tables. The current graph work is intentionally lightweight; leave heavier charting for later if the need becomes clear.
 
 The same V2 storage path is available from the CLI:
 
