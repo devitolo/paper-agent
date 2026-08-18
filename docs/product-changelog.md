@@ -18,6 +18,20 @@ Purpose:
 - Track exclusion reasons over time, especially `previously_discovered`.
 - Consider Mac mini CPU, temperature, and disk metrics later if they are easy to collect.
 
+### Scout sources: Semantic Scholar, OpenAlex, and source-aware review
+
+Status: Implemented in commits `be36bbe`, `865e1ab`, `c14e9d9`, and `b66a7a6`.
+
+Decision: Project Paper can support multiple Scout sources as opt-in adapters while keeping arXiv as the default and nightly cron source.
+
+Completed behavior:
+
+- Semantic Scholar can be selected with `--source semantic_scholar`.
+- Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` header; use `--request-delay 2` or higher because approved key guidance is 1 request per second cumulatively across endpoints.
+- OpenAlex can be selected with `--source openalex` and does not require an API key.
+- Non-arXiv sources are opt-in and are not part of nightly cron yet.
+- Review Queue cards show source badges, and the source filter composes with status, sort, and view controls.
+
 ## 2026-07-31
 
 ### Operability: backups, apply attempts, and logs

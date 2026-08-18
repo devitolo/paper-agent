@@ -32,6 +32,9 @@ Status: Implemented as V2 backend.
 - Download PDFs and extract triage summaries for recommended papers.
 - Record workflow cycles, Scout runs/candidates, Curator evaluations/recommendations, guidance, PDFs, and triage summaries in SQLite.
 - Retry arXiv timeouts, 429s, and malformed responses with configurable delay, retries, and timeout.
+- Add opt-in Semantic Scholar source adapter. Implemented; API key recommended via `SEMANTIC_SCHOLAR_API_KEY` due practical rate limits.
+- Add opt-in OpenAlex source adapter. Implemented; no API key required.
+- Add Review Queue source filter and source badges. Implemented for multi-source review.
 
 ## Phase 3: Provider-Based Scouting
 
@@ -40,6 +43,7 @@ Status: Implemented as V2 backend.
 - Normalize outputs.
 - Add run limits and telemetry.
 - Compare provider quota per useful paper.
+- Decide whether any non-arXiv source should graduate from opt-in testing into nightly cron.
 
 ## Phase 4: Automated Acquisition
 

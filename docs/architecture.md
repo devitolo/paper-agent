@@ -38,9 +38,10 @@ Python workflow
       |
       v
 Scout source adapters
-   |-- arXiv adapter
-   |-- future company blog adapters
-   `-- future provider adapters
+   |-- arXiv adapter (default/nightly)
+   |-- Semantic Scholar adapter (opt-in)
+   |-- OpenAlex adapter (opt-in)
+   `-- future source adapters
       |
       v
 SQLite candidate pool
@@ -70,7 +71,7 @@ The scheduler starts runs and captures basic process status. The first scheduler
 
 The Python workflow owns orchestration between deterministic steps and model-backed judgment steps. It should remain explicit and debuggable before any larger agent framework is considered.
 
-Scout source adapters translate a normalized scouting request into source-specific calls and return normalized paper records. Scout persists candidate pools and diagnostics only; preference scoring and recommendations belong to Curator.
+Scout source adapters translate a normalized scouting request into source-specific calls and return normalized paper records. arXiv is the default and nightly source; Semantic Scholar and OpenAlex are opt-in adapters for exploratory runs. Scout persists candidate pools and diagnostics only; preference scoring and recommendations belong to Curator.
 
 Curator reads the candidate pool, active profile version, history, and guidance. It stores evaluations for every candidate considered and writes at most three ordered recommendations.
 

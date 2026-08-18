@@ -103,7 +103,13 @@ Full scheduled run:
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-`--keep` is capped at three recommendations. `--max-scout-attempts` controls the bounded re-scout loop. arXiv remains the default Scout source; Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. Semantic Scholar may optionally use `SEMANTIC_SCHOLAR_API_KEY`; OpenAlex uses its public API without a key. Non-arXiv sources are opt-in and are not part of the nightly cron default yet. Default Scout topics are intentionally broad across AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, software maintenance, SRE, cloud operations, and production engineering. Curator penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, grid, and transportation incidents.
+`--keep` is capped at three recommendations. `--max-scout-attempts` controls the bounded re-scout loop.
+
+arXiv remains the default Scout source and the nightly cron source. Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. Non-arXiv sources are opt-in and are not part of the nightly cron default yet.
+
+Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key.
+
+Default Scout topics are intentionally broad across AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, software maintenance, SRE, cloud operations, and production engineering. Curator penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, grid, and transportation incidents.
 
 ## Review Queue UI
 

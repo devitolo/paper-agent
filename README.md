@@ -148,7 +148,9 @@ Run the default arXiv Scout source check:
 python3 -m paper_agents.cli scout-daily
 ```
 
-Scout uses arXiv by default and can also query Semantic Scholar with `--source semantic_scholar` or OpenAlex with `--source openalex`. It stores source candidate metadata in `data/scout/YYYY-MM-DD.jsonl` without preference scores, recommendation ranks, or final selection decisions. Ranking and recommendations belong to Curator inside `pipeline-daily`. Semantic Scholar works without an API key for low-volume use; set `SEMANTIC_SCHOLAR_API_KEY` if you have one. OpenAlex uses its public API without a key. Non-arXiv sources are opt-in and are not part of the nightly cron default yet.
+Scout uses arXiv by default, including for nightly cron. Semantic Scholar and OpenAlex are opt-in source adapters selected with `--source semantic_scholar` or `--source openalex`. Scout stores source candidate metadata in `data/scout/YYYY-MM-DD.jsonl` without preference scores, recommendation ranks, or final selection decisions. Ranking and recommendations belong to Curator inside `pipeline-daily`.
+
+Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Non-arXiv sources are opt-in and are not part of the nightly cron default yet.
 
 Default Scout topics cover practical operations clusters such as AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, program repair, software maintenance, SRE, cloud operations, and production engineering. Curator also penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, power grid, smart grid, and transportation incidents.
 
@@ -165,7 +167,7 @@ python3 -m paper_agents.cli scout-daily \
   --source-timeout 90
 ```
 
-For a gentle Semantic Scholar test:
+For a gentle Semantic Scholar test, set `SEMANTIC_SCHOLAR_API_KEY` when available and keep `--request-delay` at 2 or higher:
 
 ```bash
 python3 -m paper_agents.cli scout-daily \
