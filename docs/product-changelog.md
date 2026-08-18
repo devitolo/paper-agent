@@ -2,6 +2,22 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-08-18
+
+### System health and pipeline metrics dashboard
+
+Status: Planned/backlog.
+
+Decision: Project Paper needs a compact health view that shows whether the Mac mini and recommendation pipeline are working at a glance.
+
+Purpose:
+
+- Visualize the daily funnel from Scout candidates to eligible candidates, Curator work, recommendations, artifacts, feedback, and profile applications.
+- Surface cron, arXiv, Ollama, and Gemini failures alongside pipeline counts.
+- Help distinguish "cron did not run" from "Scout ran but the candidate funnel was exhausted."
+- Track exclusion reasons over time, especially `previously_discovered`.
+- Consider Mac mini CPU, temperature, and disk metrics later if they are easy to collect.
+
 ## 2026-07-31
 
 ### Operability: backups, apply attempts, and logs

@@ -52,6 +52,11 @@ Status: Implemented as V2 backend.
 
 - Add systemd service and timer.
 - Add log tailing and rotation. First logrotate/tail helpers implemented.
+- Add a System Health and Pipeline Metrics dashboard. Planned/backlog.
+  - Show daily workflow cycles, Scout candidates, eligible candidates, Curator evaluations, recommendations, artifacts/extractions, feedback submissions, and profile applications.
+  - Track exclusion reasons over time, especially `previously_discovered`.
+  - Surface cron, arXiv, Ollama, and Gemini failures so operators can distinguish "cron did not run" from "Scout ran but the candidate funnel was exhausted."
+  - Consider Mac mini CPU, temperature, and disk metrics later if available.
 - Resume missed jobs.
 - Add safe failure recovery. Backup script and feedback apply-attempt tracking implemented for first pass.
 
