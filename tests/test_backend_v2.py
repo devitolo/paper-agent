@@ -306,7 +306,7 @@ class BackendV2Tests(unittest.TestCase):
         query = urllib.parse.parse_qs(parsed.query)
         self.assertEqual(query["search"], ["AIOps"])
         self.assertEqual(query["per_page"], ["3"])
-        self.assertEqual(query["sort"], ["-publication_date"])
+        self.assertEqual(query["sort"], ["publication_date:desc"])
         self.assertIn("from_publication_date:", query["filter"][0])
         self.assertNotIn("select", query)
         self.assertEqual(captured["timeout"], 14)

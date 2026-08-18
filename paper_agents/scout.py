@@ -412,7 +412,7 @@ class OpenAlexSource:
             {
                 "search": topic,
                 "per_page": max_results,
-                "sort": "-publication_date",
+                "sort": "publication_date:desc",
                 "filter": f"from_publication_date:{cutoff.isoformat()}",
             }
         )
