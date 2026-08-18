@@ -434,6 +434,34 @@ def insert_scout_candidate(
     return int(row[0])
 
 
+def paper_has_scout_candidate_in_cycle(
+    connection: sqlite3.Connection,
+    *,
+    paper_id: int,
+    workflow_cycle_id: int,
+    before_scout_run_id: int | None = None,
+) -> bool:
+    before_clause = "" if before_scout_run_id is None else "AND scout_runs.id < ?"
+    params: tuple[Any, ...] = (
+        (paper_id, workflow_cycle_id)
+        if before_scout_run_id is None
+        else (paper_id, workflow_cycle_id, before_scout_run_id)
+    )
+    row = connection.execute(
+        f"""
+        SELECT 1
+        FROM scout_candidates
+        JOIN scout_runs ON scout_runs.id = scout_candidates.scout_run_id
+        WHERE scout_candidates.paper_id = ?
+          AND scout_runs.workflow_cycle_id = ?
+          {before_clause}
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    return row is not None
+
+
 def eligible_candidates_for_cycle(connection: sqlite3.Connection, workflow_cycle_id: int) -> list[dict[str, Any]]:
     rows = connection.execute(
         """

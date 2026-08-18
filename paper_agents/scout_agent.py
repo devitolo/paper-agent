@@ -68,6 +68,7 @@ class ScoutAgent:
         warnings: list[str] = []
         errors: list[str] = []
         candidates = []
+        source_diagnostics: dict[str, Any] = {}
         try:
             candidates = dedupe_candidates(
                 source.fetch(
@@ -76,6 +77,7 @@ class ScoutAgent:
                     freshness_months=config.freshness_months,
                 )
             )
+            source_diagnostics = dict(getattr(source, "last_diagnostics", {}) or {})
         except Exception as error:  # source adapters normalize most errors, but keep runs recoverable.
             errors.append(str(error))
 
@@ -83,7 +85,14 @@ class ScoutAgent:
         for index, candidate in enumerate(candidates, 1):
             candidate_dict = sanitize_candidate(candidate.as_dict())
             paper_id, is_new = db.upsert_paper(connection, candidate_dict)
-            excluded = not is_new
+            seen_in_current_cycle = db.paper_has_scout_candidate_in_cycle(
+                connection,
+                paper_id=paper_id,
+                workflow_cycle_id=workflow_cycle_id,
+                before_scout_run_id=scout_run_id,
+            )
+            excluded = not is_new and not seen_in_current_cycle
+            exclusion_reason = "previously_discovered" if excluded else None
             scout_candidate_id = db.insert_scout_candidate(
                 connection,
                 scout_run_id=scout_run_id,
@@ -91,7 +100,7 @@ class ScoutAgent:
                 retrieval_order=index,
                 is_new=is_new,
                 excluded=excluded,
-                exclusion_reason="previously_discovered" if excluded else None,
+                exclusion_reason=exclusion_reason,
                 source_query=(candidate.metadata or {}).get("query_topic"),
                 source_diagnostics={"primary_category": candidate.primary_category},
             )
@@ -102,7 +111,7 @@ class ScoutAgent:
                     "scout_candidate_id": scout_candidate_id,
                     "is_new": is_new,
                     "excluded": excluded,
-                    "exclusion_reason": "previously_discovered" if excluded else None,
+                    "exclusion_reason": exclusion_reason,
                     "retrieval_order": index,
                 }
             )
@@ -110,7 +119,11 @@ class ScoutAgent:
         db.complete_scout_run(
             connection,
             scout_run_id,
-            diagnostics={"fetched_count": len(candidates), "stored_count": len(stored)},
+            diagnostics={
+                "fetched_count": len(candidates),
+                "stored_count": len(stored),
+                "source_diagnostics": source_diagnostics,
+            },
             warnings=warnings,
             errors=errors,
         )

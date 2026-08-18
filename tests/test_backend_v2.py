@@ -22,6 +22,7 @@ from paper_agents.scout import OpenAlexSource
 from paper_agents.scout import SemanticScholarSource
 from paper_agents.scout import ScoutCandidate
 from paper_agents.scout import openalex_http_error_message
+from paper_agents.scout import openalex_rejection_reason
 from paper_agents.scout import openalex_work_to_candidate
 from paper_agents.scout import semantic_scholar_paper_to_candidate
 from paper_agents.scout import rank_candidates
@@ -304,12 +305,63 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("api.openalex.org", captured["url"])
         parsed = urllib.parse.urlparse(captured["url"])
         query = urllib.parse.parse_qs(parsed.query)
-        self.assertEqual(query["search"], ["AIOps"])
+        self.assertEqual(query["search"], ["AIOps software cloud operations observability"])
         self.assertEqual(query["per_page"], ["3"])
         self.assertEqual(query["sort"], ["publication_date:desc"])
         self.assertIn("from_publication_date:", query["filter"][0])
+        self.assertIn("type:article|preprint|posted-content|report", query["filter"][0])
         self.assertNotIn("select", query)
         self.assertEqual(captured["timeout"], 14)
+
+    def test_openalex_filters_noisy_off_domain_records(self):
+        payload = {
+            "results": [
+                {"id": "https://openalex.org/W-index", "display_name": "Index", "type": "book-chapter"},
+                {
+                    "id": "https://openalex.org/W-brain",
+                    "display_name": "Volitional deep brain stimulation following brain-computer interface training for Parkinson's disease",
+                    "type": "article",
+                    "abstract_inverted_index": {"Parkinson": [0], "patient": [1], "clinical": [2]},
+                },
+                {
+                    "id": "https://openalex.org/W-aiops",
+                    "display_name": "AIOps Root Cause Analysis for Cloud Incidents",
+                    "type": "article",
+                    "abstract_inverted_index": {"Root": [0], "cause": [1], "analysis": [2], "for": [3], "cloud": [4], "incidents": [5]},
+                    "concepts": [{"display_name": "Software engineering"}],
+                    "keywords": [{"display_name": "AIOps"}],
+                },
+            ]
+        }
+
+        def fake_urlopen(request, timeout):
+            return FakeHttpResponse(payload)
+
+        source = OpenAlexSource(request_delay=0, retries=0, timeout=14, verbose=False)
+        with patch("paper_agents.scout.urllib.request.urlopen", fake_urlopen):
+            candidates = source.fetch(["microservice diagnosis"], max_results=3, freshness_months=24)
+
+        self.assertEqual([candidate.source_id for candidate in candidates], ["W-aiops"])
+        self.assertEqual(source.last_diagnostics["raw_count"], 3)
+        self.assertEqual(source.last_diagnostics["rejected_reasons"]["excluded_type:book-chapter"], 1)
+        self.assertEqual(source.last_diagnostics["rejected_reasons"]["off_domain_biomedical"], 1)
+
+    def test_openalex_rejection_keeps_biomedical_record_with_ops_context(self):
+        reason = openalex_rejection_reason(
+            {
+                "display_name": "Clinical incident response observability platform",
+                "type": "article",
+                "abstract_inverted_index": {
+                    "Healthcare": [0],
+                    "incident": [1],
+                    "response": [2],
+                    "observability": [3],
+                    "cloud": [4],
+                },
+            }
+        )
+
+        self.assertIsNone(reason)
 
     def test_openalex_http_error_message_includes_response_body(self):
         error = urllib.error.HTTPError(
@@ -443,6 +495,26 @@ class BackendV2Tests(unittest.TestCase):
         config = ScoutConfig(topics=["AIOps"], max_candidates=5)
         first = agent.run(self.connection, workflow_cycle_id=self.cycle_id, attempt_number=1, config=config)
         second = agent.run(self.connection, workflow_cycle_id=self.cycle_id, attempt_number=2, config=config)
+        self.assertEqual(first["eligible_count"], 1)
+        self.assertEqual(second["eligible_count"], 1)
+        row = self.connection.execute(
+            """
+            SELECT excluded, exclusion_reason
+            FROM scout_candidates
+            WHERE scout_run_id = ?
+            """,
+            (second["scout_run_id"],),
+        ).fetchone()
+        self.assertEqual(row, (0, None))
+
+    def test_previously_discovered_paper_from_prior_cycle_is_excluded(self):
+        source = FakeSource([candidate("2601.priorv1", "Incident RCA")])
+        config = ScoutConfig(topics=["AIOps"], max_candidates=5)
+        first = ScoutAgent(source=source).run(self.connection, workflow_cycle_id=self.cycle_id, attempt_number=1, config=config)
+        next_cycle_id = db.create_workflow_cycle(self.connection, mode="test", max_scout_attempts=1)
+
+        second = ScoutAgent(source=source).run(self.connection, workflow_cycle_id=next_cycle_id, attempt_number=1, config=config)
+
         self.assertEqual(first["eligible_count"], 1)
         self.assertEqual(second["eligible_count"], 0)
         row = self.connection.execute(
@@ -1093,6 +1165,15 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("arXiv +1", html)
         self.assertIn("Dense Review Paper", html)
         self.assertNotIn("2607.semanticv1", html)
+
+    def test_review_queue_uses_source_abstract_when_triage_summary_missing(self):
+        self._seed_review_recommendation()
+        self.connection.commit()
+
+        html = web.render_review_queue(self.db_path)
+
+        self.assertIn("Source Abstract", html)
+        self.assertIn("Applied incident review automation.", html)
 
     def test_review_queue_feedback_save_still_inserts_status_and_notes(self):
         paper_id, _ = self._seed_review_recommendation()

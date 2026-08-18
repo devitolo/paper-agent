@@ -368,6 +368,7 @@ class OpenAlexSource:
         self.retries = retries
         self.timeout = timeout
         self.verbose = verbose
+        self.last_diagnostics: dict[str, Any] = {}
 
     def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
         terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
@@ -375,6 +376,8 @@ class OpenAlexSource:
         cutoff = date.today() - timedelta(days=freshness_months * 31)
         candidates: list[ScoutCandidate] = []
         errors: list[str] = []
+        raw_count = 0
+        rejected_reasons: dict[str, int] = {}
 
         for index, topic in enumerate(terms):
             if index:
@@ -390,14 +393,29 @@ class OpenAlexSource:
                 continue
             if self.verbose:
                 print(f"received {len(works)} OpenAlex entries for topic: {topic}")
+            raw_count += len(works)
 
             for work in works:
+                rejection_reason = openalex_rejection_reason(work)
+                if rejection_reason:
+                    rejected_reasons[rejection_reason] = rejected_reasons.get(rejection_reason, 0) + 1
+                    continue
                 candidate = openalex_work_to_candidate(work)
                 candidate.metadata["query_topic"] = topic
                 if not candidate.title or not candidate.source_id:
+                    rejected_reasons["missing_title_or_source_id"] = rejected_reasons.get("missing_title_or_source_id", 0) + 1
                     continue
                 candidates.append(candidate)
 
+        self.last_diagnostics = {
+            "raw_count": raw_count,
+            "kept_count": len(candidates),
+            "rejected_count": sum(rejected_reasons.values()),
+            "rejected_reasons": rejected_reasons,
+        }
+        if self.verbose and rejected_reasons:
+            reasons = ", ".join(f"{reason}={count}" for reason, count in sorted(rejected_reasons.items()))
+            print(f"filtered {sum(rejected_reasons.values())} OpenAlex entries before storage: {reasons}")
         if errors and self.verbose:
             print(f"OpenAlex partial failures: {len(errors)}/{len(terms)} topics failed")
         if not candidates and errors:
@@ -408,12 +426,16 @@ class OpenAlexSource:
         return dedupe_candidates(candidates)[:max_results]
 
     def _fetch_topic(self, topic: str, max_results: int, cutoff: date) -> list[dict[str, Any]]:
+        filters = [
+            f"from_publication_date:{cutoff.isoformat()}",
+            "type:article|preprint|posted-content|report",
+        ]
         params = urllib.parse.urlencode(
             {
-                "search": topic,
+                "search": openalex_search_query(topic),
                 "per_page": max_results,
                 "sort": "publication_date:desc",
-                "filter": f"from_publication_date:{cutoff.isoformat()}",
+                "filter": ",".join(filters),
             }
         )
         request = urllib.request.Request(f"{self.api_url}?{params}", headers={"User-Agent": "paper-agent/0.1"})
@@ -754,6 +776,70 @@ def openalex_work_to_candidate(work: dict[str, Any]) -> ScoutCandidate:
         primary_category=categories[0] if categories else None,
         metadata=metadata,
     )
+
+
+OPENALEX_SEARCH_CONTEXT = ["software", "cloud", "operations", "observability"]
+OPENALEX_ALLOWED_TYPES = {"article", "preprint", "posted-content", "report"}
+OPENALEX_EXCLUDED_TYPES = {
+    "book",
+    "book-chapter",
+    "book chapter",
+    "reference-entry",
+    "reference entry",
+    "paratext",
+    "editorial",
+    "erratum",
+}
+OPENALEX_NOISE_TITLES = {"index", "contents", "front matter", "back matter"}
+OPENALEX_BIOMEDICAL_TERMS = [
+    "brain",
+    "brain-computer",
+    "parkinson",
+    "deep brain stimulation",
+    "biomedical",
+    "clinical",
+    "medical",
+    "healthcare",
+    "patient",
+    "disease",
+    "neural stimulation",
+]
+
+
+def openalex_search_query(topic: str) -> str:
+    normalized_topic = _clean(topic)
+    lower = normalize_text(normalized_topic)
+    additions = [term for term in OPENALEX_SEARCH_CONTEXT if not count_phrase(lower, term)]
+    return " ".join([normalized_topic, *additions]).strip()
+
+
+def openalex_rejection_reason(work: dict[str, Any]) -> str | None:
+    work_type = normalize_text(str(work.get("type") or work.get("type_crossref") or ""))
+    if work_type in OPENALEX_EXCLUDED_TYPES:
+        return f"excluded_type:{work_type.replace(' ', '_')}"
+    if work_type and work_type not in OPENALEX_ALLOWED_TYPES:
+        return f"unsupported_type:{work_type.replace(' ', '_')}"
+
+    title = normalize_text(str(work.get("title") or work.get("display_name") or ""))
+    if title in OPENALEX_NOISE_TITLES:
+        return "noise_title"
+
+    text = normalize_text(
+        " ".join(
+            [
+                title,
+                reconstruct_openalex_abstract(work.get("abstract_inverted_index")),
+                " ".join(openalex_named_items(work.get("concepts"))),
+                " ".join(openalex_named_items(work.get("keywords"))),
+                str((work.get("primary_topic") or {}).get("display_name") if isinstance(work.get("primary_topic"), dict) else ""),
+            ]
+        )
+    )
+    biomedical_hits = [term for term in OPENALEX_BIOMEDICAL_TERMS if count_phrase(text, term)]
+    context_hits = [term for term in DOMAIN_CONTEXT_TERMS if count_phrase(text, term)]
+    if biomedical_hits and not context_hits:
+        return "off_domain_biomedical"
+    return None
 
 
 def openalex_work_id(value: Any) -> str:

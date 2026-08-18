@@ -426,6 +426,16 @@ def render_source_controls(card: dict[str, Any]) -> str:
 
 
 def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
+    has_extracted_summary = any(summary.get(key) for key in ["research_problem", "why_it_matters", "approach"])
+    source_abstract = summary.get("source_abstract")
+    if not has_extracted_summary and source_abstract:
+        abstract = escape(source_abstract)
+        if compact:
+            return f'<div class="compact-summary"><strong>Source Abstract:</strong> {abstract}</div>'
+        return f"""<div class="source-summary">
+    <section><h3>Source Abstract</h3><p>{abstract}</p></section>
+  </div>"""
+
     problem = escape(summary.get("research_problem") or "Not extracted yet.")
     if compact:
         return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
@@ -460,7 +470,8 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
         else "ORDER BY latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
     )
 
-    with connect_db(db_path) as connection:
+    connection = connect_db(db_path)
+    try:
         rows = connection.execute(
             f"""
             WITH latest_recommendation AS (
@@ -513,6 +524,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                 primary_source.source_id,
                 papers.title,
                 papers.published,
+                papers.abstract,
                 primary_source.url,
                 latest_recommendation.score,
                 latest_recommendation.matched_signals_json,
@@ -544,20 +556,29 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     "recommendation_id": row[1],
                     "source": row[2] or "unknown",
                     "source_id": row[3] or "unknown",
-                    "source_label": source_label(row[2] or "unknown", parse_sources(row[12])),
+                    "source_label": source_label(row[2] or "unknown", parse_sources(row[13])),
                     "title": row[4],
                     "published": row[5],
-                    "url": row[6],
-                    "score": float(row[7] or 0),
-                    "matched_keywords": decode_json(row[8], []),
-                    "ranking_reason": row[9],
-                    "feedback_status": row[10],
-                    "feedback_notes": row[11],
+                    "url": row[7],
+                    "score": float(row[8] or 0),
+                    "matched_keywords": decode_json(row[9], []),
+                    "ranking_reason": row[10],
+                    "feedback_status": row[11],
+                    "feedback_notes": row[12],
                     "artifacts": artifacts,
-                    "summary": load_summary(artifacts.get("triage_summary")),
+                    "summary": with_source_abstract(load_summary(artifacts.get("triage_summary")), row[6]),
                 }
             )
+    finally:
+        connection.close()
     return cards
+
+
+def with_source_abstract(summary: dict[str, Any], abstract: str | None) -> dict[str, Any]:
+    merged = dict(summary)
+    if abstract:
+        merged["source_abstract"] = abstract
+    return merged
 
 
 def render_select(
@@ -599,7 +620,8 @@ def selected_label(choices: list[tuple[str, str]], value: str) -> str:
 
 def load_source_filter_choices(db_path: Path) -> list[tuple[str, str]]:
     init_db(db_path)
-    with connect_db(db_path) as connection:
+    connection = connect_db(db_path)
+    try:
         rows = connection.execute(
             """
             SELECT DISTINCT paper_sources.source
@@ -609,6 +631,8 @@ def load_source_filter_choices(db_path: Path) -> list[tuple[str, str]]:
             ORDER BY paper_sources.source
             """
         ).fetchall()
+    finally:
+        connection.close()
     choices = [(SOURCE_FILTER_ALL, "All sources")]
     choices.extend((row[0], source_display_name(row[0])) for row in rows if row[0])
     return choices
@@ -820,7 +844,9 @@ button.secondary { background: #f6f8fa; }
 .tag { border: 1px solid #d8dee4; color: #57606a; border-radius: 999px; padding: 1px 6px; font-size: 11px; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
 .summary-grid section { min-width: 0; }
-.summary-grid p, .compact-summary { color: #3f4650; font-size: 12px; }
+.summary-grid p, .source-summary p, .compact-summary { color: #3f4650; font-size: 12px; }
+.source-summary { margin: 8px 0; }
+.source-summary p { max-height: 88px; overflow: auto; }
 .compact-summary { margin: 6px 0; line-height: 1.35; }
 .links { margin-bottom: 7px; }
 .paper-card.compact { padding: 8px 10px; }
@@ -854,7 +880,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
   .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .health-table th, .health-kv dt { color: #8b949e; }
-  .summary-grid p { color: #c9d1d9; }
+  .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
   .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-table table, .health-kv { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }

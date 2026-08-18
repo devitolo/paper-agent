@@ -36,6 +36,12 @@ Completed behavior:
 - Non-arXiv sources are opt-in and are not part of nightly cron yet.
 - Review Queue cards show source badges, and the source filter composes with status, sort, and view controls.
 
+Follow-up implementation:
+
+- OpenAlex now narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
+- Review Queue cards show a clearly labeled source abstract when local triage extraction is missing.
+- Same-cycle Scout rediscoveries remain eligible during bounded rescouts; older-cycle discoveries are still excluded as `previously_discovered`.
+
 ## 2026-07-31
 
 ### Operability: backups, apply attempts, and logs
