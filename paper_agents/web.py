@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from paper_agents.db import DEFAULT_DB_PATH, connect_db, init_db
+from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob
 
 ASSET_DIR = Path(__file__).with_name("assets")
@@ -72,6 +72,16 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
                         sort_value=params.get("sort", ["latest"])[0],
                         view_value=params.get("view", ["full"])[0],
+                    )
+                )
+                return
+            if parsed.path == "/health":
+                params = urllib.parse.parse_qs(parsed.query)
+                self.respond_html(
+                    render_health_page(
+                        db_path,
+                        days=parse_days(params.get("days", ["21"])[0]),
+                        source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
                     )
                 )
                 return
@@ -289,6 +299,103 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     </div>
   </form>
 </article>"""
+
+
+def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:
+    days = days if days in {7, 21, 30, 90} else 21
+    summary = health_summary(db_path, days=days, source=source_value)
+    source_choices = [(SOURCE_FILTER_ALL, "All sources")]
+    source_choices.extend((source, source_display_name(source)) for source in summary["available_sources"])
+    source_value = normalize_choice(summary["range"]["source"], source_choices, SOURCE_FILTER_ALL)
+    warning_html = render_warnings(summary["warnings"])
+    cards = [
+        ("Latest Run", f"{summary['top']['latest_run_time'] or 'none'}", f"{summary['top']['latest_run_age_hours'] or 0}h old"),
+        ("Workflow", summary["top"]["latest_workflow_state"] or "none", "latest state"),
+        ("Last Rec Day", summary["top"]["last_successful_recommendation_day"] or "none", "successful recommendation"),
+        ("Queue", str(summary["top"]["papers_waiting_in_queue"]), "papers waiting"),
+        ("Feedback", str(summary["top"]["unapplied_structured_feedback_count"]), "unapplied structured rows"),
+        ("Profile Failures", str(summary["top"]["recent_profile_apply_failures_count"]), "last 7 days"),
+        ("Zero Eligible", summary["top"]["latest_zero_eligible_source"] or "none", "latest Scout source"),
+    ]
+    card_html = "".join(
+        f'<section class="health-card"><h2>{escape(title)}</h2><strong>{escape(value)}</strong><span>{escape(detail)}</span></section>'
+        for title, value, detail in cards
+    )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Paper Health</title>
+  <style>{page_css()}</style>
+</head>
+<body>
+  <main>
+    <header class="topbar">
+      <div>
+        <h1 class="brand-title"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Health</span></h1>
+        <p>{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}</p>
+      </div>
+      <form method="get" action="/health" class="queue-controls">
+        {render_select([("7", "7 days"), ("21", "21 days"), ("30", "30 days"), ("90", "90 days")], "days", str(days), "Range")}
+        {render_select(source_choices, "source", source_value, "Source")}
+        <a class="secondary-link" href="/">Review queue</a>
+      </form>
+    </header>
+    {warning_html}
+    <div class="health-cards">{card_html}</div>
+    <section class="health-section">
+      <h2>Daily Funnel</h2>
+      {render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}
+      {render_health_table("Scout", summary["daily"]["scout"], ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])}
+      {render_health_table("Curator", summary["daily"]["curator"], ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])}
+      {render_health_table("Reviewer", summary["daily"]["reviewer"], ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])}
+      {render_health_table("Feedback/Profile", summary["daily"]["feedback"], ["day", "raw_feedback_count", "structured_feedback_count", "profile_version_count", "apply_failure_count"])}
+    </section>
+    <section class="health-section">
+      <h2>Source Breakdown</h2>
+      {render_health_table("Scout by source", summary["source_breakdown"]["funnel"], ["source", "candidate_count", "eligible_count", "excluded_count"])}
+      {render_health_table("Recommendations by source", summary["source_breakdown"]["recommendations"], ["source", "recommendation_count"])}
+      {render_health_table("Exclusion reasons", summary["source_breakdown"]["exclusion_reasons"], ["source", "reason", "count"])}
+    </section>
+    <section class="health-section">
+      <h2>Artifact Health</h2>
+      {render_key_values(summary["artifact_health"])}
+    </section>
+  </main>
+</body>
+</html>"""
+
+
+def render_warnings(warnings: list[dict[str, str]]) -> str:
+    if not warnings:
+        return '<div class="banner">No health warnings.</div>'
+    items = "".join(
+        f'<li class="{escape(warning["level"])}"><strong>{escape(warning["level"])}</strong> {escape(warning["message"])}</li>'
+        for warning in warnings
+    )
+    return f'<section class="health-warnings"><h2>Warnings</h2><ul>{items}</ul></section>'
+
+
+def render_health_table(title: str, rows: list[dict[str, Any]], columns: list[str]) -> str:
+    headers = "".join(f"<th>{escape(column.replace('_', ' ').title())}</th>" for column in columns)
+    if rows:
+        body = "".join(
+            "<tr>" + "".join(f"<td>{escape(row.get(column) if row.get(column) is not None else 0)}</td>" for column in columns) + "</tr>"
+            for row in rows
+        )
+    else:
+        body = f'<tr><td colspan="{len(columns)}">No rows in this range.</td></tr>'
+    return f"""<div class="health-table">
+      <h3>{escape(title)}</h3>
+      <table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table>
+    </div>"""
+
+
+def render_key_values(values: dict[str, Any]) -> str:
+    items = "".join(f"<dt>{escape(key.replace('_', ' ').title())}</dt><dd>{escape(value)}</dd>" for key, value in values.items())
+    return f'<dl class="health-kv">{items}</dl>'
 
 
 def render_artifact_links(artifacts: dict[str, dict[str, Any]]) -> str:
@@ -659,6 +766,22 @@ def parse_optional_int(value: str) -> int | None:
         return None
 
 
+def parse_days(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 21
+
+
+def format_bytes(value: int) -> str:
+    size = float(value)
+    for unit in ["B", "KiB", "MiB", "GiB"]:
+        if size < 1024 or unit == "GiB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+    return f"{value} B"
+
+
 def page_css() -> str:
     return """
 :root { color-scheme: light dark; }
@@ -676,6 +799,7 @@ p { margin: 0; }
 .control-label { display: grid; gap: 2px; color: #57606a; font-size: 11px; }
 select, button { border: 1px solid #d8dee4; border-radius: 5px; padding: 4px 7px; background: #ffffff; color: #24292f; font: inherit; min-height: 28px; }
 button { cursor: pointer; }
+.secondary-link { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid #d8dee4; border-radius: 5px; padding: 0 8px; color: #24292f; background: #f6f8fa; text-decoration: none; }
 .source-link { color: #0969da; text-decoration: none; }
 .source-link:hover { text-decoration: underline; }
 .copy-url { display: inline-flex; align-items: center; min-height: 22px; margin-left: 6px; padding: 1px 6px; font-size: 12px; }
@@ -707,16 +831,38 @@ button.secondary { background: #f6f8fa; }
 label { display: grid; gap: 3px; color: #57606a; font-size: 12px; }
 textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertical; border: 1px solid #d8dee4; border-radius: 5px; padding: 6px; font: inherit; color: #1f2328; background: #ffffff; }
 .save-feedback { margin-top: 5px; }
+.health-cards { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+.health-card { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; min-width: 0; }
+.health-card h2 { color: #57606a; font-size: 11px; margin-bottom: 5px; text-transform: uppercase; }
+.health-card strong { display: block; font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; }
+.health-card span { color: #57606a; font-size: 11px; }
+.health-warnings { border: 1px solid #bf8700; background: #fff8c5; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+.health-warnings h2, .health-section h2 { margin: 0 0 6px; font-size: 14px; }
+.health-warnings ul { margin: 0; padding-left: 18px; }
+.health-warnings li { margin: 2px 0; }
+.health-warnings li.critical strong { color: #cf222e; }
+.health-section { margin-top: 12px; }
+.health-table { margin: 8px 0 12px; overflow-x: auto; }
+.health-table table { width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; }
+.health-table th, .health-table td { padding: 5px 7px; border-bottom: 1px solid #d8dee4; text-align: left; white-space: nowrap; }
+.health-table th { color: #57606a; background: #f6f8fa; font-size: 11px; font-weight: 650; }
+.health-table td { font-size: 12px; }
+.health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
+.health-kv dt { color: #57606a; }
+.health-kv dd { margin: 0; }
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary { color: #8b949e; }
+  .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .health-table th, .health-kv dt { color: #8b949e; }
   .summary-grid p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .links a, button, select, .paper-card, .empty, textarea { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-table table, .health-kv { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
   .banner { background: #0f2a1a; border-color: #238636; }
   .banner.warning { background: #2d2300; border-color: #9e6a03; }
+  .health-warnings { background: #2d2300; border-color: #9e6a03; }
+  .health-table th { background: #21262d; }
+  .health-table th, .health-table td { border-color: #30363d; }
 }
 @media (max-width: 720px) {
   main { padding: 10px; }
@@ -726,5 +872,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .action-rail { grid-template-columns: 64px 1fr; align-items: start; }
   .feedback-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .feedback-state { text-align: left; grid-column: 1 / -1; }
+  .health-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .health-kv { grid-template-columns: 1fr; }
 }
 """

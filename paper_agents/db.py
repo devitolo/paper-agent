@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -892,6 +893,567 @@ def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
             ["id", "created_at", "updated_at", "state", "mode", "max_scout_attempts", "scout_attempts_used"],
         ),
     }
+
+
+def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: str | None = None) -> dict[str, Any]:
+    init_db(db_path)
+    days = max(1, days)
+    source_filter = None if source in (None, "", "all") else source
+    window = f"-{days} days"
+    with connect_db(db_path) as connection:
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+        available_sources = [
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT source FROM (
+                    SELECT DISTINCT source FROM scout_runs
+                    UNION
+                    SELECT DISTINCT source FROM paper_sources
+                )
+                WHERE source IS NOT NULL
+                ORDER BY source
+                """
+            ).fetchall()
+            if row[0]
+        ]
+        latest_cycle = row_to_dict(
+            connection.execute(
+                """
+                SELECT id, created_at, updated_at, state, mode, max_scout_attempts, scout_attempts_used
+                FROM workflow_cycles
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone(),
+            ["id", "created_at", "updated_at", "state", "mode", "max_scout_attempts", "scout_attempts_used"],
+        )
+        latest_recommendation_day = _scalar(
+            connection,
+            """
+            SELECT MAX(date(recommendations.created_at))
+            FROM recommendations
+            LEFT JOIN paper_sources ON paper_sources.paper_id = recommendations.paper_id
+            WHERE (? IS NULL OR paper_sources.source = ?)
+            """,
+            (source_filter, source_filter),
+        )
+        papers_waiting = _scalar(
+            connection,
+            """
+            WITH latest_recommendation AS (
+                SELECT
+                    paper_id,
+                    ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY curator_run_id DESC, recommendation_order ASC) AS row_number
+                FROM recommendations
+            ), latest_feedback AS (
+                SELECT
+                    paper_id,
+                    status,
+                    ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id DESC) AS row_number
+                FROM feedback
+            )
+            SELECT COUNT(*)
+            FROM latest_recommendation
+            LEFT JOIN latest_feedback
+              ON latest_feedback.paper_id = latest_recommendation.paper_id
+             AND latest_feedback.row_number = 1
+            WHERE latest_recommendation.row_number = 1
+              AND latest_feedback.status IS NULL
+            """,
+        )
+        feedback_profile = {
+            "unapplied_structured_feedback_count": _scalar(
+                connection,
+                """
+                SELECT COUNT(*)
+                FROM structured_feedback
+                LEFT JOIN feedback_profile_applications
+                  ON feedback_profile_applications.structured_feedback_id = structured_feedback.id
+                WHERE feedback_profile_applications.id IS NULL
+                """,
+            ),
+            "recent_apply_failures_count": _scalar(
+                connection,
+                """
+                SELECT COUNT(*)
+                FROM feedback_profile_apply_attempts
+                WHERE status = 'failed'
+                  AND created_at >= datetime('now', '-7 days')
+                """,
+            ),
+            "latest_profile": row_to_dict(
+                connection.execute(
+                    """
+                    SELECT id, version, created_at, change_summary
+                    FROM profile_versions
+                    WHERE active = 1
+                    ORDER BY version DESC
+                    LIMIT 1
+                    """
+                ).fetchone(),
+                ["id", "version", "created_at", "change_summary"],
+            ),
+        }
+        daily = {
+            "cycles": _rows(
+                connection,
+                """
+                SELECT date(workflow_cycles.created_at) AS day, workflow_cycles.state, COUNT(*) AS cycle_count
+                FROM workflow_cycles
+                WHERE workflow_cycles.created_at >= datetime('now', ?)
+                  AND (
+                    ? IS NULL OR EXISTS (
+                        SELECT 1 FROM scout_runs
+                        WHERE scout_runs.workflow_cycle_id = workflow_cycles.id
+                          AND scout_runs.source = ?
+                    )
+                  )
+                GROUP BY day, workflow_cycles.state
+                ORDER BY day DESC, workflow_cycles.state
+                """,
+                (window, source_filter, source_filter),
+                ["day", "state", "cycle_count"],
+            ),
+            "scout": _rows(
+                connection,
+                """
+                SELECT
+                    date(scout_runs.started_at) AS day,
+                    scout_runs.source,
+                    COUNT(DISTINCT scout_runs.id) AS run_count,
+                    COUNT(scout_candidates.id) AS candidate_count,
+                    SUM(CASE WHEN scout_candidates.excluded = 0 THEN 1 ELSE 0 END) AS eligible_count,
+                    SUM(CASE WHEN scout_candidates.excluded = 1 THEN 1 ELSE 0 END) AS excluded_count
+                FROM scout_runs
+                LEFT JOIN scout_candidates ON scout_candidates.scout_run_id = scout_runs.id
+                WHERE scout_runs.started_at >= datetime('now', ?)
+                  AND (? IS NULL OR scout_runs.source = ?)
+                GROUP BY day, scout_runs.source
+                ORDER BY day DESC, scout_runs.source
+                """,
+                (window, source_filter, source_filter),
+                ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"],
+            ),
+            "curator": _rows(
+                connection,
+                """
+                SELECT
+                    date(curator_runs.created_at) AS day,
+                    COALESCE(scout_runs.source, 'unknown') AS source,
+                    COUNT(DISTINCT curator_evaluations.id) AS evaluation_count,
+                    SUM(CASE WHEN curator_evaluations.quality_threshold_met = 1 THEN 1 ELSE 0 END) AS quality_met_count,
+                    COUNT(DISTINCT recommendations.id) AS recommendation_count
+                FROM curator_runs
+                LEFT JOIN curator_evaluations ON curator_evaluations.curator_run_id = curator_runs.id
+                LEFT JOIN scout_candidates ON scout_candidates.id = curator_evaluations.scout_candidate_id
+                LEFT JOIN scout_runs ON scout_runs.id = scout_candidates.scout_run_id
+                LEFT JOIN recommendations
+                  ON recommendations.curator_run_id = curator_runs.id
+                 AND recommendations.paper_id = curator_evaluations.paper_id
+                WHERE curator_runs.created_at >= datetime('now', ?)
+                  AND (? IS NULL OR COALESCE(scout_runs.source, 'unknown') = ?)
+                GROUP BY day, source
+                ORDER BY day DESC, source
+                """,
+                (window, source_filter, source_filter),
+                ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"],
+            ),
+            "reviewer": _rows(
+                connection,
+                """
+                WITH primary_source AS (
+                    SELECT paper_id, source
+                    FROM paper_sources
+                    WHERE id IN (SELECT MIN(id) FROM paper_sources GROUP BY paper_id)
+                )
+                SELECT
+                    date(recommendations.created_at) AS day,
+                    COALESCE(primary_source.source, 'unknown') AS source,
+                    COUNT(DISTINCT recommendations.id) AS recommendation_count,
+                    COUNT(DISTINCT pdf.paper_id) AS pdf_count,
+                    COUNT(DISTINCT triage.paper_id) AS triage_summary_count
+                FROM recommendations
+                LEFT JOIN primary_source ON primary_source.paper_id = recommendations.paper_id
+                LEFT JOIN artifacts pdf
+                  ON pdf.paper_id = recommendations.paper_id
+                 AND pdf.artifact_type = 'pdf'
+                LEFT JOIN artifacts triage
+                  ON triage.paper_id = recommendations.paper_id
+                 AND triage.artifact_type = 'triage_summary'
+                WHERE recommendations.created_at >= datetime('now', ?)
+                  AND (? IS NULL OR COALESCE(primary_source.source, 'unknown') = ?)
+                GROUP BY day, source
+                ORDER BY day DESC, source
+                """,
+                (window, source_filter, source_filter),
+                ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"],
+            ),
+            "feedback": _rows(
+                connection,
+                """
+                SELECT day, SUM(raw_feedback_count), SUM(structured_feedback_count), SUM(profile_version_count), SUM(apply_failure_count)
+                FROM (
+                    SELECT date(received_at) AS day, COUNT(*) AS raw_feedback_count, 0 AS structured_feedback_count, 0 AS profile_version_count, 0 AS apply_failure_count
+                    FROM raw_feedback
+                    WHERE received_at >= datetime('now', ?)
+                    GROUP BY day
+                    UNION ALL
+                    SELECT date(created_at) AS day, 0, COUNT(*), 0, 0
+                    FROM structured_feedback
+                    WHERE created_at >= datetime('now', ?)
+                    GROUP BY day
+                    UNION ALL
+                    SELECT date(created_at) AS day, 0, 0, COUNT(*), 0
+                    FROM profile_versions
+                    WHERE created_at >= datetime('now', ?)
+                    GROUP BY day
+                    UNION ALL
+                    SELECT date(created_at) AS day, 0, 0, 0, COUNT(*)
+                    FROM feedback_profile_apply_attempts
+                    WHERE created_at >= datetime('now', ?)
+                      AND status = 'failed'
+                    GROUP BY day
+                )
+                GROUP BY day
+                ORDER BY day DESC
+                """,
+                (window, window, window, window),
+                [
+                    "day",
+                    "raw_feedback_count",
+                    "structured_feedback_count",
+                    "profile_version_count",
+                    "apply_failure_count",
+                ],
+            ),
+        }
+        source_breakdown = {
+            "funnel": _rows(
+                connection,
+                """
+                SELECT
+                    scout_runs.source,
+                    COUNT(scout_candidates.id) AS candidate_count,
+                    SUM(CASE WHEN scout_candidates.excluded = 0 THEN 1 ELSE 0 END) AS eligible_count,
+                    SUM(CASE WHEN scout_candidates.excluded = 1 THEN 1 ELSE 0 END) AS excluded_count
+                FROM scout_runs
+                LEFT JOIN scout_candidates ON scout_candidates.scout_run_id = scout_runs.id
+                WHERE scout_runs.started_at >= datetime('now', ?)
+                  AND (? IS NULL OR scout_runs.source = ?)
+                GROUP BY scout_runs.source
+                ORDER BY candidate_count DESC, scout_runs.source
+                """,
+                (window, source_filter, source_filter),
+                ["source", "candidate_count", "eligible_count", "excluded_count"],
+            ),
+            "recommendations": _rows(
+                connection,
+                """
+                WITH primary_source AS (
+                    SELECT paper_id, source
+                    FROM paper_sources
+                    WHERE id IN (SELECT MIN(id) FROM paper_sources GROUP BY paper_id)
+                )
+                SELECT COALESCE(primary_source.source, 'unknown') AS source, COUNT(DISTINCT recommendations.id) AS recommendation_count
+                FROM recommendations
+                LEFT JOIN primary_source ON primary_source.paper_id = recommendations.paper_id
+                WHERE recommendations.created_at >= datetime('now', ?)
+                  AND (? IS NULL OR COALESCE(primary_source.source, 'unknown') = ?)
+                GROUP BY source
+                ORDER BY recommendation_count DESC, source
+                """,
+                (window, source_filter, source_filter),
+                ["source", "recommendation_count"],
+            ),
+            "exclusion_reasons": _rows(
+                connection,
+                """
+                SELECT
+                    scout_runs.source,
+                    COALESCE(scout_candidates.exclusion_reason, 'unspecified') AS reason,
+                    COUNT(*) AS count
+                FROM scout_candidates
+                JOIN scout_runs ON scout_runs.id = scout_candidates.scout_run_id
+                WHERE scout_candidates.excluded = 1
+                  AND scout_runs.started_at >= datetime('now', ?)
+                  AND (? IS NULL OR scout_runs.source = ?)
+                GROUP BY scout_runs.source, reason
+                ORDER BY count DESC, scout_runs.source, reason
+                LIMIT 20
+                """,
+                (window, source_filter, source_filter),
+                ["source", "reason", "count"],
+            ),
+        }
+        latest_scout = row_to_dict(
+            connection.execute(
+                """
+                SELECT
+                    scout_runs.id,
+                    scout_runs.source,
+                    scout_runs.started_at,
+                    scout_runs.completed_at,
+                    COUNT(scout_candidates.id) AS candidate_count,
+                    SUM(CASE WHEN scout_candidates.excluded = 0 THEN 1 ELSE 0 END) AS eligible_count,
+                    SUM(CASE WHEN scout_candidates.excluded = 1 THEN 1 ELSE 0 END) AS excluded_count
+                FROM scout_runs
+                LEFT JOIN scout_candidates ON scout_candidates.scout_run_id = scout_runs.id
+                WHERE (? IS NULL OR scout_runs.source = ?)
+                GROUP BY scout_runs.id
+                ORDER BY scout_runs.id DESC
+                LIMIT 1
+                """,
+                (source_filter, source_filter),
+            ).fetchone(),
+            ["id", "source", "started_at", "completed_at", "candidate_count", "eligible_count", "excluded_count"],
+        )
+        recent_scout_runs = _rows(
+            connection,
+            """
+            SELECT
+                scout_runs.id,
+                scout_runs.source,
+                scout_runs.started_at,
+                COUNT(scout_candidates.id) AS candidate_count,
+                SUM(CASE WHEN scout_candidates.excluded = 0 THEN 1 ELSE 0 END) AS eligible_count,
+                SUM(CASE WHEN scout_candidates.excluded = 1 THEN 1 ELSE 0 END) AS excluded_count
+            FROM scout_runs
+            LEFT JOIN scout_candidates ON scout_candidates.scout_run_id = scout_runs.id
+            WHERE (? IS NULL OR scout_runs.source = ?)
+            GROUP BY scout_runs.id
+            ORDER BY scout_runs.id DESC
+            LIMIT 3
+            """,
+            (source_filter, source_filter),
+            ["id", "source", "started_at", "candidate_count", "eligible_count", "excluded_count"],
+        )
+        recent_cycle_recommendations = _rows(
+            connection,
+            """
+            WITH primary_source AS (
+                SELECT paper_id, source
+                FROM paper_sources
+                WHERE id IN (SELECT MIN(id) FROM paper_sources GROUP BY paper_id)
+            )
+            SELECT
+                workflow_cycles.id,
+                workflow_cycles.created_at,
+                workflow_cycles.state,
+                COUNT(DISTINCT recommendations.id) AS recommendation_count
+            FROM workflow_cycles
+            LEFT JOIN curator_runs ON curator_runs.workflow_cycle_id = workflow_cycles.id
+            LEFT JOIN recommendations ON recommendations.curator_run_id = curator_runs.id
+            LEFT JOIN primary_source ON primary_source.paper_id = recommendations.paper_id
+            WHERE (
+                ? IS NULL OR EXISTS (
+                    SELECT 1 FROM scout_runs
+                    WHERE scout_runs.workflow_cycle_id = workflow_cycles.id
+                      AND scout_runs.source = ?
+                )
+            )
+            GROUP BY workflow_cycles.id
+            ORDER BY workflow_cycles.id DESC
+            LIMIT 2
+            """,
+            (source_filter, source_filter),
+            ["id", "created_at", "state", "recommendation_count"],
+        )
+        artifact_health = _artifact_health(connection, latest_cycle["id"] if latest_cycle else None, source_filter)
+    connection.close()
+
+    days_since_last_cycle = _days_since(latest_cycle["created_at"] if latest_cycle else None)
+    days_since_last_recommendation = _days_since(latest_recommendation_day)
+    top = {
+        "latest_run_time": latest_cycle["created_at"] if latest_cycle else None,
+        "latest_run_age_hours": None if days_since_last_cycle is None else round(days_since_last_cycle * 24, 1),
+        "latest_workflow_state": latest_cycle["state"] if latest_cycle else None,
+        "last_successful_recommendation_day": latest_recommendation_day,
+        "papers_waiting_in_queue": papers_waiting,
+        "unapplied_structured_feedback_count": feedback_profile["unapplied_structured_feedback_count"],
+        "recent_profile_apply_failures_count": feedback_profile["recent_apply_failures_count"],
+        "latest_zero_eligible_source": latest_scout["source"] if latest_scout and int(latest_scout["eligible_count"] or 0) == 0 else None,
+    }
+    summary = {
+        "db": {
+            "path": str(db_path),
+            "size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+            "integrity": integrity,
+        },
+        "range": {"days": days, "source": source_filter or "all", "window": window},
+        "available_sources": available_sources,
+        "latest_cycle": latest_cycle,
+        "latest_scout_run": latest_scout,
+        "recent_scout_runs": recent_scout_runs,
+        "recent_cycle_recommendations": recent_cycle_recommendations,
+        "latest_recommendation_day": latest_recommendation_day,
+        "days_since_last_cycle": days_since_last_cycle,
+        "days_since_last_recommendation": days_since_last_recommendation,
+        "top": top,
+        "daily": daily,
+        "source_breakdown": source_breakdown,
+        "artifact_health": artifact_health,
+        "feedback_profile": feedback_profile,
+    }
+    summary["warnings"] = _health_warnings(summary)
+    return summary
+
+
+def _artifact_health(connection: sqlite3.Connection, latest_cycle_id: int | None, source: str | None) -> dict[str, Any]:
+    if latest_cycle_id is None:
+        return {
+            "latest_cycle_id": None,
+            "recommendation_count": 0,
+            "pdf_count": 0,
+            "triage_summary_count": 0,
+            "missing_pdf_count": 0,
+            "missing_triage_summary_count": 0,
+        }
+    row = connection.execute(
+        """
+        WITH primary_source AS (
+            SELECT paper_id, source
+            FROM paper_sources
+            WHERE id IN (SELECT MIN(id) FROM paper_sources GROUP BY paper_id)
+        ), latest_recommendations AS (
+            SELECT recommendations.id, recommendations.paper_id
+            FROM recommendations
+            JOIN curator_runs ON curator_runs.id = recommendations.curator_run_id
+            LEFT JOIN primary_source ON primary_source.paper_id = recommendations.paper_id
+            WHERE curator_runs.workflow_cycle_id = ?
+              AND (? IS NULL OR COALESCE(primary_source.source, 'unknown') = ?)
+        )
+        SELECT
+            COUNT(DISTINCT latest_recommendations.id) AS recommendation_count,
+            COUNT(DISTINCT pdf.paper_id) AS pdf_count,
+            COUNT(DISTINCT triage.paper_id) AS triage_summary_count
+        FROM latest_recommendations
+        LEFT JOIN artifacts pdf
+          ON pdf.paper_id = latest_recommendations.paper_id
+         AND pdf.artifact_type = 'pdf'
+        LEFT JOIN artifacts triage
+          ON triage.paper_id = latest_recommendations.paper_id
+         AND triage.artifact_type = 'triage_summary'
+        """,
+        (latest_cycle_id, source, source),
+    ).fetchone()
+    recommendation_count = int(row[0] or 0)
+    pdf_count = int(row[1] or 0)
+    triage_count = int(row[2] or 0)
+    return {
+        "latest_cycle_id": latest_cycle_id,
+        "recommendation_count": recommendation_count,
+        "pdf_count": pdf_count,
+        "triage_summary_count": triage_count,
+        "missing_pdf_count": max(0, recommendation_count - pdf_count),
+        "missing_triage_summary_count": max(0, recommendation_count - triage_count),
+    }
+
+
+def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
+    warnings: list[dict[str, str]] = []
+    integrity = summary["db"]["integrity"]
+    if integrity != "ok":
+        warnings.append({"level": "critical", "message": f"DB integrity check failed: {integrity}"})
+
+    days_since_last_cycle = summary["days_since_last_cycle"]
+    if days_since_last_cycle is None:
+        warnings.append({"level": "warning", "message": "No workflow cycle has been recorded."})
+    elif days_since_last_cycle * 24 > 72:
+        warnings.append({"level": "critical", "message": "No workflow cycle has run in more than 72 hours."})
+    elif days_since_last_cycle * 24 > 36:
+        warnings.append({"level": "warning", "message": "No workflow cycle has run in more than 36 hours."})
+
+    latest_cycle = summary["latest_cycle"]
+    latest_cycle_age_hours = summary["top"]["latest_run_age_hours"]
+    if latest_cycle and latest_cycle_age_hours is not None:
+        terminal_states = {"recommendations_ready", "awaiting_manual_discussion", "profile_updated", "complete"}
+        if latest_cycle["state"] == "failed" or (
+            latest_cycle["state"] not in terminal_states and latest_cycle_age_hours > 6
+        ):
+            warnings.append(
+                {
+                    "level": "warning",
+                    "message": f"Latest workflow cycle is {latest_cycle['state']} and {latest_cycle_age_hours:.1f} hours old.",
+                }
+            )
+
+    latest_scout = summary["latest_scout_run"]
+    if latest_scout:
+        if int(latest_scout["candidate_count"] or 0) == 0:
+            warnings.append({"level": "warning", "message": f"Latest {latest_scout['source']} Scout run returned 0 candidates."})
+        if int(latest_scout["eligible_count"] or 0) == 0:
+            warnings.append({"level": "warning", "message": f"Latest {latest_scout['source']} Scout run had 0 eligible candidates."})
+
+    low_ratio_runs = 0
+    for row in summary["recent_scout_runs"]:
+        candidates = int(row["candidate_count"] or 0)
+        eligible = int(row["eligible_count"] or 0)
+        if candidates > 0 and eligible / candidates < 0.10:
+            low_ratio_runs += 1
+    if len(summary["recent_scout_runs"]) >= 3 and low_ratio_runs >= 3:
+        warnings.append({"level": "warning", "message": "Eligible/stored ratio is below 10% for the latest 3 Scout runs."})
+
+    recent_cycle_recommendations = summary["recent_cycle_recommendations"]
+    if len(recent_cycle_recommendations) >= 2 and all(
+        int(row["recommendation_count"] or 0) == 0 for row in recent_cycle_recommendations
+    ):
+        warnings.append({"level": "warning", "message": "No recommendations were produced across two recent workflow cycles."})
+
+    artifact_health = summary["artifact_health"]
+    if artifact_health["missing_triage_summary_count"] > 0:
+        warnings.append(
+            {
+                "level": "warning",
+                "message": (
+                    f"Latest cycle has {artifact_health['missing_triage_summary_count']} "
+                    "recommended paper(s) without triage summaries."
+                ),
+            }
+        )
+
+    feedback_profile = summary["feedback_profile"]
+    if feedback_profile["recent_apply_failures_count"] > 0:
+        warnings.append({"level": "warning", "message": "Gemini/profile apply failed in the last 7 days."})
+    if feedback_profile["unapplied_structured_feedback_count"] > 0:
+        warnings.append({"level": "warning", "message": "Structured feedback is waiting to be applied to the profile."})
+    return warnings
+
+
+def _rows(
+    connection: sqlite3.Connection,
+    sql: str,
+    params: tuple[Any, ...] = (),
+    columns: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    rows = connection.execute(sql, params).fetchall()
+    if columns is None:
+        columns = [description[0] for description in connection.execute(sql, params).description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def _scalar(connection: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> Any:
+    row = connection.execute(sql, params).fetchone()
+    return row[0] if row else None
+
+
+def _days_since(value: str | None) -> float | None:
+    parsed = _parse_sqlite_datetime(value)
+    if parsed is None:
+        return None
+    return round((datetime.now() - parsed).total_seconds() / 86400, 2)
+
+
+def _parse_sqlite_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value)
+    for candidate in (text, f"{text} 00:00:00"):
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+    return None
 
 
 def recent_runs(db_path: Path = DEFAULT_DB_PATH, limit: int = 10) -> dict[str, Any]:

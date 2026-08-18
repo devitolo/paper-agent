@@ -13,6 +13,7 @@ from paper_agents.db import (
     DEFAULT_SCHEMA_PATH,
     connect_db,
     db_stats,
+    health_summary,
     init_db,
     list_papers,
     recent_runs,
@@ -100,6 +101,11 @@ def main() -> None:
         action="store_true",
         help="Only show papers selected by the latest scout ranking",
     )
+    db_health_parser = db_subparsers.add_parser("health", help="Show workflow and source health")
+    db_health_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    db_health_parser.add_argument("--days", type=int, default=21, help="Number of recent days to summarize")
+    db_health_parser.add_argument("--source", default="all", help="Optional source filter, e.g. arxiv/openalex")
+    db_health_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     bootstrap_parser = subparsers.add_parser("bootstrap", help="Backfill known Project Paper seed data")
     bootstrap_subparsers = bootstrap_parser.add_subparsers(dest="bootstrap_command", required=True)
@@ -266,6 +272,13 @@ def main() -> None:
                 "Database papers",
                 list_papers(args.db, limit=args.limit, selected_only=args.selected),
             )
+            return
+        if args.db_command == "health":
+            summary = health_summary(args.db, days=args.days, source=args.source)
+            if args.json:
+                print(json.dumps(summary, indent=2, sort_keys=True))
+            else:
+                print(format_health_summary(summary))
             return
 
     if args.command == "bootstrap":
@@ -534,6 +547,110 @@ def run_feedback_rebuild_profile(argv: list[str]) -> dict[str, Any]:
 def print_section(title: str, payload: dict) -> None:
     print(f"\n## {title}")
     print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def format_health_summary(summary: dict[str, Any]) -> str:
+    db_info = summary["db"]
+    latest_cycle = summary.get("latest_cycle")
+    latest_scout = summary.get("latest_scout_run")
+    artifact = summary["artifact_health"]
+    feedback = summary["feedback_profile"]
+    lines = [
+        "## Project Paper health",
+        f"DB: {db_info['path']} ({format_bytes(db_info['size_bytes'])}), integrity={db_info['integrity']}",
+        f"Range: last {summary['range']['days']} day(s), source={summary['range']['source']}",
+    ]
+    if latest_cycle:
+        lines.append(
+            "Latest cycle: "
+            f"#{latest_cycle['id']} {latest_cycle['state']} at {latest_cycle['created_at']} "
+            f"(age {summary['top']['latest_run_age_hours']}h)"
+        )
+    else:
+        lines.append("Latest cycle: none")
+    if latest_scout:
+        lines.append(
+            "Latest Scout: "
+            f"#{latest_scout['id']} {latest_scout['source']} "
+            f"candidates={latest_scout['candidate_count']} eligible={latest_scout['eligible_count']} "
+            f"excluded={latest_scout['excluded_count']}"
+        )
+    lines.extend(
+        [
+            f"Last recommendation day: {summary['latest_recommendation_day'] or 'none'}",
+            f"Papers waiting in queue: {summary['top']['papers_waiting_in_queue']}",
+            (
+                "Artifacts in latest cycle: "
+                f"recommendations={artifact['recommendation_count']} "
+                f"pdf={artifact['pdf_count']} triage={artifact['triage_summary_count']}"
+            ),
+            (
+                "Feedback/profile: "
+                f"unapplied={feedback['unapplied_structured_feedback_count']} "
+                f"recent_apply_failures={feedback['recent_apply_failures_count']}"
+            ),
+            "",
+            "Warnings:",
+        ]
+    )
+    if summary["warnings"]:
+        lines.extend(f"- [{warning['level']}] {warning['message']}" for warning in summary["warnings"])
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "Daily Scout funnel:", "day | source | runs | candidates | eligible | excluded"])
+    lines.extend(
+        _format_table_row(row, ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])
+        for row in summary["daily"]["scout"][:20]
+    )
+    if not summary["daily"]["scout"]:
+        lines.append("none")
+
+    lines.extend(["", "Daily Curator funnel:", "day | source | evaluations | quality_met | recommendations"])
+    lines.extend(
+        _format_table_row(row, ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])
+        for row in summary["daily"]["curator"][:20]
+    )
+    if not summary["daily"]["curator"]:
+        lines.append("none")
+
+    lines.extend(["", "Reviewer artifacts:", "day | source | recommendations | pdf | triage"])
+    lines.extend(
+        _format_table_row(row, ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])
+        for row in summary["daily"]["reviewer"][:20]
+    )
+    if not summary["daily"]["reviewer"]:
+        lines.append("none")
+
+    lines.extend(["", "Source breakdown:", "source | candidates | eligible | excluded"])
+    lines.extend(
+        _format_table_row(row, ["source", "candidate_count", "eligible_count", "excluded_count"])
+        for row in summary["source_breakdown"]["funnel"]
+    )
+    if not summary["source_breakdown"]["funnel"]:
+        lines.append("none")
+
+    lines.extend(["", "Top exclusion reasons:", "source | reason | count"])
+    lines.extend(
+        _format_table_row(row, ["source", "reason", "count"])
+        for row in summary["source_breakdown"]["exclusion_reasons"][:10]
+    )
+    if not summary["source_breakdown"]["exclusion_reasons"]:
+        lines.append("none")
+    return "\n".join(lines)
+
+
+def _format_table_row(row: dict[str, Any], keys: list[str]) -> str:
+    return " | ".join(str(row.get(key) if row.get(key) is not None else 0) for key in keys)
+
+
+def format_bytes(value: int) -> str:
+    size = float(value)
+    for unit in ["B", "KiB", "MiB", "GiB"]:
+        if size < 1024 or unit == "GiB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+    return f"{value} B"
 
 
 def require_openai_api_key() -> None:

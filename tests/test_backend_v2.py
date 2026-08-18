@@ -1194,6 +1194,104 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("logo_light.png", web.LOGO_ASSETS)
         self.assertIn("logo_dark.png", web.LOGO_ASSETS)
 
+    def test_health_summary_empty_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            empty_db = Path(tmp) / "paper_agent.db"
+            db.init_db(empty_db)
+
+            summary = db.health_summary(empty_db, days=21)
+
+        self.assertEqual(summary["db"]["integrity"], "ok")
+        self.assertIsNone(summary["latest_cycle"])
+        self.assertEqual(summary["top"]["papers_waiting_in_queue"], 0)
+        self.assertTrue(any("No workflow cycle" in warning["message"] for warning in summary["warnings"]))
+
+    def test_health_summary_healthy_run_with_artifacts(self):
+        paper_id, _ = self._seed_review_recommendation()
+        db.insert_artifact(self.connection, paper_id, artifact_type="pdf", path=Path("data/papers/test.pdf"))
+        db.insert_artifact(
+            self.connection,
+            paper_id,
+            artifact_type="triage_summary",
+            path=Path("data/extractions/test.summary.json"),
+        )
+        db.update_workflow_state(self.connection, self.cycle_id, "recommendations_ready")
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21)
+
+        self.assertEqual(summary["db"]["integrity"], "ok")
+        self.assertEqual(summary["artifact_health"]["recommendation_count"], 1)
+        self.assertEqual(summary["artifact_health"]["pdf_count"], 1)
+        self.assertEqual(summary["artifact_health"]["triage_summary_count"], 1)
+        self.assertEqual(summary["top"]["papers_waiting_in_queue"], 1)
+
+    def test_health_summary_warns_on_zero_eligible_scout_run(self):
+        self._seed_scout_candidate(source="openalex", excluded=True, exclusion_reason="already_seen")
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21, source="openalex")
+
+        self.assertEqual(summary["top"]["latest_zero_eligible_source"], "openalex")
+        self.assertTrue(any("0 eligible" in warning["message"] for warning in summary["warnings"]))
+        self.assertEqual(summary["source_breakdown"]["exclusion_reasons"][0]["reason"], "already_seen")
+
+    def test_health_summary_source_split_and_filter(self):
+        self._seed_scout_candidate(source="arxiv", excluded=False, source_id="2607.sourcev1")
+        self._seed_scout_candidate(source="openalex", excluded=True, source_id="W-source", exclusion_reason="history")
+        self.connection.commit()
+
+        all_summary = db.health_summary(self.db_path, days=21)
+        openalex_summary = db.health_summary(self.db_path, days=21, source="openalex")
+
+        all_sources = {row["source"] for row in all_summary["source_breakdown"]["funnel"]}
+        filtered_sources = {row["source"] for row in openalex_summary["daily"]["scout"]}
+        self.assertIn("arxiv", all_sources)
+        self.assertIn("openalex", all_sources)
+        self.assertEqual(filtered_sources, {"openalex"})
+
+    def test_health_summary_reports_feedback_profile_warnings(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        ingest = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nGreat operational fit.",
+            source="test",
+            status="interested",
+        )
+        db.create_feedback_profile_apply_attempt(
+            self.connection,
+            provider="gemini",
+            model=None,
+            structured_feedback_ids=[ingest["structured_feedback_id"]],
+            dry_run=False,
+            status="failed",
+            error="provider unavailable",
+        )
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21)
+
+        self.assertEqual(summary["feedback_profile"]["unapplied_structured_feedback_count"], 1)
+        self.assertEqual(summary["feedback_profile"]["recent_apply_failures_count"], 1)
+        messages = [warning["message"] for warning in summary["warnings"]]
+        self.assertTrue(any("Gemini/profile apply failed" in message for message in messages))
+        self.assertTrue(any("Structured feedback is waiting" in message for message in messages))
+
+    def test_health_page_renders_dashboard_controls(self):
+        self._seed_scout_candidate(source="openalex", excluded=True, exclusion_reason="history")
+        self.connection.commit()
+
+        html = web.render_health_page(self.db_path, days=21, source_value="openalex")
+
+        self.assertIn("Project Paper Health", html)
+        self.assertIn('<form method="get" action="/health"', html)
+        self.assertIn('<select name="days"', html)
+        self.assertIn('<option value="openalex" selected>OpenAlex</option>', html)
+        self.assertIn("Daily Funnel", html)
+        self.assertIn("Source Breakdown", html)
+
     def _seed_review_recommendation(self, *, source_id: str = "2607.reviewv1") -> tuple[int, int]:
         paper_id, _ = db.upsert_paper(
             self.connection,
@@ -1234,6 +1332,49 @@ class BackendV2Tests(unittest.TestCase):
             rationale="Strong match.",
         )
         return paper_id, recommendation_id
+
+    def _seed_scout_candidate(
+        self,
+        *,
+        source: str,
+        excluded: bool,
+        source_id: str = "health-source",
+        exclusion_reason: str | None = None,
+    ) -> tuple[int, int, int]:
+        scout_run_id = db.insert_scout_run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            source=source,
+            target_candidates=1,
+            max_candidates=1,
+            freshness_months=24,
+            topics=["microservice diagnosis"],
+            guidance_id=None,
+        )
+        paper_id, is_new = db.upsert_paper(
+            self.connection,
+            {
+                "source": source,
+                "source_id": source_id,
+                "title": f"{source} health paper",
+                "url": f"https://example.test/{source_id}",
+                "published": "2026-08-01",
+                "abstract": "Microservice diagnosis for production engineering.",
+            },
+        )
+        candidate_id = db.insert_scout_candidate(
+            self.connection,
+            scout_run_id=scout_run_id,
+            paper_id=paper_id,
+            retrieval_order=1,
+            is_new=is_new,
+            excluded=excluded,
+            exclusion_reason=exclusion_reason,
+            source_query="microservice diagnosis",
+        )
+        db.complete_scout_run(self.connection, scout_run_id)
+        return scout_run_id, paper_id, candidate_id
 
 
 if __name__ == "__main__":

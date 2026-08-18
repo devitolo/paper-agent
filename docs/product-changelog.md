@@ -6,17 +6,21 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ### System health and pipeline metrics dashboard
 
-Status: Planned/backlog.
+Status: Implemented.
 
 Decision: Project Paper needs a compact health view that shows whether the Mac mini and recommendation pipeline are working at a glance.
 
-Purpose:
+Completed behavior:
 
-- Visualize the daily funnel from Scout candidates to eligible candidates, Curator work, recommendations, artifacts, feedback, and profile applications.
-- Surface cron, arXiv, Ollama, and Gemini failures alongside pipeline counts.
-- Help distinguish "cron did not run" from "Scout ran but the candidate funnel was exhausted."
-- Track exclusion reasons over time, especially `previously_discovered`.
-- Consider Mac mini CPU, temperature, and disk metrics later if they are easy to collect.
+- Add `python3 -m paper_agents.cli db health` with `--days`, `--source`, and `--json`.
+- Add `/health` to the existing Review Queue web server.
+- Compute DB integrity, latest workflow cycle age/state, days since last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, feedback/profile status, and operator warnings directly from SQLite.
+- Include source breakdowns for Scout candidates, eligible/excluded candidates, recommendations, and exclusion reasons.
+- Surface stale workflow cycles, zero-candidate/zero-eligible Scout runs, missing triage summaries, unapplied structured feedback, recent Gemini/profile apply failures, and DB integrity failures.
+
+Future consideration:
+
+- Add Mac mini CPU, temperature, disk, backup freshness, and tunnel metrics if they become easy to collect without making the dashboard heavy.
 
 ### Scout sources: Semantic Scholar, OpenAlex, and source-aware review
 

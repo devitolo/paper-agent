@@ -214,6 +214,8 @@ Inspect the registry:
 python3 -m paper_agents.cli db stats
 python3 -m paper_agents.cli db recent-runs --limit 5
 python3 -m paper_agents.cli db papers --selected --limit 10
+python3 -m paper_agents.cli db health --days 21
+python3 -m paper_agents.cli db health --days 21 --source openalex --json
 ```
 
 Run the daily Scout-to-Curator pipeline:
@@ -251,6 +253,8 @@ python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
 The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, shows source badges, filters by source when multiple Scout sources are present, keeps quick review actions close to each paper, stores non-empty Feedback boxes as raw V2 feedback blobs with deterministic v1 structured parsing, and auto-applies the newly submitted structured feedback to the active profile through Gemini. Applied-feedback tracking prevents reusing the same structured row repeatedly.
+
+The same web server exposes a lightweight operator dashboard at `/health`. It computes DB integrity, latest cycle age/state, Scout/Curator/Reviewer funnel counts, artifact gaps, feedback/profile status, warnings, and source splits directly from SQLite. Use the range and source filters to distinguish "cron did not run" from "Scout ran but a source returned no eligible candidates."
 
 Manual feedback apply and full profile rebuild remain available for testing and operations:
 

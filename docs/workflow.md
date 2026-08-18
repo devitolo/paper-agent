@@ -83,7 +83,11 @@ The bootstrap command inserts known seed papers as manual backfill recommendatio
 python3 -m paper_agents.cli db stats
 python3 -m paper_agents.cli db recent-runs --limit 5
 python3 -m paper_agents.cli db papers --selected --limit 10
+python3 -m paper_agents.cli db health --days 21
+python3 -m paper_agents.cli db health --days 21 --source openalex --json
 ```
+
+`db health` computes operational rollups directly from SQLite. It reports DB path/size/integrity, latest workflow cycle age/state, days since the last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, unapplied structured feedback, recent profile apply failures, and warnings for stale cycles or unhealthy sources.
 
 ## Repository Path
 
@@ -118,6 +122,8 @@ python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
 The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, shows source badges, filters by source when multiple Scout sources are present, and appends lightweight status rows. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions`, ScoutAgent, or CuratorAgent directly.
+
+The same server exposes `/health`, a compact source-aware operations dashboard for the last 7/21/30/90 days. It shows top operational cards, warning banners, daily funnel tables, source breakdowns, exclusion reasons, artifact coverage, feedback/profile activity, and source filters without adding aggregate tables.
 
 The same V2 storage path is available from the CLI:
 
