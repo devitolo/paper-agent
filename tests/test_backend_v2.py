@@ -1188,6 +1188,38 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, ("reviewed", "Dense feedback blob"))
 
+    def test_review_queue_quick_status_controls_are_status_only(self):
+        self._seed_review_recommendation()
+        self.connection.commit()
+
+        html = web.render_review_queue(self.db_path)
+
+        self.assertIn('name="action" value="feedback"', html)
+        self.assertIn('data-quick-status="1">Read later</button>', html)
+        self.assertIn('<span class="submit-state" aria-live="polite"></span>', html)
+
+    def test_review_queue_status_only_save_does_not_ingest_existing_notes(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        self.connection.commit()
+        calls = []
+
+        result = web.save_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            status="read_later",
+            notes="Decision: keep\nScore: 5\nExisting pasted feedback.",
+            feedback_content="",
+            profile_provider_fn=lambda payload, model: calls.append(payload),
+        )
+
+        self.assertTrue(result["feedback_saved"])
+        self.assertFalse(result["feedback_ingested"])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM raw_feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 0)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM structured_feedback").fetchone()[0], 0)
+
     def test_review_queue_feedback_save_ingests_non_empty_feedback_blob(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
         self.connection.commit()

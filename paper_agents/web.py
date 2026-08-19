@@ -108,12 +108,17 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid paper id")
                 return
 
-            status = form.get("status", [""])[0]
-            feedback_content = form.get("notes", [""])[0]
-            notes = feedback_content.strip()
+            status = form.get("status", [""])[-1]
+            action = form.get("action", ["status"])[-1]
+            submitted_notes = form.get("notes", [""])[0]
+            notes = submitted_notes.strip()
+            feedback_content = submitted_notes if action == "feedback" else ""
             recommendation_id = parse_optional_int(form.get("recommendation_id", [""])[0])
             if status not in {value for value, _ in FEEDBACK_STATUSES}:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback status")
+                return
+            if action not in {"status", "feedback"}:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback action")
                 return
 
             result = save_feedback(
@@ -253,6 +258,24 @@ def render_review_queue(
           setTimeout(() => {{ button.textContent = originalText; }}, 1400);
         }});
       }});
+      document.querySelectorAll(".paper-form").forEach((form) => {{
+        form.addEventListener("submit", (event) => {{
+          const submitter = event.submitter;
+          if (!submitter || submitter.dataset.quickStatus !== "1") {{
+            return;
+          }}
+          const originalText = submitter.textContent;
+          submitter.textContent = "Saving...";
+          const notice = form.querySelector(".submit-state");
+          const timer = setTimeout(() => {{
+            submitter.textContent = originalText;
+            if (notice) {{
+              notice.textContent = "Still waiting. Refresh and try again if this does not complete.";
+            }}
+          }}, 10000);
+          window.addEventListener("pagehide", () => clearTimeout(timer), {{ once: true }});
+        }});
+      }});
     </script>
   </main>
 </body>
@@ -263,7 +286,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     tags = "".join(f'<span class="tag">{escape(keyword)}</span>' for keyword in card["matched_keywords"][:6])
     links = render_artifact_links(card["artifacts"])
     feedback_buttons = "".join(
-        f'<button type="submit" name="status" value="{value}" class="{button_class(card, value)}">{label}</button>'
+        f'<button type="submit" name="status" value="{value}" class="{button_class(card, value)}" data-quick-status="1">{label}</button>'
         for value, label in FEEDBACK_STATUSES
     )
     notes = escape(card.get("feedback_notes") or "")
@@ -280,6 +303,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     <input type="hidden" name="paper_id" value="{card['id']}">
     <input type="hidden" name="recommendation_id" value="{card['recommendation_id']}">
     <input type="hidden" name="return_to" value="{escape(return_to)}">
+    <input type="hidden" name="status" value="{feedback_status or 'read_later'}">
     <div class="paper-main">
       <div class="card-head">
         <div>
@@ -291,12 +315,13 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
       {summary_html}
       <div class="links">{links}</div>
       <label>Feedback<textarea name="notes">{notes}</textarea></label>
-      <button type="submit" name="status" value="{feedback_status or 'read_later'}" class="secondary save-feedback">Save feedback</button>
+      <button type="submit" name="action" value="feedback" class="secondary save-feedback">Save feedback</button>
     </div>
     <div class="action-rail">
       <div class="score"><strong>{card["score"]:.1f}</strong></div>
       <div class="feedback-actions">{feedback_buttons}</div>
       {feedback_label}
+      <span class="submit-state" aria-live="polite"></span>
     </div>
   </form>
 </article>"""
@@ -1161,6 +1186,7 @@ button.secondary { background: #f6f8fa; }
 .action-rail { display: grid; gap: 6px; }
 .feedback-actions { display: grid; gap: 5px; }
 .feedback-actions button { width: 100%; min-height: 26px; padding: 3px 6px; text-align: left; }
+.submit-state { color: #57606a; font-size: 11px; line-height: 1.25; }
 label { display: grid; gap: 3px; color: #57606a; font-size: 12px; }
 textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertical; border: 1px solid #d8dee4; border-radius: 5px; padding: 6px; font: inherit; color: #1f2328; background: #ffffff; }
 .save-feedback { margin-top: 5px; }
@@ -1209,7 +1235,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt { color: #8b949e; }
+  .topbar p, .card-head p, h3, .feedback-state, .submit-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
   .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-graph, .health-table table, .health-kv { background: #161b22; color: #e6edf3; border-color: #30363d; }
