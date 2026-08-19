@@ -284,6 +284,8 @@ export PAPER_AGENT_GEMINI_TIMEOUT_SECONDS=240
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 ```
 
+When no explicit Gemini model is supplied, profile apply first uses the Gemini CLI default model and falls back once to `gemini-3.1-flash-lite` for quota/rate-limit failures. Explicit `--model` choices are honored without automatic fallback.
+
 Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
 
 Backfill missing triage summaries for already recommended papers without re-scouting:

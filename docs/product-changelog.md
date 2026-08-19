@@ -15,6 +15,7 @@ Completed behavior:
 - Increase the Gemini CLI profile-update timeout default to 180 seconds.
 - Add `PAPER_AGENT_GEMINI_TIMEOUT_SECONDS` so operators can raise the timeout for manual retries.
 - Include the configured timeout value in timeout failure messages.
+- Retry once with `gemini-3.1-flash-lite` when the default Gemini model fails due to quota or rate limits.
 
 ## 2026-08-18
 

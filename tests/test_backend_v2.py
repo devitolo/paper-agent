@@ -951,6 +951,62 @@ class BackendV2Tests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "timed out after 240 seconds"):
                     call_gemini_json(payload)
 
+    def test_feedback_profile_apply_falls_back_to_flash_lite_on_quota_error(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        feedback = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nVery applied.",
+            source="test",
+        )
+        calls = []
+
+        def provider(payload, model):
+            calls.append(model)
+            if model is None:
+                raise RuntimeError("Gemini CLI failed: 429 quota exhausted")
+            return {
+                "profile": {
+                    "interests": ["fallback profile"],
+                    "positive_signals": ["quota recovery"],
+                    "negative_signals": [],
+                    "notes": "Recovered with Flash-Lite.",
+                },
+                "change_summary": "Recovered with fallback model.",
+            }
+
+        with patch("paper_agents.feedback.call_gemini_json", side_effect=provider):
+            output = apply_feedback_to_profile(self.connection, dry_run=True)
+
+        self.assertEqual(calls, [None, "gemini-3.1-flash-lite"])
+        self.assertEqual(output["status"], "dry_run")
+        self.assertEqual(output["model"], "gemini-3.1-flash-lite")
+        self.assertEqual(output["structured_feedback_ids"], [feedback["structured_feedback_id"]])
+        attempts = self.connection.execute(
+            "SELECT model, dry_run, status, error FROM feedback_profile_apply_attempts ORDER BY id"
+        ).fetchall()
+        self.assertEqual(attempts[0], (None, 1, "failed", "Gemini CLI failed: 429 quota exhausted"))
+        self.assertEqual(attempts[1], ("gemini-3.1-flash-lite", 1, "succeeded", None))
+
+    def test_feedback_profile_apply_does_not_fallback_for_non_quota_error(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nVery applied.",
+            source="test",
+        )
+
+        with patch("paper_agents.feedback.call_gemini_json", side_effect=RuntimeError("Provider did not return valid JSON.")) as provider:
+            output = apply_feedback_to_profile(self.connection, dry_run=True)
+
+        self.assertEqual(provider.call_count, 1)
+        self.assertEqual(output["status"], "failed")
+        self.assertIsNone(output["model"])
+        self.assertEqual(output["error"], "Provider did not return valid JSON.")
+
     def test_feedback_profile_apply_creates_profile_version_and_application_rows(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
         first = ingest_feedback_blob(

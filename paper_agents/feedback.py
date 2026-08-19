@@ -15,6 +15,7 @@ DETERMINISTIC_FEEDBACK_PARSER_NAME = "feedback-agent"
 DETERMINISTIC_FEEDBACK_PARSER_VERSION = "deterministic-v1"
 DEFAULT_GEMINI_TIMEOUT_SECONDS = 180
 GEMINI_TIMEOUT_ENV = "PAPER_AGENT_GEMINI_TIMEOUT_SECONDS"
+GEMINI_FLASH_LITE_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 
 DECISION_ALIASES = {
     "keep": "keep",
@@ -38,6 +39,12 @@ STATUS_DECISIONS = {
 DECISION_RE = re.compile(r"^\s*decision\s*:\s*(keep|maybe|reject|interested|read\s+later|not\s+interested|reviewed)\s*$", re.IGNORECASE)
 SCORE_RE = re.compile(r"^\s*score\s*:\s*([1-5])\s*$", re.IGNORECASE)
 ProfileProvider = Callable[[dict[str, Any], str | None], dict[str, Any]]
+
+
+class ProfileProviderFailure(RuntimeError):
+    def __init__(self, message: str, *, model: str | None) -> None:
+        super().__init__(message)
+        self.model = model
 
 
 class FeedbackAgent:
@@ -198,14 +205,22 @@ def apply_feedback_to_profile(
         "current_profile": current_profile,
         "structured_feedback": feedback_rows,
     }
-    profile_provider = provider_fn or call_gemini_json
     try:
-        proposed = normalize_profile_update(profile_provider(payload, model))
-    except RuntimeError as error:
+        proposed, effective_model = propose_profile_update(
+            connection,
+            payload=payload,
+            provider=provider,
+            model=model,
+            dry_run=dry_run,
+            feedback_ids=feedback_ids,
+            mode="incremental",
+            provider_fn=provider_fn,
+        )
+    except ProfileProviderFailure as error:
         attempt_id = db.create_feedback_profile_apply_attempt(
             connection,
             provider=provider,
-            model=model,
+            model=error.model,
             structured_feedback_ids=feedback_ids,
             dry_run=dry_run,
             status="failed",
@@ -216,7 +231,7 @@ def apply_feedback_to_profile(
             "status": "failed",
             "dry_run": dry_run,
             "provider": provider,
-            "model": model,
+            "model": error.model,
             "current_profile_version_id": current["id"] if current else None,
             "structured_feedback_ids": feedback_ids,
             "error": str(error),
@@ -226,7 +241,7 @@ def apply_feedback_to_profile(
         "status": "dry_run" if dry_run else "applied",
         "dry_run": dry_run,
         "provider": provider,
-        "model": model,
+        "model": effective_model,
         "current_profile_version_id": current["id"] if current else None,
         "structured_feedback_ids": feedback_ids,
         "proposed_profile": proposed["profile"],
@@ -236,7 +251,7 @@ def apply_feedback_to_profile(
         attempt_id = db.create_feedback_profile_apply_attempt(
             connection,
             provider=provider,
-            model=model,
+            model=effective_model,
             structured_feedback_ids=feedback_ids,
             dry_run=True,
             status="succeeded",
@@ -255,7 +270,7 @@ def apply_feedback_to_profile(
     attempt_id = db.create_feedback_profile_apply_attempt(
         connection,
         provider=provider,
-        model=model,
+        model=effective_model,
         structured_feedback_ids=feedback_ids,
         dry_run=False,
         status="succeeded",
@@ -300,14 +315,22 @@ def rebuild_feedback_profile(
         "current_profile": current_profile,
         "structured_feedback": feedback_rows,
     }
-    profile_provider = provider_fn or call_gemini_json
     try:
-        proposed = normalize_profile_update(profile_provider(payload, model))
-    except RuntimeError as error:
+        proposed, effective_model = propose_profile_update(
+            connection,
+            payload=payload,
+            provider=provider,
+            model=model,
+            dry_run=dry_run,
+            feedback_ids=feedback_ids,
+            mode="full_rebuild",
+            provider_fn=provider_fn,
+        )
+    except ProfileProviderFailure as error:
         attempt_id = db.create_feedback_profile_apply_attempt(
             connection,
             provider=provider,
-            model=model,
+            model=error.model,
             structured_feedback_ids=feedback_ids,
             dry_run=dry_run,
             status="failed",
@@ -318,7 +341,7 @@ def rebuild_feedback_profile(
             "status": "failed",
             "dry_run": dry_run,
             "provider": provider,
-            "model": model,
+            "model": error.model,
             "current_profile_version_id": current["id"] if current else None,
             "structured_feedback_ids": feedback_ids,
             "error": str(error),
@@ -328,7 +351,7 @@ def rebuild_feedback_profile(
         "status": "dry_run" if dry_run else "rebuilt",
         "dry_run": dry_run,
         "provider": provider,
-        "model": model,
+        "model": effective_model,
         "current_profile_version_id": current["id"] if current else None,
         "structured_feedback_ids": feedback_ids,
         "proposed_profile": proposed["profile"],
@@ -338,7 +361,7 @@ def rebuild_feedback_profile(
         attempt_id = db.create_feedback_profile_apply_attempt(
             connection,
             provider=provider,
-            model=model,
+            model=effective_model,
             structured_feedback_ids=feedback_ids,
             dry_run=True,
             status="succeeded",
@@ -356,7 +379,7 @@ def rebuild_feedback_profile(
     attempt_id = db.create_feedback_profile_apply_attempt(
         connection,
         provider=provider,
-        model=model,
+        model=effective_model,
         structured_feedback_ids=feedback_ids,
         dry_run=False,
         status="succeeded",
@@ -366,6 +389,60 @@ def rebuild_feedback_profile(
     output["profile_version_id"] = profile_version_id
     output["apply_attempt_id"] = attempt_id
     return output
+
+
+def propose_profile_update(
+    connection: sqlite3.Connection,
+    *,
+    payload: dict[str, Any],
+    provider: str,
+    model: str | None,
+    dry_run: bool,
+    feedback_ids: list[int],
+    mode: str,
+    provider_fn: ProfileProvider | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    profile_provider = provider_fn or call_gemini_json
+    try:
+        return normalize_profile_update(profile_provider(payload, model)), model
+    except RuntimeError as error:
+        if not should_fallback_to_flash_lite(error, model=model, provider_fn=provider_fn):
+            raise ProfileProviderFailure(str(error), model=model) from error
+
+        db.create_feedback_profile_apply_attempt(
+            connection,
+            provider=provider,
+            model=model,
+            structured_feedback_ids=feedback_ids,
+            dry_run=dry_run,
+            status="failed",
+            error=str(error),
+            metadata={"mode": mode, "fallback_model": GEMINI_FLASH_LITE_FALLBACK_MODEL},
+        )
+        try:
+            proposed = normalize_profile_update(profile_provider(payload, GEMINI_FLASH_LITE_FALLBACK_MODEL))
+        except RuntimeError as fallback_error:
+            raise ProfileProviderFailure(str(fallback_error), model=GEMINI_FLASH_LITE_FALLBACK_MODEL) from fallback_error
+        return proposed, GEMINI_FLASH_LITE_FALLBACK_MODEL
+
+
+def should_fallback_to_flash_lite(error: RuntimeError, *, model: str | None, provider_fn: ProfileProvider | None) -> bool:
+    if provider_fn is not None or model is not None:
+        return False
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in [
+            "429",
+            "quota",
+            "rate limit",
+            "ratelimit",
+            "too many requests",
+            "toomanyrequests",
+            "free_tier_requests",
+            "exhausted",
+        ]
+    )
 
 
 def call_gemini_json(payload: dict[str, Any], model: str | None = None) -> dict[str, Any]:

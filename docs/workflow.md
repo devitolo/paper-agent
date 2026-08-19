@@ -153,6 +153,8 @@ export PAPER_AGENT_GEMINI_TIMEOUT_SECONDS=240
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 ```
 
+When no explicit Gemini model is supplied, profile apply first uses the Gemini CLI default model and falls back once to `gemini-3.1-flash-lite` for quota/rate-limit failures. Explicit `--model` choices are honored without automatic fallback.
+
 Full rebuild is a manual compression path that reads all structured feedback and creates a fresh compact profile. Do not run it automatically yet:
 
 ```bash
