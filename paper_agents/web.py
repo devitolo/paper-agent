@@ -292,9 +292,10 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     notes = escape(card.get("feedback_notes") or "")
     feedback_status = card.get("feedback_status")
     feedback_label = f'<span class="feedback-state">Current: {escape(feedback_status)}</span>' if feedback_status else ""
+    user_score_html = render_user_score(card.get("user_score"))
     summary = card["summary"]
     source_controls = render_source_controls(card)
-    source_badge = f'<span class="source-badge">{escape(card["source_label"])}</span>'
+    source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
     compact_class = " compact" if view_value == "compact" else ""
     summary_html = render_summary(summary, compact=view_value == "compact")
 
@@ -318,13 +319,20 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
       <button type="submit" name="action" value="feedback" class="secondary save-feedback">Save feedback</button>
     </div>
     <div class="action-rail">
-      <div class="score"><strong>{card["score"]:.1f}</strong></div>
+      {user_score_html}
+      <div class="score {'score-secondary' if card.get('user_score') is not None else ''}"><span>System</span><strong>{card["score"]:.1f}</strong></div>
       <div class="feedback-actions">{feedback_buttons}</div>
       {feedback_label}
       <span class="submit-state" aria-live="polite"></span>
     </div>
   </form>
 </article>"""
+
+
+def render_user_score(score: int | None) -> str:
+    if score is None:
+        return ""
+    return f'<div class="user-score"><span>Your score</span><strong>{score}/5</strong></div>'
 
 
 def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:
@@ -830,6 +838,13 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     notes,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id DESC) AS row_number
                 FROM feedback
+            ), latest_structured_feedback AS (
+                SELECT
+                    paper_id,
+                    score,
+                    ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id DESC) AS row_number
+                FROM structured_feedback
+                WHERE score IS NOT NULL
             ), primary_source AS (
                 SELECT
                     paper_id,
@@ -863,7 +878,8 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                 latest_recommendation.rationale,
                 latest_feedback.status,
                 latest_feedback.notes,
-                source_rollup.sources
+                source_rollup.sources,
+                latest_structured_feedback.score
             FROM papers
             JOIN latest_recommendation
               ON latest_recommendation.paper_id = papers.id
@@ -871,6 +887,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
             LEFT JOIN primary_source ON primary_source.paper_id = papers.id AND primary_source.row_number = 1
             LEFT JOIN source_rollup ON source_rollup.paper_id = papers.id
             LEFT JOIN latest_feedback ON latest_feedback.paper_id = papers.id AND latest_feedback.row_number = 1
+            LEFT JOIN latest_structured_feedback ON latest_structured_feedback.paper_id = papers.id AND latest_structured_feedback.row_number = 1
             {where_clause}
             {order_clause}
             LIMIT 50
@@ -889,6 +906,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     "source": row[2] or "unknown",
                     "source_id": row[3] or "unknown",
                     "source_label": source_label(row[2] or "unknown", parse_sources(row[13])),
+                    "user_score": row[14],
                     "title": row[4],
                     "published": row[5],
                     "url": row[7],
@@ -981,6 +999,13 @@ def source_label(primary_source: str, sources: list[str]) -> str:
     if len(unique) > 1:
         return f"{source_display_name(primary_source)} +{len(unique) - 1}"
     return source_display_name(primary_source)
+
+
+def source_badge_class(source: str) -> str:
+    normalized = source.replace("_", "-").lower()
+    if normalized not in {"arxiv", "openalex", "semantic-scholar"}:
+        normalized = "unknown"
+    return f"source-badge-{normalized}"
 
 
 def source_display_name(source: str) -> str:
@@ -1171,9 +1196,24 @@ button.secondary { background: #f6f8fa; }
 .card-head { display: grid; gap: 4px; align-items: start; }
 .score { text-align: center; border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 6px; background: #f6f8fa; }
 .score strong { display: block; font-size: 17px; line-height: 1; }
+.score span, .user-score span { display: block; color: #57606a; font-size: 10px; line-height: 1; margin-bottom: 3px; text-transform: uppercase; }
+.score-secondary { background: transparent; }
+.score-secondary strong { font-size: 13px; }
+.user-score { text-align: center; border: 1px solid #1a7f37; border-radius: 5px; padding: 6px; background: #dafbe1; color: #116329; }
+.user-score strong { display: block; font-size: 18px; line-height: 1; }
 .feedback-state { color: #57606a; font-size: 11px; text-align: center; }
 .tags, .links { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .tag { border: 1px solid #d8dee4; color: #57606a; border-radius: 999px; padding: 1px 6px; font-size: 11px; }
+.source-badge { border-radius: 999px; padding: 1px 7px; font-size: 11px; font-weight: 650; }
+.source-badge::before { margin-right: 4px; }
+.source-badge-arxiv { color: #8a4600; background: #fff1d6; border: 1px solid #d4a72c; }
+.source-badge-arxiv::before { content: "A"; }
+.source-badge-openalex { color: #0969da; background: #ddf4ff; border: 1px solid #54aeef; }
+.source-badge-openalex::before { content: "O"; }
+.source-badge-semantic-scholar { color: #8250df; background: #fbefff; border: 1px solid #d8b9ff; }
+.source-badge-semantic-scholar::before { content: "S"; }
+.source-badge-unknown { color: #57606a; background: #f6f8fa; border: 1px solid #d8dee4; }
+.source-badge-unknown::before { content: "?"; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
 .summary-grid section { min-width: 0; }
 .summary-grid p, .source-summary p, .compact-summary { color: #3f4650; font-size: 12px; }
@@ -1235,11 +1275,17 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .submit-state, .tag, label, .compact-summary, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt { color: #8b949e; }
+  .topbar p, .card-head p, h3, .feedback-state, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
   .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-graph, .health-table table, .health-kv { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
+  .score-secondary { background: transparent; }
+  .user-score { background: #0f2a1a; color: #7ee787; border-color: #238636; }
+  .source-badge-arxiv { color: #f0b72f; background: #2d2300; border-color: #9e6a03; }
+  .source-badge-openalex { color: #79c0ff; background: #0d263f; border-color: #1f6feb; }
+  .source-badge-semantic-scholar { color: #d8b9ff; background: #2a163f; border-color: #8250df; }
+  .source-badge-unknown { color: #8b949e; background: #21262d; border-color: #30363d; }
   .chart-axis { stroke: #8b949e; }
   .chart-grid { stroke: #30363d; opacity: 1; }
   .chart-label { fill: #8b949e; }

@@ -1124,18 +1124,42 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("All sources", html)
         self.assertIn("arXiv", html)
         self.assertIn('href="/health"', html)
-        self.assertIn('class="source-badge"', html)
+        self.assertIn('class="source-badge source-badge-arxiv"', html)
         self.assertIn('class="action-rail"', html)
         self.assertIn('<h1 class="brand-title">', html)
         self.assertIn('srcset="/assets/logo_dark.png"', html)
         self.assertIn('src="/assets/logo_light.png"', html)
-        self.assertIn('<strong>72.5</strong>', html)
+        self.assertIn('<span>System</span><strong>72.5</strong>', html)
         self.assertIn('data-copy-value="https://example.test/2607.reviewv1"', html)
         self.assertIn("Feedback<textarea name=\"notes\">", html)
         self.assertNotIn("No ChatGPT review yet", html)
         self.assertNotIn("Copy prompt/link", html)
         self.assertNotIn("<span>score</span>", html)
         self.assertNotIn(">Notes<textarea", html)
+
+    def test_review_queue_shows_user_feedback_score_prominently(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: maybe\nScore: 2\nUseful but not urgent.",
+            source="test",
+            status="read_later",
+        )
+        self.connection.commit()
+
+        html = web.render_review_queue(self.db_path)
+
+        self.assertIn('<div class="user-score"><span>Your score</span><strong>2/5</strong></div>', html)
+        self.assertIn('class="score score-secondary"', html)
+        self.assertIn('<span>System</span><strong>72.5</strong>', html)
+
+    def test_source_badge_class_distinguishes_sources(self):
+        self.assertEqual(web.source_badge_class("arxiv"), "source-badge-arxiv")
+        self.assertEqual(web.source_badge_class("openalex"), "source-badge-openalex")
+        self.assertEqual(web.source_badge_class("semantic_scholar"), "source-badge-semantic-scholar")
+        self.assertEqual(web.source_badge_class("custom_source"), "source-badge-unknown")
 
     def test_review_queue_filters_by_source_and_shows_multi_source_label(self):
         paper_id, _ = self._seed_review_recommendation()
