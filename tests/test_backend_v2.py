@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import io
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 import urllib.error
@@ -12,7 +13,7 @@ from unittest.mock import patch
 
 from paper_agents import cli
 from paper_agents import db
-from paper_agents.feedback import apply_feedback_to_profile, ingest_feedback_blob, rebuild_feedback_profile
+from paper_agents.feedback import apply_feedback_to_profile, call_gemini_json, gemini_timeout_seconds, ingest_feedback_blob, rebuild_feedback_profile
 from paper_agents.cli import run_feedback_add, run_feedback_apply, run_feedback_rebuild_profile
 from paper_agents.bootstrap import import_legacy_scout_files
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
@@ -926,6 +927,29 @@ class BackendV2Tests(unittest.TestCase):
             "SELECT provider, model, dry_run, status, profile_version_id FROM feedback_profile_apply_attempts"
         ).fetchone()
         self.assertEqual(attempt, ("gemini", "gemini-test", 1, "succeeded", None))
+
+    def test_gemini_timeout_is_configurable_by_environment(self):
+        with patch.dict("os.environ", {"PAPER_AGENT_GEMINI_TIMEOUT_SECONDS": "240"}):
+            self.assertEqual(gemini_timeout_seconds(), 240)
+
+        with patch.dict("os.environ", {"PAPER_AGENT_GEMINI_TIMEOUT_SECONDS": "not-a-number"}):
+            self.assertEqual(gemini_timeout_seconds(), 180)
+
+    def test_call_gemini_json_uses_configured_timeout(self):
+        payload = {"current_profile": {}, "structured_feedback": []}
+        with patch.dict("os.environ", {"PAPER_AGENT_GEMINI_TIMEOUT_SECONDS": "240"}):
+            with patch("paper_agents.feedback.subprocess.run") as run:
+                run.return_value.stdout = '{"profile":{"interests":[],"positive_signals":[],"negative_signals":[],"notes":""},"change_summary":"ok"}'
+                call_gemini_json(payload)
+
+        self.assertEqual(run.call_args.kwargs["timeout"], 240)
+
+    def test_call_gemini_json_timeout_error_includes_timeout(self):
+        payload = {"current_profile": {}, "structured_feedback": []}
+        with patch.dict("os.environ", {"PAPER_AGENT_GEMINI_TIMEOUT_SECONDS": "240"}):
+            with patch("paper_agents.feedback.subprocess.run", side_effect=subprocess.TimeoutExpired(["gemini"], 240)):
+                with self.assertRaisesRegex(RuntimeError, "timed out after 240 seconds"):
+                    call_gemini_json(payload)
 
     def test_feedback_profile_apply_creates_profile_version_and_application_rows(self):
         paper_id, recommendation_id = self._seed_review_recommendation()

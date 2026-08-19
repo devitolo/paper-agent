@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from paper_agents.openai_helpers import call_openai_json
 
 DETERMINISTIC_FEEDBACK_PARSER_NAME = "feedback-agent"
 DETERMINISTIC_FEEDBACK_PARSER_VERSION = "deterministic-v1"
+DEFAULT_GEMINI_TIMEOUT_SECONDS = 180
+GEMINI_TIMEOUT_ENV = "PAPER_AGENT_GEMINI_TIMEOUT_SECONDS"
 
 DECISION_ALIASES = {
     "keep": "keep",
@@ -371,16 +374,28 @@ def call_gemini_json(payload: dict[str, Any], model: str | None = None) -> dict[
     if model:
         command.extend(["--model", model])
     command.extend(["-p", prompt])
+    timeout = gemini_timeout_seconds()
     try:
-        result = subprocess.run(command, text=True, capture_output=True, check=True, timeout=120)
+        result = subprocess.run(command, text=True, capture_output=True, check=True, timeout=timeout)
     except FileNotFoundError as error:
         raise RuntimeError("Gemini CLI was not found. Install and authenticate `gemini`, then retry.") from error
     except subprocess.CalledProcessError as error:
         details = error.stderr.strip() or error.stdout.strip()
         raise RuntimeError(f"Gemini CLI failed: {details}") from error
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError("Gemini CLI timed out while updating the feedback profile.") from error
+        raise RuntimeError(f"Gemini CLI timed out after {timeout} seconds while updating the feedback profile.") from error
     return parse_json_object(result.stdout)
+
+
+def gemini_timeout_seconds() -> int:
+    value = os.environ.get(GEMINI_TIMEOUT_ENV)
+    if not value:
+        return DEFAULT_GEMINI_TIMEOUT_SECONDS
+    try:
+        parsed = int(value)
+    except ValueError:
+        return DEFAULT_GEMINI_TIMEOUT_SECONDS
+    return max(1, parsed)
 
 
 def build_profile_update_prompt(payload: dict[str, Any]) -> str:

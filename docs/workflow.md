@@ -146,6 +146,13 @@ python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
+Gemini profile updates use a 180-second default CLI timeout. If Gemini is slow on the Mac mini, raise it for the retry:
+
+```bash
+export PAPER_AGENT_GEMINI_TIMEOUT_SECONDS=240
+python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
+```
+
 Full rebuild is a manual compression path that reads all structured feedback and creates a fresh compact profile. Do not run it automatically yet:
 
 ```bash

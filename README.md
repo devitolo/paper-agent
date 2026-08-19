@@ -277,6 +277,13 @@ python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
+Gemini profile updates use the Gemini CLI with a 180-second default timeout. If the CLI is slow on the Mac mini, raise it before retrying:
+
+```bash
+export PAPER_AGENT_GEMINI_TIMEOUT_SECONDS=240
+python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
+```
+
 Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
 
 Backfill missing triage summaries for already recommended papers without re-scouting:

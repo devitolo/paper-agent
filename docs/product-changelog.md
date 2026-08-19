@@ -2,6 +2,20 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-08-19
+
+### Gemini profile apply timeout recovery
+
+Status: Implemented.
+
+Decision: Gemini profile updates on the Mac mini can exceed the original CLI timeout even for normal-sized feedback blobs.
+
+Completed behavior:
+
+- Increase the Gemini CLI profile-update timeout default to 180 seconds.
+- Add `PAPER_AGENT_GEMINI_TIMEOUT_SECONDS` so operators can raise the timeout for manual retries.
+- Include the configured timeout value in timeout failure messages.
+
 ## 2026-08-18
 
 ### System health and pipeline metrics dashboard
