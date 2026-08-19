@@ -4,18 +4,24 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ## 2026-08-19
 
-### Gemini profile apply timeout recovery
+### Gemini profile apply timeout and fallback recovery
 
-Status: Implemented.
+Status: Implemented in commits `6745d8d` and `ad85bfc`.
 
-Decision: Gemini profile updates on the Mac mini can exceed the original CLI timeout even for normal-sized feedback blobs.
+Decision: Gemini profile updates on the Mac mini need longer timeouts and a quota/rate-limit fallback path, while preserving operator control over explicit model choices.
 
 Completed behavior:
 
-- Increase the Gemini CLI profile-update timeout default to 180 seconds.
-- Add `PAPER_AGENT_GEMINI_TIMEOUT_SECONDS` so operators can raise the timeout for manual retries.
-- Include the configured timeout value in timeout failure messages.
-- Retry once with `gemini-3.1-flash-lite` when the default Gemini model fails due to quota or rate limits.
+- `feedback apply --provider gemini` without `--model` uses the Gemini CLI default model first.
+- Quota/rate-limit failures retry once with `gemini-3.1-flash-lite`.
+- Explicit `--model` choices are honored without automatic fallback.
+- Gemini CLI timeout defaults to 180 seconds and can be changed with `PAPER_AGENT_GEMINI_TIMEOUT_SECONDS`.
+- Failed default-model attempts and fallback success attempts are both recorded in `feedback_profile_apply_attempts`, so `/health` may show historic failed attempts even after retry success.
+- Profile apply uses the Gemini CLI/API quota path; Gemini app usage and Gemini API/AI Studio quota screens are different operational views.
+
+Backlog:
+
+- Dry-run currently calls Gemini, and real apply calls Gemini again. Consider caching a reviewed dry-run proposal to reduce quota use.
 
 ## 2026-08-18
 

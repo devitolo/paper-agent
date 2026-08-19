@@ -79,6 +79,7 @@ Next major feature area.
 - Keep manual `feedback apply --dry-run` and `feedback apply` available for testing and operations.
 - Add a manual `feedback rebuild-profile` path that regenerates the compact profile from all structured feedback.
 - Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
+- Consider caching reviewed Gemini dry-run profile proposals to reduce duplicate quota usage during apply.
 - Improve Curator ranking based on user feedback.
 
 ## Phase 7: Optimization

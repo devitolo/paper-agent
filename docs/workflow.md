@@ -139,21 +139,27 @@ The Review Queue UI auto-applies the newly submitted structured feedback row to 
 sqlite3 data/paper_agent.db "SELECT id, provider, status, error, profile_version_id, created_at FROM feedback_profile_apply_attempts ORDER BY id DESC LIMIT 10;"
 ```
 
-Manual profile apply remains available for recovery, testing, and operations:
+Manual profile apply remains available for recovery, testing, and operations. With no explicit model, the Gemini CLI default is tried first and quota/rate-limit failures retry once with `gemini-3.1-flash-lite`:
 
 ```bash
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
+Use an explicit model to bypass fallback behavior:
+
+```bash
+python3 -m paper_agents.cli feedback apply --provider gemini --model gemini-3.1-flash-lite
+```
+
 Gemini profile updates use a 180-second default CLI timeout. If Gemini is slow on the Mac mini, raise it for the retry:
 
 ```bash
 export PAPER_AGENT_GEMINI_TIMEOUT_SECONDS=240
-python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
+python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
-When no explicit Gemini model is supplied, profile apply first uses the Gemini CLI default model and falls back once to `gemini-3.1-flash-lite` for quota/rate-limit failures. Explicit `--model` choices are honored without automatic fallback.
+Failed default-model attempts and fallback successes are both recorded in `feedback_profile_apply_attempts`, so `/health` may show historic failed attempts even after retry success. Profile apply uses the Gemini CLI/API quota path, which is separate from Gemini app usage.
 
 Full rebuild is a manual compression path that reads all structured feedback and creates a fresh compact profile. Do not run it automatically yet:
 

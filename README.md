@@ -270,21 +270,27 @@ If Review Queue feedback saves but Gemini profile auto-apply fails, the UI shows
 sqlite3 data/paper_agent.db "SELECT id, provider, status, error, profile_version_id, created_at FROM feedback_profile_apply_attempts ORDER BY id DESC LIMIT 10;"
 ```
 
-Then retry manually:
+Then retry manually. With no explicit model, `feedback apply` uses the Gemini CLI default first and falls back once to `gemini-3.1-flash-lite` only for quota/rate-limit failures:
 
 ```bash
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
+Use an explicit model when you want to bypass the default model; explicit `--model` choices are honored without automatic fallback:
+
+```bash
+python3 -m paper_agents.cli feedback apply --provider gemini --model gemini-3.1-flash-lite
+```
+
 Gemini profile updates use the Gemini CLI with a 180-second default timeout. If the CLI is slow on the Mac mini, raise it before retrying:
 
 ```bash
 export PAPER_AGENT_GEMINI_TIMEOUT_SECONDS=240
-python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
+python3 -m paper_agents.cli feedback apply --provider gemini
 ```
 
-When no explicit Gemini model is supplied, profile apply first uses the Gemini CLI default model and falls back once to `gemini-3.1-flash-lite` for quota/rate-limit failures. Explicit `--model` choices are honored without automatic fallback.
+Failed default-model attempts and fallback success attempts are both recorded in `feedback_profile_apply_attempts`, so `/health` can show historic failed attempts even after retry success. Profile apply uses the Gemini CLI/API quota path; the Gemini app usage screen and Gemini API/AI Studio quota screen are different operational views.
 
 Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
 
@@ -397,12 +403,11 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 
 The next work should build on the V2 Scout/Curator backend:
 
-1. Auto-apply Gemini incremental profile updates after Review Queue feedback submit while keeping manual dry-run/apply for testing and operations.
-2. Add a manual full rebuild path that regenerates the compact profile from all structured feedback.
-3. Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
-4. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
-5. Add provider adapters beyond Gemini for profile synthesis.
-6. Add general open-access PDF resolution beyond arXiv.
+1. Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
+2. Consider caching reviewed Gemini dry-run proposals so apply does not spend quota on the same synthesis twice.
+3. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
+4. Add provider adapters beyond Gemini for profile synthesis.
+5. Add general open-access PDF resolution beyond arXiv.
 
 See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
 
