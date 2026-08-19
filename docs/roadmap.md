@@ -32,7 +32,7 @@ Status: Implemented as V2 backend.
 - Download PDFs and extract triage summaries for recommended papers.
 - Record workflow cycles, Scout runs/candidates, Curator evaluations/recommendations, guidance, PDFs, and triage summaries in SQLite.
 - Retry arXiv timeouts, 429s, and malformed responses with configurable delay, retries, and timeout.
-- Add opt-in Semantic Scholar source adapter. Implemented; API key recommended via `SEMANTIC_SCHOLAR_API_KEY` due practical rate limits.
+- Add opt-in Semantic Scholar source adapter. Implemented; approved API key works via `SEMANTIC_SCHOLAR_API_KEY`, and weekly Tuesday cron is scheduled with `--request-delay 2`.
 - Add opt-in OpenAlex source adapter. Implemented; no API key required.
 - Add Review Queue source filter and source badges. Implemented for multi-source review.
 
@@ -43,8 +43,8 @@ Status: Implemented as V2 backend.
 - Normalize outputs.
 - Add run limits and telemetry.
 - Compare provider quota per useful paper.
-- Keep Semantic Scholar opt-in until API-key behavior and rate-limit handling are reliable enough for scheduled use.
-- Decide whether any non-arXiv source beyond weekly OpenAlex should graduate into scheduled operation.
+- Monitor weekly Semantic Scholar runs for API-key/rate-limit reliability before increasing cadence.
+- Decide whether any non-arXiv source beyond weekly OpenAlex/Semantic Scholar should graduate into more frequent scheduled operation.
 
 ## Phase 4: Automated Acquisition
 
@@ -69,7 +69,7 @@ Status: Implemented as V2 backend.
 
 Next major feature area.
 
-- Redesign the Review Queue UI around dense paper triage and blob-first feedback capture. Implemented for first UI pass.
+- Redesign the Review Queue UI around dense paper triage and blob-first feedback capture. Implemented for first UI pass; quick status is status-only, and Feedback save is the ingestion/profile-apply path.
 - Store immutable raw ChatGPT discussion summaries. Implemented for V2 blob ingestion.
 - Allow multiple parse attempts per raw summary. Implemented for deterministic parser v1.
 - Store structured feedback with parser/model provenance. Implemented for deterministic parser v1.

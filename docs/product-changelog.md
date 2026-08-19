@@ -33,7 +33,7 @@ Decision: Project Paper can support multiple Scout sources as opt-in adapters wh
 Completed behavior:
 
 - Semantic Scholar can be selected with `--source semantic_scholar`.
-- Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` header; use `--request-delay 2` or higher because approved key guidance is 1 request per second cumulatively across endpoints. Keep it opt-in until API-key behavior is reliable enough for scheduled use.
+- Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` header; direct CLI testing with the approved key succeeded. Use `--request-delay 2` or higher because approved key guidance is 1 request per second cumulatively across endpoints.
 - OpenAlex can be selected with `--source openalex` and does not require an API key.
 - Non-arXiv sources are opt-in and are not part of nightly cron yet.
 - Review Queue cards show source badges, and the source filter composes with status, sort, and view controls.
@@ -45,6 +45,21 @@ Follow-up implementation:
 - Same-cycle Scout rediscoveries remain eligible during bounded rescouts; older-cycle discoveries are still excluded as `previously_discovered`.
 - OpenAlex has a separate Monday 6:30 AM rotating cron script, `scripts/openalex_pipeline.sh`, with fetch 30, keep 2, and `--max-scout-attempts 1` so stable OpenAlex queries do not exhaust the same tiny pool every day.
 - The old direct one-off Sunday `pipeline-daily --source openalex` cron has been removed and is superseded by the script.
+- Semantic Scholar has a separate Tuesday 6:00 AM cron using `--source semantic_scholar`, `--request-delay 2`, fetch 10, keep 2, and `--max-scout-attempts 1`; the job sources `$HOME/.bashrc` for the API key.
+
+
+### Review Queue quick status and score clarity
+
+Status: Implemented in commits `4698a43` and `25ee9b2`.
+
+Completed behavior:
+
+- Quick status buttons (`Interested`, `Read later`, `Not interested`, `Reviewed`) save status only and avoid feedback ingestion/profile apply.
+- Saving a non-empty Feedback blob is the only Review Queue path that ingests feedback and triggers Gemini profile apply.
+- Quick status submit shows `Saving...` and a visible timeout hint if completion hangs.
+- Cards label Curator ranking as `System` score.
+- Parsed user feedback scores render as `Your score: N/5` and visually demote the system score.
+- Source badges have distinct compact styling for arXiv, OpenAlex, Semantic Scholar, and unknown sources.
 
 ## 2026-07-31
 

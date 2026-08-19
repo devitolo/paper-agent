@@ -111,7 +111,7 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 
 arXiv remains the default Scout source and the daily cron source. Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. OpenAlex is available through a separate weekly rotating script rather than the daily arXiv path.
 
-Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. Keep Semantic Scholar opt-in until API-key behavior is reliable enough for scheduled use. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
+Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
 
 During bounded rescouts inside one workflow cycle, papers rediscovered earlier in the same cycle remain eligible instead of being marked `previously_discovered`; older-cycle discoveries are still excluded.
 
@@ -123,7 +123,7 @@ Default Scout topics are intentionally broad across AIOps, LLM/agentic operation
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, shows source badges, filters by source when multiple Scout sources are present, and appends lightweight status rows. When local extraction is missing, the card shows a clearly labeled `Source Abstract` from stored source metadata instead of pretending it has a triage summary. Non-empty Feedback boxes are also stored as exact `raw_feedback` blobs, parsed by deterministic parser v1 into `feedback_parse_attempts` and `structured_feedback`, and intentionally do not update `profile_versions`, ScoutAgent, or CuratorAgent directly.
+The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, shows distinct compact source badges, filters by source when multiple Scout sources are present, and appends lightweight status rows. When local extraction is missing, the card shows a clearly labeled `Source Abstract` from stored source metadata instead of pretending it has a triage summary. Quick status buttons are status-only and should complete quickly; they show `Saving...` and a timeout hint if completion hangs. Only the Feedback save action stores non-empty blobs as exact `raw_feedback`, parses deterministic v1 `structured_feedback`, and runs Gemini profile apply. Cards label Curator ranking as `System`; parsed user scores appear as `Your score: N/5` and demote the system score.
 
 The review queue links to `/health`, and `/health` links back to the review queue. The health page is a compact source-aware operations dashboard for the last 7/21/30/90 days. It computes from raw SQLite facts and shows top operational cards, warning banners, lightweight charts, daily funnel tables, source breakdowns, exclusion reasons, artifact coverage, feedback/profile activity, and source filters without adding aggregate tables. The current graph work is intentionally lightweight; leave heavier charting for later if the need becomes clear.
 
@@ -164,11 +164,12 @@ python3 -m paper_agents.cli review-backfill --quick
 
 ## Nightly Cron
 
-The current intended Mac mini pipeline crontab has exactly two pipeline jobs: daily arXiv at 5:00 AM and weekly Monday OpenAlex at 6:30 AM via the rotating topic script.
+The current intended Mac mini pipeline crontab has three source jobs: daily arXiv at 5:00 AM, weekly Monday OpenAlex at 6:30 AM via the rotating topic script, and weekly Tuesday Semantic Scholar at 6:00 AM. The Semantic Scholar job sources `$HOME/.bashrc` so `SEMANTIC_SCHOLAR_API_KEY` is available to cron.
 
 ```cron
 0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
 30 6 * * 1 cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+0 6 * * 2 cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --topic "microservice diagnosis" --fetch 10 --keep 2 --max-scout-attempts 1 --request-delay 2 --retries 4 --source-timeout 90 >> logs/pipeline-semantic-scholar.log 2>&1
 ```
 
 The old one-off Sunday OpenAlex cron that called `pipeline-daily --source openalex` directly has been removed. Do not document or reinstall it; `scripts/openalex_pipeline.sh` is the supported OpenAlex cron entry.

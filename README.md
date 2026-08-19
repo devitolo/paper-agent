@@ -150,7 +150,7 @@ python3 -m paper_agents.cli scout-daily
 
 Scout uses arXiv by default, including for nightly cron. Semantic Scholar and OpenAlex are opt-in source adapters selected with `--source semantic_scholar` or `--source openalex`. Scout stores source candidate metadata in `data/scout/YYYY-MM-DD.jsonl` without preference scores, recommendation ranks, or final selection decisions. Ranking and recommendations belong to Curator inside `pipeline-daily`.
 
-Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` request header. The key is optional in code, but practically recommended because unauthenticated requests hit rate limits quickly. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. Keep Semantic Scholar opt-in until API-key behavior is reliable enough for scheduled use. OpenAlex uses its public API without a key. Its adapter narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage. OpenAlex remains outside the daily arXiv cron path; run it with the separate weekly rotating script so stable search results do not exhaust the same tiny topic pool every day.
+Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage. OpenAlex remains outside the daily arXiv cron path; run it with the separate weekly rotating script so stable search results do not exhaust the same tiny topic pool every day.
 
 Default Scout topics cover practical operations clusters such as AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, program repair, software maintenance, SRE, cloud operations, and production engineering. Curator also penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, power grid, smart grid, and transportation incidents.
 
@@ -252,7 +252,7 @@ Run the local review queue UI:
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, shows source badges, filters by source when multiple Scout sources are present, keeps quick review actions close to each paper, shows a clearly labeled source abstract when local triage extraction is missing, stores non-empty Feedback boxes as raw V2 feedback blobs with deterministic v1 structured parsing, and auto-applies the newly submitted structured feedback to the active profile through Gemini. Applied-feedback tracking prevents reusing the same structured row repeatedly.
+The review UI reads selected papers from SQLite, shows triage fields, links to registered artifacts, and writes feedback rows. Bind to `0.0.0.0` only on a trusted LAN. It uses compact inbox-style controls, exposes the original paper link with a URL copy control, shows distinct source badges for arXiv/OpenAlex/Semantic Scholar/unknown sources, filters by source when multiple Scout sources are present, keeps quick status actions close to each paper, and shows a clearly labeled source abstract when local triage extraction is missing. Quick status buttons are status-only and should complete quickly; they show `Saving...` and a timeout hint if completion hangs. Only saving a non-empty Feedback blob triggers V2 feedback ingestion and Gemini profile apply. Cards label Curator ranking as `System`; when parsed user feedback includes a score, `Your score: N/5` is shown prominently and the system score is visually demoted.
 
 The review queue links to `/health`, and `/health` links back to the review queue. The health dashboard computes DB integrity, latest cycle age/state, Scout/Curator/Reviewer funnel counts, artifact gaps, feedback/profile status, warnings, and source splits directly from raw SQLite facts rather than materialized aggregate tables. It includes lightweight charts and tables for daily candidates, eligible papers, recommendations, source breakdown, warning/empty-stage behavior, and feedback/profile activity. Use the range and source filters to distinguish "cron did not run" from "Scout ran but a source returned no eligible candidates."
 
@@ -311,11 +311,12 @@ Tail local Project Paper logs:
 scripts/tail_logs.sh
 ```
 
-The current intended Mac mini pipeline crontab has two entries: daily arXiv at 5:00 AM and weekly Monday OpenAlex at 6:30 AM via the rotating topic script.
+The current intended Mac mini pipeline crontab has three source jobs: daily arXiv at 5:00 AM, weekly Monday OpenAlex at 6:30 AM via the rotating topic script, and weekly Tuesday Semantic Scholar at 6:00 AM. The Semantic Scholar entry sources `$HOME/.bashrc` so `SEMANTIC_SCHOLAR_API_KEY` is available to cron.
 
 ```cron
 0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
 30 6 * * 1 cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+0 6 * * 2 cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --topic "microservice diagnosis" --fetch 10 --keep 2 --max-scout-attempts 1 --request-delay 2 --retries 4 --source-timeout 90 >> logs/pipeline-semantic-scholar.log 2>&1
 ```
 
 Do not install the old one-off direct `pipeline-daily --source openalex ...` cron line; it is superseded by `scripts/openalex_pipeline.sh`, which rotates practical operations topics, fetches 30, keeps 2, and caps Scout attempts at one because OpenAlex search is stable for repeated queries.
