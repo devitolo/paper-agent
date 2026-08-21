@@ -34,10 +34,53 @@ def init_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_
     schema_sql = schema_path.read_text(encoding="utf-8")
     with sqlite3.connect(db_path) as connection:
         connection.executescript(schema_sql)
+        migrate_structured_feedback_score_to_real(connection)
         connection.execute("PRAGMA foreign_keys = ON")
         tables = list_tables(connection)
 
     return {"db_path": str(db_path), "schema_path": str(schema_path), "tables": tables}
+
+
+def migrate_structured_feedback_score_to_real(connection: sqlite3.Connection) -> None:
+    columns = connection.execute("PRAGMA table_info(structured_feedback)").fetchall()
+    score_column = next((column for column in columns if column[1] == "score"), None)
+    if score_column is None or str(score_column[2]).upper() == "REAL":
+        return
+
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS structured_feedback_new (
+            id INTEGER PRIMARY KEY,
+            parse_attempt_id INTEGER NOT NULL UNIQUE REFERENCES feedback_parse_attempts(id) ON DELETE CASCADE,
+            paper_id INTEGER REFERENCES papers(id) ON DELETE SET NULL,
+            decision TEXT,
+            score REAL,
+            observations_json TEXT NOT NULL DEFAULT '[]',
+            preference_signals_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            CHECK (score IS NULL OR (score >= 1 AND score <= 5))
+        );
+
+        INSERT INTO structured_feedback_new (
+            id, parse_attempt_id, paper_id, decision, score,
+            observations_json, preference_signals_json, created_at
+        )
+        SELECT
+            id, parse_attempt_id, paper_id, decision, score,
+            observations_json, preference_signals_json, created_at
+        FROM structured_feedback;
+
+        DROP TABLE structured_feedback;
+        ALTER TABLE structured_feedback_new RENAME TO structured_feedback;
+        CREATE INDEX IF NOT EXISTS idx_structured_feedback_paper ON structured_feedback (paper_id);
+        CREATE INDEX IF NOT EXISTS idx_structured_feedback_decision ON structured_feedback (decision);
+        """
+    )
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    connection.execute("PRAGMA foreign_keys = ON")
+    if violations:
+        raise RuntimeError(f"structured_feedback score migration produced foreign-key violations: {violations}")
 
 
 def reset_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
@@ -712,7 +755,7 @@ def create_structured_feedback(
     parse_attempt_id: int,
     paper_id: int | None,
     decision: str | None,
-    score: int | None,
+    score: float | None,
     observations: list[str],
     preference_signals: list[str],
 ) -> int:

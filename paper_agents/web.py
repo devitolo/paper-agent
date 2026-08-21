@@ -334,10 +334,14 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
 </article>"""
 
 
-def render_user_score(score: int | None) -> str:
+def render_user_score(score: float | None) -> str:
     if score is None:
         return ""
-    return f'<div class="user-score"><span>Your score</span><strong>{score}/5</strong></div>'
+    return f'<div class="user-score"><span>Your score</span><strong>{format_user_score(score)}/5</strong></div>'
+
+
+def format_user_score(score: float) -> str:
+    return f"{float(score):.2f}".rstrip("0").rstrip(".")
 
 
 def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:

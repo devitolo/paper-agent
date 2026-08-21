@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS structured_feedback (
     parse_attempt_id INTEGER NOT NULL UNIQUE REFERENCES feedback_parse_attempts(id) ON DELETE CASCADE,
     paper_id INTEGER REFERENCES papers(id) ON DELETE SET NULL,
     decision TEXT,
-    score INTEGER,
+    score REAL,
     observations_json TEXT NOT NULL DEFAULT '[]',
     preference_signals_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),

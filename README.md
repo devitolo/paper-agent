@@ -154,6 +154,8 @@ Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` req
 
 Default Scout topics cover practical operations clusters such as AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, program repair, software maintenance, SRE, cloud operations, and production engineering. Curator also penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, power grid, smart grid, and transportation incidents. The Review Queue web server exposes a read-only `/topics` page showing the repo-defined arXiv defaults, OpenAlex rotating script topics, and documented Semantic Scholar cron topic visibility before Scout learning/edit controls exist.
 
+Feedback blobs can include `Score: N` or decimal ratings such as `Score: 4.5`; parsed user scores must be between 1 and 5 and display on Review Queue cards as `Your score: N/5`.
+
 For a gentle arXiv test, use a single topic and the network hardening flags:
 
 ```bash

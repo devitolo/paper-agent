@@ -758,6 +758,65 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(current["source_structured_feedback_id"], structured_id)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 2)
 
+    def test_init_db_migrates_structured_feedback_score_to_real(self):
+        legacy_db = Path(self.tmp.name) / "legacy-score.db"
+        connection = sqlite3.connect(legacy_db)
+        try:
+            connection.executescript(
+                """
+                CREATE TABLE raw_feedback (
+                    id INTEGER PRIMARY KEY,
+                    paper_id INTEGER,
+                    recommendation_id INTEGER,
+                    content TEXT NOT NULL,
+                    content_hash TEXT NOT NULL UNIQUE,
+                    received_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE TABLE feedback_parse_attempts (
+                    id INTEGER PRIMARY KEY,
+                    raw_feedback_id INTEGER NOT NULL REFERENCES raw_feedback(id) ON DELETE CASCADE,
+                    attempted_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    parser_name TEXT NOT NULL,
+                    parser_version TEXT NOT NULL,
+                    model TEXT,
+                    status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+                    error TEXT,
+                    output_json TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE TABLE structured_feedback (
+                    id INTEGER PRIMARY KEY,
+                    parse_attempt_id INTEGER NOT NULL UNIQUE REFERENCES feedback_parse_attempts(id) ON DELETE CASCADE,
+                    paper_id INTEGER,
+                    decision TEXT,
+                    score INTEGER,
+                    observations_json TEXT NOT NULL DEFAULT '[]',
+                    preference_signals_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    CHECK (score IS NULL OR (score >= 1 AND score <= 5))
+                );
+                INSERT INTO raw_feedback (id, content, content_hash) VALUES (1, 'Score: 4', 'hash');
+                INSERT INTO feedback_parse_attempts (id, raw_feedback_id, parser_name, parser_version, status)
+                VALUES (1, 1, 'feedback-agent', 'deterministic-v1', 'succeeded');
+                INSERT INTO structured_feedback (id, parse_attempt_id, decision, score, observations_json, preference_signals_json)
+                VALUES (1, 1, 'keep', 4, '[]', '[]');
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        db.init_db(legacy_db)
+
+        migrated = sqlite3.connect(legacy_db)
+        try:
+            score_column = next(column for column in migrated.execute("PRAGMA table_info(structured_feedback)") if column[1] == "score")
+            score = migrated.execute("SELECT score FROM structured_feedback WHERE id = 1").fetchone()[0]
+        finally:
+            migrated.close()
+        self.assertEqual(score_column[2].upper(), "REAL")
+        self.assertEqual(score, 4.0)
+
     def test_feedback_blob_ingestion_stores_raw_blob_exactly_and_structured_parse(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
         content = "Decision: keep\nScore: 5\nUseful because it studies real incidents.\n"
@@ -790,6 +849,43 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(structured[0:3], (paper_id, "keep", 5))
         self.assertEqual(json.loads(structured[3]), ["Useful because it studies real incidents."])
         self.assertEqual(json.loads(structured[4]), [])
+
+    def test_feedback_blob_ingestion_accepts_decimal_score(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        content = "Decision: keep\nScore: 4.5\nUseful and practical.\n"
+
+        output = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content=content,
+            source="test",
+            status=None,
+        )
+
+        structured = self.connection.execute(
+            "SELECT decision, score FROM structured_feedback WHERE id = ?",
+            (output["structured_feedback_id"],),
+        ).fetchone()
+        self.assertEqual(structured, ("keep", 4.5))
+
+    def test_feedback_blob_ingestion_ignores_out_of_range_decimal_score(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+
+        output = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: maybe\nScore: 5.5\nInteresting but too broad.",
+            source="test",
+            status=None,
+        )
+
+        score = self.connection.execute(
+            "SELECT score FROM structured_feedback WHERE id = ?",
+            (output["structured_feedback_id"],),
+        ).fetchone()[0]
+        self.assertIsNone(score)
 
     def test_feedback_blob_duplicate_dedupes_raw_feedback_but_records_attempt(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
@@ -1236,6 +1332,22 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<div class="user-score"><span>Your score</span><strong>2/5</strong></div>', html)
         self.assertIn('class="score score-secondary"', html)
         self.assertIn('<span>System</span><strong>72.5</strong>', html)
+
+    def test_review_queue_renders_decimal_user_feedback_score(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 4.5\nStrong fit.",
+            source="test",
+            status="interested",
+        )
+        self.connection.commit()
+
+        html = web.render_review_queue(self.db_path)
+
+        self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', html)
 
     def test_source_badge_class_distinguishes_sources(self):
         self.assertEqual(web.source_badge_class("arxiv"), "source-badge-arxiv")

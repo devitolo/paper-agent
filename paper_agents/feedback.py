@@ -37,7 +37,7 @@ STATUS_DECISIONS = {
 }
 
 DECISION_RE = re.compile(r"^\s*decision\s*:\s*(keep|maybe|reject|interested|read\s+later|not\s+interested|reviewed)\s*$", re.IGNORECASE)
-SCORE_RE = re.compile(r"^\s*score\s*:\s*([1-5])\s*$", re.IGNORECASE)
+SCORE_RE = re.compile(r"^\s*score\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE)
 ProfileProvider = Callable[[dict[str, Any], str | None], dict[str, Any]]
 
 
@@ -143,7 +143,9 @@ def parse_feedback_blob(content: str, *, status: str | None = None) -> dict[str,
 
         score_match = SCORE_RE.match(line)
         if score_match:
-            score = int(score_match.group(1))
+            parsed_score = float(score_match.group(1))
+            if 1 <= parsed_score <= 5:
+                score = parsed_score
             continue
 
         stripped = line.strip()

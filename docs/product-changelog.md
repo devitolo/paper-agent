@@ -4,6 +4,18 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ## 2026-08-21
 
+### Decimal feedback scores
+
+Status: Implemented.
+
+Decision: User feedback scores should support real values instead of integers only, so ratings such as `4.5` are preserved.
+
+Completed behavior:
+
+- Change `structured_feedback.score` to `REAL` and migrate existing SQLite databases during init.
+- Parse `Score: 4.5` style feedback values when they are within 1 to 5.
+- Display decimal user scores in the Review Queue without confusing them with the Curator system score.
+
 ### Read-only Scout topic inventory
 
 Status: Implemented.
