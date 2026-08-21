@@ -4,6 +4,7 @@ import html
 import json
 import mimetypes
 import sqlite3
+import threading
 import urllib.parse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -68,6 +69,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     render_review_queue(
                         db_path,
                         saved=params.get("saved", [None])[0] == "1",
+                        profile_apply_queued=params.get("profile_apply_queued", [None])[0] == "1",
                         profile_apply_failed=params.get("profile_apply_failed", [None])[0] == "1",
                         filter_value=params.get("filter", ["needs_review"])[0],
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
@@ -133,9 +135,12 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 feedback_content=feedback_content,
                 recommendation_id=recommendation_id,
                 source="review_queue_ui",
+                profile_apply_mode="background",
             )
             return_to = form.get("return_to", ["/"])[0]
             redirect_to = add_query_param(return_to, "saved", "1")
+            if result.get("profile_apply_queued"):
+                redirect_to = add_query_param(redirect_to, "profile_apply_queued", "1")
             if result.get("profile_apply_error"):
                 redirect_to = add_query_param(redirect_to, "profile_apply_failed", "1")
             self.send_response(HTTPStatus.SEE_OTHER)
@@ -204,6 +209,7 @@ def render_review_queue(
     db_path: Path,
     *,
     saved: bool = False,
+    profile_apply_queued: bool = False,
     profile_apply_failed: bool = False,
     filter_value: str = "needs_review",
     source_value: str = SOURCE_FILTER_ALL,
@@ -219,6 +225,8 @@ def render_review_queue(
     banners = []
     if saved:
         banners.append('<div class="banner">Feedback saved.</div>')
+    if profile_apply_queued:
+        banners.append('<div class="banner">Profile update queued.</div>')
     if profile_apply_failed:
         banners.append('<div class="banner warning">Profile auto-apply failed. Feedback was saved; run feedback apply manually when ready.</div>')
     saved_banner = "".join(banners)
@@ -1155,7 +1163,10 @@ def save_feedback(
     recommendation_id: int | None = None,
     source: str = "review_queue_ui",
     profile_provider_fn: ProfileProvider | None = None,
+    profile_apply_mode: str = "sync",
 ) -> dict[str, Any]:
+    if profile_apply_mode not in {"sync", "background"}:
+        raise ValueError(f"Unknown profile apply mode: {profile_apply_mode}")
     init_db(db_path)
     ingest_output = None
     with connect_db(db_path) as connection:
@@ -1178,15 +1189,26 @@ def save_feedback(
         "ingest": ingest_output,
         "profile_apply": None,
         "profile_apply_error": None,
+        "profile_apply_queued": False,
     }
     if ingest_output is None:
+        return result
+
+    structured_feedback_id = ingest_output["structured_feedback_id"]
+    if profile_apply_mode == "background":
+        start_profile_apply_worker(
+            db_path,
+            structured_feedback_ids=[structured_feedback_id],
+            profile_provider_fn=profile_provider_fn,
+        )
+        result["profile_apply_queued"] = True
         return result
 
     try:
         with connect_db(db_path) as connection:
             result["profile_apply"] = apply_feedback_to_profile(
                 connection,
-                structured_feedback_ids=[ingest_output["structured_feedback_id"]],
+                structured_feedback_ids=[structured_feedback_id],
                 dry_run=False,
                 provider_fn=profile_provider_fn,
             )
@@ -1196,6 +1218,44 @@ def save_feedback(
         result["profile_apply_error"] = str(error)
         print(f"feedback profile auto-apply failed: {error}")
     return result
+
+
+def start_profile_apply_worker(
+    db_path: Path,
+    *,
+    structured_feedback_ids: list[int],
+    profile_provider_fn: ProfileProvider | None = None,
+) -> threading.Thread:
+    worker = threading.Thread(
+        target=run_profile_apply_worker,
+        kwargs={
+            "db_path": db_path,
+            "structured_feedback_ids": structured_feedback_ids,
+            "profile_provider_fn": profile_provider_fn,
+        },
+        daemon=True,
+        name="paper-agent-profile-apply",
+    )
+    worker.start()
+    return worker
+
+
+def run_profile_apply_worker(
+    *,
+    db_path: Path,
+    structured_feedback_ids: list[int],
+    profile_provider_fn: ProfileProvider | None = None,
+) -> None:
+    try:
+        with connect_db(db_path) as connection:
+            apply_feedback_to_profile(
+                connection,
+                structured_feedback_ids=structured_feedback_ids,
+                dry_run=False,
+                provider_fn=profile_provider_fn,
+            )
+    except RuntimeError as error:
+        print(f"feedback profile auto-apply failed: {error}")
 
 
 def decode_json(value: str | None, fallback: Any) -> Any:

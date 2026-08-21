@@ -5,6 +5,8 @@ import io
 import sqlite3
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -1315,6 +1317,12 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn("<span>score</span>", html)
         self.assertNotIn(">Notes<textarea", html)
 
+    def test_review_queue_renders_profile_apply_queued_banner(self):
+        html = web.render_review_queue(self.db_path, saved=True, profile_apply_queued=True)
+
+        self.assertIn("Feedback saved.", html)
+        self.assertIn("Profile update queued.", html)
+
     def test_review_queue_shows_user_feedback_score_prominently(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
         ingest_feedback_blob(
@@ -1470,6 +1478,50 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(lightweight, ("interested", "Decision: keep\nScore: 4\nGood fit."))
         self.assertEqual(result["profile_apply"]["status"], "applied")
         self.assertEqual(current["profile"]["interests"], ["auto-applied"])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 1)
+
+    def test_review_queue_feedback_save_can_queue_profile_apply(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        self.connection.commit()
+        provider_started = threading.Event()
+
+        def provider(payload, model):
+            provider_started.set()
+            return {
+                "profile": {
+                    "interests": ["background-applied"],
+                    "positive_signals": ["good fit"],
+                    "negative_signals": [],
+                    "notes": "Applied from background worker.",
+                },
+                "change_summary": "Background-applied UI feedback.",
+            }
+
+        result = web.save_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            status="interested",
+            notes="Decision: keep\nScore: 4.5\nGood fit.",
+            feedback_content="Decision: keep\nScore: 4.5\nGood fit.\n",
+            source="review_queue_ui",
+            profile_provider_fn=provider,
+            profile_apply_mode="background",
+        )
+
+        self.assertTrue(result["feedback_saved"])
+        self.assertTrue(result["feedback_ingested"])
+        self.assertTrue(result["profile_apply_queued"])
+        self.assertIsNone(result["profile_apply"])
+        self.assertTrue(provider_started.wait(timeout=2))
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            current = db.current_profile_version(self.connection)
+            if current["profile"].get("interests") == ["background-applied"]:
+                break
+            time.sleep(0.05)
+        current = db.current_profile_version(self.connection)
+        self.assertEqual(current["profile"]["interests"], ["background-applied"])
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 1)
 
     def test_review_queue_feedback_save_preserves_feedback_when_profile_apply_fails(self):

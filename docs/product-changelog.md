@@ -16,6 +16,18 @@ Completed behavior:
 - Parse `Score: 4.5` style feedback values when they are within 1 to 5.
 - Display decimal user scores in the Review Queue without confusing them with the Curator system score.
 
+### Non-blocking Review Queue feedback save
+
+Status: Implemented.
+
+Decision: Saving feedback from the browser should not wait on Gemini profile apply, because provider latency or quota problems can otherwise leave the page spinning after feedback has already been persisted.
+
+Completed behavior:
+
+- `/feedback` still stores lightweight feedback, raw feedback, parse attempts, and structured feedback before profile apply.
+- Review Queue profile apply now runs in a background worker after non-empty Feedback saves.
+- The browser redirects immediately with a saved/queued banner; profile apply successes or failures remain visible through existing profile apply attempt records and health checks.
+
 ### Read-only Scout topic inventory
 
 Status: Implemented.
