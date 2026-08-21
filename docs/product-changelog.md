@@ -17,6 +17,12 @@ Completed behavior:
 - Show arXiv daily default topics, OpenAlex weekly rotating script topics, and documented Semantic Scholar cron topic visibility.
 - Keep the page read-only and label cron/operator overrides as external when they are not stored in the repo.
 
+Backlog:
+
+- Make Scout topics user-editable later, either from the UI or a simple config file.
+- Include per-source topic selection, priority/cadence controls, and ad hoc one-off topics such as `datalake`.
+- Track topic performance over time before enabling automatic Scout learning.
+
 ## 2026-08-19
 
 ### Gemini profile apply timeout and fallback recovery
