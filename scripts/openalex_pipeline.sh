@@ -8,19 +8,10 @@ mkdir -p logs
 
 git pull --ff-only
 
-topics=(
-  "AIOps observability incident response"
-  "cloud operations anomaly detection remediation"
-  "microservice diagnosis distributed systems debugging"
-  "software reliability engineering production incidents"
-  "LLM operations root cause analysis logs traces"
-)
-
 if [[ -n "${PAPER_AGENT_OPENALEX_TOPIC:-}" ]]; then
   topic="$PAPER_AGENT_OPENALEX_TOPIC"
 else
-  day_of_year="$(date +%j)"
-  topic="${topics[$((10#$day_of_year % ${#topics[@]}))]}"
+  topic="$(python3 -c 'from paper_agents.topic_inventory import openalex_rotating_topic; print(openalex_rotating_topic())')"
 fi
 
 echo "OpenAlex topic: $topic"

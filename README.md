@@ -152,7 +152,7 @@ Scout uses arXiv by default, including for nightly cron. Semantic Scholar and Op
 
 Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage. OpenAlex remains outside the daily arXiv cron path; run it with the separate weekly rotating script so stable search results do not exhaust the same tiny topic pool every day.
 
-Default Scout topics cover practical operations clusters such as AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, program repair, software maintenance, SRE, cloud operations, and production engineering. Curator also penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, power grid, smart grid, and transportation incidents.
+Default Scout topics cover practical operations clusters such as AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, program repair, software maintenance, SRE, cloud operations, and production engineering. Curator also penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, power grid, smart grid, and transportation incidents. The Review Queue web server exposes a read-only `/topics` page showing the repo-defined arXiv defaults, OpenAlex rotating script topics, and documented Semantic Scholar cron topic visibility before Scout learning/edit controls exist.
 
 For a gentle arXiv test, use a single topic and the network hardening flags:
 
@@ -331,7 +331,7 @@ The current intended Mac mini pipeline crontab has three source jobs: daily arXi
 ```cron
 0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
 30 6 * * 1 cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
-0 6 * * 2 cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --topic "microservice diagnosis" --fetch 10 --keep 2 --max-scout-attempts 1 --request-delay 2 --retries 4 --source-timeout 90 >> logs/pipeline-semantic-scholar.log 2>&1
+0 6 * * 2 cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --topic "AIOps root cause analysis" --fetch 3 --keep 1 --max-scout-attempts 1 --request-delay 10 --retries 6 --source-timeout 120 >> logs/pipeline-semantic-scholar.log 2>&1
 ```
 
 Do not install the old one-off direct `pipeline-daily --source openalex ...` cron line; it is superseded by `scripts/openalex_pipeline.sh`, which rotates practical operations topics, fetches 30, keeps 2, and caps Scout attempts at one because OpenAlex search is stable for repeated queries.

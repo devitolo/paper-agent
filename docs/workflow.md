@@ -115,7 +115,7 @@ Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key
 
 During bounded rescouts inside one workflow cycle, papers rediscovered earlier in the same cycle remain eligible instead of being marked `previously_discovered`; older-cycle discoveries are still excluded.
 
-Default Scout topics are intentionally broad across AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, software maintenance, SRE, cloud operations, and production engineering. Curator penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, grid, and transportation incidents.
+Default Scout topics are intentionally broad across AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, software maintenance, SRE, cloud operations, and production engineering. Curator penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, grid, and transportation incidents. The web server includes a read-only `/topics` page for visibility into the arXiv default list, OpenAlex rotating script list, and documented Semantic Scholar cron topic before Scout learning/edit controls exist.
 
 ## Review Queue UI
 
@@ -123,9 +123,9 @@ Default Scout topics are intentionally broad across AIOps, LLM/agentic operation
 python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
 ```
 
-The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, shows distinct compact source badges, filters by source when multiple Scout sources are present, and appends lightweight status rows. When local extraction is missing, the card shows a clearly labeled `Source Abstract` from stored source metadata instead of pretending it has a triage summary. Quick status buttons are status-only and should complete quickly; they show `Saving...` and a timeout hint if completion hangs. Only the Feedback save action stores non-empty blobs as exact `raw_feedback`, parses deterministic v1 `structured_feedback`, and runs Gemini profile apply. Cards label Curator ranking as `System`; parsed user scores appear as `Your score: N/5` and demote the system score.
+The UI lists Curator recommendations from SQLite, displays local triage summary fields when available, opens registered artifacts, exposes the original paper link with a URL copy control, shows distinct compact source badges, filters by source when multiple Scout sources are present, and appends lightweight status rows. When local extraction is missing, the card shows a clearly labeled `Source Abstract` from stored source metadata instead of pretending it has a triage summary. Quick status buttons are status-only and should complete quickly; they show `Saving...` and a timeout hint if completion hangs. Only the Feedback save action stores non-empty blobs as exact `raw_feedback`, parses deterministic v1 `structured_feedback`, and runs Gemini profile apply. Cards label Curator ranking as `System`; parsed user scores appear as `Your score: N/5` and demote the system score. The review queue links to `/topics` for read-only Scout topic inventory.
 
-The review queue links to `/health`, and `/health` links back to the review queue. The health page is a compact source-aware operations dashboard for the last 7/21/30/90 days. It computes from raw SQLite facts and shows top operational cards, warning banners, lightweight charts, daily funnel tables, source breakdowns, exclusion reasons, artifact coverage, feedback/profile activity, and source filters without adding aggregate tables. The current graph work is intentionally lightweight; leave heavier charting for later if the need becomes clear.
+The review queue links to `/health`, and `/health` links back to the review queue and `/topics`. The health page is a compact source-aware operations dashboard for the last 7/21/30/90 days. It computes from raw SQLite facts and shows top operational cards, warning banners, lightweight charts, daily funnel tables, source breakdowns, exclusion reasons, artifact coverage, feedback/profile activity, and source filters without adding aggregate tables. The current graph work is intentionally lightweight; leave heavier charting for later if the need becomes clear.
 
 The same V2 storage path is available from the CLI:
 
@@ -184,7 +184,7 @@ The current intended Mac mini pipeline crontab has three source jobs: daily arXi
 ```cron
 0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
 30 6 * * 1 cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
-0 6 * * 2 cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --topic "microservice diagnosis" --fetch 10 --keep 2 --max-scout-attempts 1 --request-delay 2 --retries 4 --source-timeout 90 >> logs/pipeline-semantic-scholar.log 2>&1
+0 6 * * 2 cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --topic "AIOps root cause analysis" --fetch 3 --keep 1 --max-scout-attempts 1 --request-delay 10 --retries 6 --source-timeout 120 >> logs/pipeline-semantic-scholar.log 2>&1
 ```
 
 The old one-off Sunday OpenAlex cron that called `pipeline-daily --source openalex` directly has been removed. Do not document or reinstall it; `scripts/openalex_pipeline.sh` is the supported OpenAlex cron entry.

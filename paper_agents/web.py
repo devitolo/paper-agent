@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob
+from paper_agents.topic_inventory import scout_topic_inventory
 
 ASSET_DIR = Path(__file__).with_name("assets")
 LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
@@ -84,6 +85,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
                     )
                 )
+                return
+            if parsed.path == "/topics":
+                self.respond_html(render_topics_page())
                 return
             if parsed.path.startswith("/artifact/"):
                 self.serve_artifact(db_path, parsed.path.removeprefix("/artifact/"))
@@ -244,6 +248,7 @@ def render_review_queue(
         {render_select(SORTS, "sort", sort_value, "Sort")}
         {render_select(VIEWS, "view", view_value, "View")}
         <button type="submit" class="secondary">Apply</button>
+        <a class="secondary-link" href="/topics">Topics</a>
         <a class="secondary-link" href="/health">Health</a>
       </form>
     </header>
@@ -375,6 +380,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
       <form method="get" action="/health" class="queue-controls">
         {render_select([("7", "7 days"), ("21", "21 days"), ("30", "30 days"), ("90", "90 days")], "days", str(days), "Range")}
         {render_select(source_choices, "source", source_value, "Source")}
+        <a class="secondary-link" href="/topics">Topics</a>
         <a class="secondary-link" href="/">Review queue</a>
       </form>
     </header>
@@ -402,6 +408,67 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
   </main>
 </body>
 </html>"""
+
+
+def render_topics_page() -> str:
+    inventory = scout_topic_inventory()
+    tabs = "".join(
+        f'<a class="topic-tab source-badge {source_badge_class(item["source"])}" href="#{escape(item["source"])}">{escape(item["label"])}</a>'
+        for item in inventory
+    )
+    sections = "".join(render_topic_source_section(item) for item in inventory)
+    total_topics = sum(len(item["topics"]) for item in inventory)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Paper Scout Topics</title>
+  <style>{page_css()}</style>
+</head>
+<body>
+  <main>
+    <header class="topbar">
+      <div>
+        <h1 class="brand-title"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Scout Topics</span></h1>
+        <p>{len(inventory)} sources | {total_topics} configured topic strings | read-only inventory</p>
+      </div>
+      <nav class="queue-controls" aria-label="Primary">
+        <a class="secondary-link" href="/">Review queue</a>
+        <a class="secondary-link" href="/health">Health</a>
+      </nav>
+    </header>
+    <section class="topic-note">
+      <strong>Visibility only.</strong> These are the repo-defined topic lists and documented schedule topics that steer Scout today. Future work may add priority and edit controls.
+    </section>
+    <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
+    <div class="topic-sections">{sections}</div>
+  </main>
+</body>
+</html>"""
+
+
+def render_topic_source_section(item: dict[str, Any]) -> str:
+    active_topics = "".join(f"<li>{escape(topic)}</li>" for topic in item["active_topics"])
+    topics = "".join(f"<li>{escape(topic)}</li>" for topic in item["topics"])
+    return f"""<section class="topic-source" id="{escape(item["source"])}">
+      <div class="topic-source-head">
+        <h2><span class="source-badge {source_badge_class(item["source"])}">{escape(item["label"])}</span></h2>
+        <span>{escape(item["schedule"])}</span>
+      </div>
+      <p>{escape(item["description"])}</p>
+      <div class="topic-columns">
+        <div>
+          <h3>Active schedule topic</h3>
+          <ol class="topic-list active-topic-list">{active_topics}</ol>
+        </div>
+        <div>
+          <h3>Configured topics</h3>
+          <ol class="topic-list">{topics}</ol>
+        </div>
+      </div>
+      <p class="topic-note-text">{escape(item["notes"])}</p>
+    </section>"""
 
 
 def render_warnings(warnings: list[dict[str, str]]) -> str:
@@ -1272,13 +1339,28 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
+.topic-note { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px 9px; margin-bottom: 10px; color: #57606a; }
+.topic-note strong { color: #1f2328; }
+.topic-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+.topic-tab { text-decoration: none; }
+.topic-sections { display: grid; gap: 10px; }
+.topic-source { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 10px; scroll-margin-top: 10px; }
+.topic-source-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 6px; }
+.topic-source-head h2 { margin: 0; }
+.topic-source-head > span, .topic-source > p, .topic-note-text { color: #57606a; font-size: 12px; }
+.topic-columns { display: grid; grid-template-columns: minmax(180px, 0.38fr) minmax(0, 1fr); gap: 12px; margin-top: 8px; }
+.topic-list { margin: 0; padding-left: 22px; columns: 2; column-gap: 28px; }
+.active-topic-list { columns: 1; }
+.topic-list li { break-inside: avoid; margin: 0 0 3px; padding-left: 2px; font-size: 12px; }
+.topic-note-text { margin-top: 8px; }
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt { color: #8b949e; }
+  .topbar p, .card-head p, h3, .feedback-state, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note, .topic-note-text { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-graph, .health-table table, .health-kv { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-graph, .health-table table, .health-kv, .topic-note, .topic-source { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .topic-note strong { color: #e6edf3; }
   button.secondary, .score { background: #21262d; }
   .score-secondary { background: transparent; }
   .user-score { background: #0f2a1a; color: #7ee787; border-color: #238636; }
@@ -1308,5 +1390,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-graphs { grid-template-columns: 1fr; }
   .health-graph-wide { grid-column: auto; }
   .health-kv { grid-template-columns: 1fr; }
+  .topic-columns { grid-template-columns: 1fr; }
+  .topic-list { columns: 1; }
 }
 """

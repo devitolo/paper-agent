@@ -2,6 +2,21 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-08-21
+
+### Read-only Scout topic inventory
+
+Status: Implemented.
+
+Decision: Before automatic Scout learning or topic editing exists, the operator needs visibility into the configured source topic lists.
+
+Completed behavior:
+
+- Add `/topics` to the existing Review Queue web server.
+- Link Review Queue, Health, and Topics pages together.
+- Show arXiv daily default topics, OpenAlex weekly rotating script topics, and documented Semantic Scholar cron topic visibility.
+- Keep the page read-only and label cron/operator overrides as external when they are not stored in the repo.
+
 ## 2026-08-19
 
 ### Gemini profile apply timeout and fallback recovery

@@ -31,6 +31,7 @@ from paper_agents.scout import run_daily_scout
 from paper_agents.scout import scout_candidate_record
 from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
+from paper_agents.topic_inventory import OPENALEX_ROTATING_TOPICS, scout_topic_inventory
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
 from paper_agents import web
 
@@ -1203,6 +1204,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<select name="view"', html)
         self.assertIn("All sources", html)
         self.assertIn("arXiv", html)
+        self.assertIn('href="/topics"', html)
         self.assertIn('href="/health"', html)
         self.assertIn('class="source-badge source-badge-arxiv"', html)
         self.assertIn('class="action-rail"', html)
@@ -1517,6 +1519,29 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Source Breakdown", html)
         self.assertIn("Recommendation Gap", html)
         self.assertIn("Feedback/Profile Activity", html)
+        self.assertIn('href="/topics">Topics</a>', html)
+
+    def test_topics_page_renders_source_topic_inventory(self):
+        html = web.render_topics_page()
+
+        self.assertIn("Project Paper Scout Topics", html)
+        self.assertIn("Visibility only.", html)
+        self.assertIn('href="/">Review queue</a>', html)
+        self.assertIn('href="/health">Health</a>', html)
+        self.assertIn("Daily default", html)
+        self.assertIn("Weekly rotating script", html)
+        self.assertIn("External/manual cron override", html)
+        self.assertIn("AIOps", html)
+        self.assertIn("AIOps observability incident response", html)
+        self.assertIn("AIOps root cause analysis", html)
+
+    def test_topic_inventory_exposes_three_sources(self):
+        inventory = scout_topic_inventory()
+
+        self.assertEqual([item["source"] for item in inventory], ["arxiv", "openalex", "semantic_scholar"])
+        openalex = next(item for item in inventory if item["source"] == "openalex")
+        self.assertEqual(openalex["topics"], OPENALEX_ROTATING_TOPICS)
+        self.assertIn(openalex["active_topics"][0], OPENALEX_ROTATING_TOPICS)
 
     def _seed_review_recommendation(self, *, source_id: str = "2607.reviewv1") -> tuple[int, int]:
         paper_id, _ = db.upsert_paper(
