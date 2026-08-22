@@ -1385,7 +1385,7 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("Dense Review Paper", default_html)
         self.assertNotIn("Feedback Only Paper", default_html)
-        self.assertIn('<option value="has_feedback" selected>Has feedback</option>', feedback_html)
+        self.assertIn('<option value="all">All</option><option value="has_feedback" selected>Scored</option>', feedback_html)
         self.assertIn("Feedback Only Paper", feedback_html)
         self.assertIn("Semantic Scholar", feedback_html)
         self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', feedback_html)
@@ -1442,7 +1442,7 @@ class BackendV2Tests(unittest.TestCase):
         reviewed_html = web.render_review_queue(self.db_path, filter_value="reviewed")
         feedback_html = web.render_review_queue(self.db_path, filter_value="has_feedback")
 
-        self.assertIn('<option value="reviewed" selected>Status: Reviewed</option>', reviewed_html)
+        self.assertIn('<option value="reviewed" selected>Reviewed</option>', reviewed_html)
         self.assertIn("Dense Review Paper", reviewed_html)
         self.assertNotIn("Structured But Not Reviewed Paper", reviewed_html)
         self.assertIn("Structured But Not Reviewed Paper", feedback_html)

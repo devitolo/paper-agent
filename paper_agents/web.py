@@ -26,13 +26,13 @@ FEEDBACK_STATUSES = [
 ]
 
 FILTERS = [
+    ("all", "All"),
+    ("has_feedback", "Scored"),
     ("needs_review", "Needs review"),
-    ("all", "All selected"),
     ("interested", "Interested"),
     ("read_later", "Read later"),
-    ("reviewed", "Status: Reviewed"),
+    ("reviewed", "Reviewed"),
     ("not_interested", "Not interested"),
-    ("has_feedback", "Has feedback"),
 ]
 
 SOURCE_FILTER_ALL = "all"
