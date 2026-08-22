@@ -13,9 +13,11 @@ Decision: Lightweight review status and actual feedback presence are separate co
 Completed behavior:
 
 - Keep `Reviewed` as the lightweight status filter.
+- Use filter labels in this order: All, Scored, Needs review, Interested, Read later, Reviewed, Not interested.
+- Keep the underlying `has_feedback` value for Scored URLs.
 - Add `Scored` to show papers with saved structured feedback, or raw feedback if parsing did not produce a structured row.
 - Allow `Scored` to include feedback-backed papers outside the current recommendations.
-- Show feedback decision and latest feedback timestamp on feedback-backed cards.
+- Show user score, feedback decision, and latest feedback timestamp on feedback-backed cards.
 
 ### Decimal feedback scores
 
@@ -27,7 +29,7 @@ Completed behavior:
 
 - Change `structured_feedback.score` to `REAL` and migrate existing SQLite databases during init.
 - Parse `Score: 4.5` style feedback values when they are within 1 to 5.
-- Display decimal user scores in the Review Queue without confusing them with the Curator system score.
+- Display decimal user scores as `Your score: N/5` in the Review Queue without confusing them with the Curator system score.
 
 ### Non-blocking Review Queue feedback save
 
