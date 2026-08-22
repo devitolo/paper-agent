@@ -27,11 +27,11 @@ from paper_agents.scout import (
     DEFAULT_FRESHNESS_MONTHS,
     DEFAULT_PDF_DIR,
     DEFAULT_SCOUT_DIR,
-    DEFAULT_SCOUT_TOPICS,
     create_scout_source,
 )
 from paper_agents.scout_agent import DEFAULT_TARGET_CANDIDATES, ScoutAgent, ScoutConfig
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile
+from paper_agents.topics import select_topics_for_source
 
 DEFAULT_PIPELINE_MAX_CHARS = DEFAULT_REVIEWER_MAX_CHARS
 DEFAULT_PIPELINE_LIMIT_CHUNKS = DEFAULT_REVIEWER_LIMIT_CHUNKS
@@ -70,7 +70,10 @@ def run_daily_pipeline(
         raise RuntimeError("pipeline-daily V2 requires SQLite; use scout-daily for throwaway source checks")
 
     db.init_db(db_path)
-    topics_for_run = topics or DEFAULT_SCOUT_TOPICS
+    topics_for_run = topics or select_topics_for_source(
+        source_name,
+        cadences=("daily", "weekly") if source_name == "openalex" else ("daily",),
+    )
     max_recommendations = min(max(1, keep_limit), DEFAULT_MAX_RECOMMENDATIONS)
     max_scout_attempts = max(1, max_scout_attempts)
     profile = load_profile(profile_path)

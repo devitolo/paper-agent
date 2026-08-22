@@ -1,0 +1,267 @@
+# Project Paper Scout topics.
+# Edit through /topics when possible; this file is intentionally human-readable.
+topics:
+  - id: "aiops"
+    label: "AIOps"
+    query: "AIOps"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "ai-for-it-operations"
+    label: "AI for IT operations"
+    query: "AI for IT operations"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "llm-for-operations"
+    label: "LLM for operations"
+    query: "LLM for operations"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "agentic-operations"
+    label: "agentic operations"
+    query: "agentic operations"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "autonomous-operations"
+    label: "autonomous operations"
+    query: "autonomous operations"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "incident-response"
+    label: "incident response"
+    query: "incident response"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "incident-management"
+    label: "incident management"
+    query: "incident management"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "root-cause-analysis"
+    label: "root cause analysis"
+    query: "root cause analysis"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "failure-diagnosis"
+    label: "failure diagnosis"
+    query: "failure diagnosis"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "anomaly-detection"
+    label: "anomaly detection"
+    query: "anomaly detection"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "remediation"
+    label: "remediation"
+    query: "remediation"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "mitigation"
+    label: "mitigation"
+    query: "mitigation"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "observability"
+    label: "observability"
+    query: "observability"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "telemetry-analysis"
+    label: "telemetry analysis"
+    query: "telemetry analysis"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "log-analysis"
+    label: "log analysis"
+    query: "log analysis"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "trace-analysis"
+    label: "trace analysis"
+    query: "trace analysis"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "monitoring-systems"
+    label: "monitoring systems"
+    query: "monitoring systems"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "developer-productivity"
+    label: "developer productivity"
+    query: "developer productivity"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "software-maintenance"
+    label: "software maintenance"
+    query: "software maintenance"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "debugging"
+    label: "debugging"
+    query: "debugging"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "automated-debugging"
+    label: "automated debugging"
+    query: "automated debugging"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "program-repair"
+    label: "program repair"
+    query: "program repair"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "software-reliability-engineering"
+    label: "software reliability engineering"
+    query: "software reliability engineering"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "cloud-operations"
+    label: "cloud operations"
+    query: "cloud operations"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "microservice-diagnosis"
+    label: "microservice diagnosis"
+    query: "microservice diagnosis"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "distributed-systems-debugging"
+    label: "distributed systems debugging"
+    query: "distributed systems debugging"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "production-engineering"
+    label: "production engineering"
+    query: "production engineering"
+    sources: [arxiv]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from historical arXiv defaults."
+  - id: "openalex-aiops-observability-incident-response"
+    label: "AIOps observability incident response"
+    query: "AIOps observability incident response"
+    sources: [openalex]
+    cadence: weekly
+    priority: normal
+    enabled: true
+    note: "Seeded from the OpenAlex rotating script."
+  - id: "openalex-cloud-operations-anomaly-detection-remediation"
+    label: "Cloud operations anomaly detection remediation"
+    query: "cloud operations anomaly detection remediation"
+    sources: [openalex]
+    cadence: weekly
+    priority: normal
+    enabled: true
+    note: "Seeded from the OpenAlex rotating script."
+  - id: "openalex-microservice-diagnosis-distributed-systems-debugging"
+    label: "Microservice diagnosis distributed systems debugging"
+    query: "microservice diagnosis distributed systems debugging"
+    sources: [openalex]
+    cadence: weekly
+    priority: normal
+    enabled: true
+    note: "Seeded from the OpenAlex rotating script."
+  - id: "openalex-software-reliability-engineering-production-incidents"
+    label: "Software reliability engineering production incidents"
+    query: "software reliability engineering production incidents"
+    sources: [openalex]
+    cadence: weekly
+    priority: normal
+    enabled: true
+    note: "Seeded from the OpenAlex rotating script."
+  - id: "openalex-llm-operations-root-cause-analysis-logs-traces"
+    label: "LLM operations root cause analysis logs traces"
+    query: "LLM operations root cause analysis logs traces"
+    sources: [openalex]
+    cadence: weekly
+    priority: normal
+    enabled: true
+    note: "Seeded from the OpenAlex rotating script."
+  - id: "semantic-scholar-aiops-root-cause-analysis"
+    label: "AIOps root cause analysis"
+    query: "AIOps root cause analysis"
+    sources: [semantic_scholar]
+    cadence: daily
+    priority: normal
+    enabled: true
+    note: "Seeded from the documented Semantic Scholar cron topic."

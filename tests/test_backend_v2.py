@@ -10,6 +10,7 @@ import time
 import unittest
 import urllib.error
 import urllib.parse
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,6 +35,13 @@ from paper_agents.scout import scout_candidate_record
 from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
 from paper_agents.topic_inventory import OPENALEX_ROTATING_TOPICS, scout_topic_inventory
+from paper_agents.topics import (
+    TopicEntry,
+    create_topic_from_fast_path,
+    load_topic_config,
+    save_topic_config,
+    select_topics_for_source,
+)
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
 from paper_agents import web
 
@@ -131,6 +139,86 @@ class BackendV2Tests(unittest.TestCase):
             "production engineering",
         }
         self.assertTrue(expected.issubset(topics))
+
+    def test_topic_config_load_save_round_trip(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        topics = [
+            TopicEntry(
+                id="datalake-operations",
+                label="Datalake operations",
+                query="datalake operations reliability observability production engineering",
+                sources=["arxiv", "semantic_scholar", "openalex"],
+                cadence="daily",
+                priority="high",
+                enabled=True,
+            )
+        ]
+
+        save_topic_config(topics, config_path)
+        loaded = load_topic_config(config_path)
+
+        self.assertEqual(loaded[0].id, "datalake-operations")
+        self.assertEqual(loaded[0].query, "datalake operations reliability observability production engineering")
+        self.assertEqual(loaded[0].sources, ["arxiv", "semantic_scholar", "openalex"])
+        self.assertEqual(loaded[0].priority, "high")
+
+    def test_fast_path_topic_creation_defaults(self):
+        topic = create_topic_from_fast_path("datalake operations")
+
+        self.assertEqual(topic.label, "Datalake operations")
+        self.assertEqual(topic.query, "datalake operations reliability observability production engineering")
+        self.assertEqual(topic.sources, ["arxiv", "semantic_scholar", "openalex"])
+        self.assertEqual(topic.cadence, "daily")
+        self.assertEqual(topic.priority, "normal")
+        self.assertTrue(topic.enabled)
+
+    def test_source_topic_selection_rotates_enabled_config_topics(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [
+                TopicEntry("a-topic", "A topic", "query a", ["openalex"], "weekly", "normal", True),
+                TopicEntry("b-topic", "B topic", "query b", ["openalex"], "weekly", "normal", True),
+                TopicEntry("disabled-topic", "Disabled", "query disabled", ["openalex"], "weekly", "high", False),
+                TopicEntry("manual-topic", "Manual", "query manual", ["openalex"], "manual", "high", True),
+            ],
+            config_path,
+        )
+
+        selected = select_topics_for_source(
+            "openalex",
+            today=date(2026, 1, 2),
+            cadences=("daily", "weekly"),
+            path=config_path,
+        )
+
+        self.assertEqual(selected, ["query a"])
+
+    def test_scout_daily_cli_topic_override_still_wins(self):
+        captured = {}
+
+        def fake_run_daily_scout(**kwargs):
+            captured["topics"] = kwargs["topics"]
+            return {"source": kwargs["source"].name, "candidates": []}
+
+        with patch("paper_agents.cli.run_daily_scout", fake_run_daily_scout):
+            with patch("paper_agents.cli.print_section"):
+                with patch(
+                    "sys.argv",
+                    [
+                        "paper_agents.cli",
+                        "scout-daily",
+                        "--topic",
+                        "manual override",
+                        "--fetch",
+                        "1",
+                        "--no-download",
+                        "--db",
+                        str(self.db_path),
+                    ],
+                ):
+                    cli.main()
+
+        self.assertEqual(captured["topics"], ["manual override"])
 
     def test_semantic_scholar_normalizes_external_ids_and_pdf(self):
         candidate = semantic_scholar_paper_to_candidate(
@@ -1492,6 +1580,50 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Source Abstract", html)
         self.assertIn("Applied incident review automation.", html)
 
+    def test_topics_page_renders_editable_topic_manager(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [
+                TopicEntry(
+                    id="datalake-operations",
+                    label="Datalake operations",
+                    query="datalake operations reliability observability production engineering",
+                    sources=["arxiv", "semantic_scholar", "openalex"],
+                )
+            ],
+            config_path,
+        )
+
+        html = web.render_topics_page(config_path=config_path)
+
+        self.assertIn("Add Topic", html)
+        self.assertIn('name="topic_text"', html)
+        self.assertIn('value="datalake-operations"', html)
+        self.assertIn("Future runs only.", html)
+        self.assertIn("Datalake operations", html)
+
+    def test_topics_post_adds_fast_path_topic(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config([], config_path)
+
+        web.save_topics_form(
+            {
+                "action": ["add"],
+                "topic_text": ["datalake operations"],
+                "sources": ["arxiv", "semantic_scholar", "openalex"],
+                "cadence": ["daily"],
+                "priority": ["normal"],
+                "enabled": ["1"],
+            },
+            config_path=config_path,
+        )
+
+        loaded = load_topic_config(config_path)
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0].label, "Datalake operations")
+        self.assertEqual(loaded[0].query, "datalake operations reliability observability production engineering")
+        self.assertEqual(loaded[0].sources, ["arxiv", "semantic_scholar", "openalex"])
+
     def test_review_queue_feedback_save_still_inserts_status_and_notes(self):
         paper_id, _ = self._seed_review_recommendation()
         self.connection.commit()
@@ -1779,12 +1911,13 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page()
 
         self.assertIn("Project Paper Scout Topics", html)
-        self.assertIn("Visibility only.", html)
+        self.assertIn("Future runs only.", html)
+        self.assertIn("Add Topic", html)
         self.assertIn('href="/">Review queue</a>', html)
         self.assertIn('href="/health">Health</a>', html)
         self.assertIn("Daily default", html)
-        self.assertIn("Weekly rotating script", html)
-        self.assertIn("External/manual cron override", html)
+        self.assertIn("Rotating source job", html)
+        self.assertIn("Source cron/manual job", html)
         self.assertIn("AIOps", html)
         self.assertIn("AIOps observability incident response", html)
         self.assertIn("AIOps root cause analysis", html)
@@ -1794,7 +1927,7 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertEqual([item["source"] for item in inventory], ["arxiv", "openalex", "semantic_scholar"])
         openalex = next(item for item in inventory if item["source"] == "openalex")
-        self.assertEqual(openalex["topics"], OPENALEX_ROTATING_TOPICS)
+        self.assertEqual([topic.query for topic in openalex["topics"]], OPENALEX_ROTATING_TOPICS)
         self.assertIn(openalex["active_topics"][0], OPENALEX_ROTATING_TOPICS)
 
     def _seed_review_recommendation(self, *, source_id: str = "2607.reviewv1") -> tuple[int, int]:

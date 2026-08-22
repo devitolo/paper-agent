@@ -2,6 +2,28 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-08-22
+
+### Topic Management V1
+
+Status: Implemented.
+
+Decision: Scout topic steering should start as a UI-first, file-backed workflow before automatic Scout learning.
+
+Completed behavior:
+
+- Add `config/topics.yaml` as the human-readable Scout topic config.
+- Make `/topics` editable with a one-field fast path for adding topics such as `Datalake operations`.
+- Infer default query, sources, cadence, priority, and enabled state for fast-path topics.
+- Expose advanced add/edit controls for query, source checkboxes, cadence, priority, and enabled state.
+- Keep explicit CLI `--topic` overrides working.
+- Let scheduled source jobs select enabled config topics on future runs instead of querying every topic every day.
+- Keep `/topics` read/write only for config management; no `Run now` button in V1.
+
+Backlog:
+
+- Track per-topic funnel performance before adding automatic Scout learning or priority recommendations.
+
 ## 2026-08-21
 
 ### Review Queue feedback visibility

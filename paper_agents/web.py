@@ -14,6 +14,16 @@ from typing import Any, Callable
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob
 from paper_agents.topic_inventory import scout_topic_inventory
+from paper_agents.topics import (
+    CADENCES,
+    DEFAULT_TOPIC_CONFIG_PATH,
+    PRIORITIES,
+    TopicEntry,
+    create_topic_from_fast_path,
+    load_topic_config_or_seed,
+    save_topic_config,
+    update_topic_from_form,
+)
 
 ASSET_DIR = Path(__file__).with_name("assets")
 LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
@@ -90,7 +100,13 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 )
                 return
             if parsed.path == "/topics":
-                self.respond_html(render_topics_page())
+                params = urllib.parse.parse_qs(parsed.query)
+                self.respond_html(
+                    render_topics_page(
+                        saved=params.get("saved", [None])[0] == "1",
+                        error=params.get("error", [None])[0],
+                    )
+                )
                 return
             if parsed.path.startswith("/artifact/"):
                 self.serve_artifact(db_path, parsed.path.removeprefix("/artifact/"))
@@ -102,6 +118,20 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/topics":
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    save_topics_form(form)
+                    redirect_to = "/topics?saved=1"
+                except ValueError as error:
+                    redirect_to = "/topics?" + urllib.parse.urlencode({"error": str(error)})
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", redirect_to)
+                self.end_headers()
+                return
+
             if parsed.path != "/feedback":
                 self.send_error(HTTPStatus.NOT_FOUND, "Not found")
                 return
@@ -438,14 +468,21 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 </html>"""
 
 
-def render_topics_page() -> str:
-    inventory = scout_topic_inventory()
+def render_topics_page(*, saved: bool = False, error: str | None = None, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> str:
+    inventory = scout_topic_inventory(config_path=config_path)
+    topics = load_topic_config_or_seed(config_path)
     tabs = "".join(
         f'<a class="topic-tab source-badge {source_badge_class(item["source"])}" href="#{escape(item["source"])}">{escape(item["label"])}</a>'
         for item in inventory
     )
     sections = "".join(render_topic_source_section(item) for item in inventory)
-    total_topics = sum(len(item["topics"]) for item in inventory)
+    topic_rows = "".join(render_topic_edit_row(topic) for topic in topics)
+    total_topics = len(topics)
+    banner = ""
+    if saved:
+        banner = '<div class="banner">Topic config saved. Future scheduled runs will use the updated topic rotation.</div>'
+    if error:
+        banner = f'<div class="banner warning">Topic config was not saved: {escape(error)}</div>'
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -459,18 +496,27 @@ def render_topics_page() -> str:
     <header class="topbar">
       <div>
         <h1 class="brand-title"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Scout Topics</span></h1>
-        <p>{len(inventory)} sources | {total_topics} configured topic strings | read-only inventory</p>
+        <p>{len(inventory)} sources | {total_topics} configured topics | editable file-backed config</p>
       </div>
       <nav class="queue-controls" aria-label="Primary">
         <a class="secondary-link" href="/">Review queue</a>
         <a class="secondary-link" href="/health">Health</a>
       </nav>
     </header>
+    {banner}
     <section class="topic-note">
-      <strong>Visibility only.</strong> These are the repo-defined topic lists and documented schedule topics that steer Scout today. Future work may add priority and edit controls.
+      <strong>Future runs only.</strong> Add or edit Scout topics here; scheduled jobs pick enabled topics from <code>config/topics.yaml</code> on their next run. This page does not run Scout or change existing recommendations.
     </section>
+    {render_topic_add_form()}
     <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
     <div class="topic-sections">{sections}</div>
+    <section class="topic-source">
+      <div class="topic-source-head">
+        <h2>All Topics</h2>
+        <span>Edit config rows</span>
+      </div>
+      <div class="topic-table">{topic_rows}</div>
+    </section>
   </main>
 </body>
 </html>"""
@@ -478,7 +524,10 @@ def render_topics_page() -> str:
 
 def render_topic_source_section(item: dict[str, Any]) -> str:
     active_topics = "".join(f"<li>{escape(topic)}</li>" for topic in item["active_topics"])
-    topics = "".join(f"<li>{escape(topic)}</li>" for topic in item["topics"])
+    topics = "".join(
+        f"<li>{escape(topic.label)} <span>{escape(topic.cadence)} / {escape(topic.priority)} / {'enabled' if topic.enabled else 'disabled'}</span></li>"
+        for topic in item["topics"]
+    )
     return f"""<section class="topic-source" id="{escape(item["source"])}">
       <div class="topic-source-head">
         <h2><span class="source-badge {source_badge_class(item["source"])}">{escape(item["label"])}</span></h2>
@@ -497,6 +546,100 @@ def render_topic_source_section(item: dict[str, Any]) -> str:
       </div>
       <p class="topic-note-text">{escape(item["notes"])}</p>
     </section>"""
+
+
+def render_topic_add_form() -> str:
+    return f"""<section class="topic-source topic-editor">
+      <div class="topic-source-head">
+        <h2>Add Topic</h2>
+        <span>Fast path requires one field</span>
+      </div>
+      <form method="post" action="/topics" class="topic-add-form">
+        <input type="hidden" name="action" value="add">
+        <label>Topic<input name="topic_text" placeholder="Datalake operations" required></label>
+        <details>
+          <summary>Advanced</summary>
+          <div class="topic-form-grid">
+            <label>Search query<input name="query" placeholder="datalake operations reliability observability production engineering"></label>
+            {render_source_checkboxes(["arxiv", "semantic_scholar", "openalex"])}
+            {render_topic_select("cadence", CADENCES, "daily", "Cadence")}
+            {render_topic_select("priority", PRIORITIES, "normal", "Priority")}
+            <label class="inline-check"><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
+          </div>
+        </details>
+        <button type="submit" class="primary">Add topic</button>
+      </form>
+    </section>"""
+
+
+def render_topic_edit_row(topic: TopicEntry) -> str:
+    enabled_label = "enabled" if topic.enabled else "disabled"
+    return f"""<form method="post" action="/topics" class="topic-row">
+      <input type="hidden" name="action" value="update">
+      <input type="hidden" name="topic_id" value="{escape(topic.id)}">
+      <label>Label<input name="label" value="{escape(topic.label)}" required></label>
+      <label>Query<input name="query" value="{escape(topic.query)}" required></label>
+      <div>{render_source_checkboxes(topic.sources)}</div>
+      {render_topic_select("cadence", CADENCES, topic.cadence, "Cadence")}
+      {render_topic_select("priority", PRIORITIES, topic.priority, "Priority")}
+      <label class="inline-check"><input type="checkbox" name="enabled" value="1" {'checked' if topic.enabled else ''}> {enabled_label}</label>
+      <button type="submit" class="secondary">Save</button>
+    </form>"""
+
+
+def render_source_checkboxes(selected_sources: list[str]) -> str:
+    selected = set(selected_sources)
+    boxes = []
+    for source in ["arxiv", "openalex", "semantic_scholar"]:
+        boxes.append(
+            f'<label class="inline-check"><input type="checkbox" name="sources" value="{escape(source)}" '
+            f'{"checked" if source in selected else ""}> {escape(source_display_name(source))}</label>'
+        )
+    return '<fieldset class="source-checks"><legend>Sources</legend>' + "".join(boxes) + "</fieldset>"
+
+
+def render_topic_select(name: str, choices: tuple[str, ...], selected_value: str, label: str) -> str:
+    options = "".join(
+        f'<option value="{escape(choice)}"{" selected" if choice == selected_value else ""}>{escape(choice.title())}</option>'
+        for choice in choices
+    )
+    return f'<label>{escape(label)}<select name="{escape(name)}">{options}</select></label>'
+
+
+def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> None:
+    topics = load_topic_config_or_seed(config_path)
+    action = form.get("action", [""])[0]
+    if action == "add":
+        topic = create_topic_from_fast_path(
+            form.get("topic_text", [""])[0],
+            existing_topics=topics,
+            query=form.get("query", [""])[0] or None,
+            sources=form.get("sources") or ["arxiv", "semantic_scholar", "openalex"],
+            cadence=form.get("cadence", ["daily"])[0],
+            priority=form.get("priority", ["normal"])[0],
+            enabled=form.get("enabled", [""])[0] == "1",
+        )
+        topics.append(topic)
+        save_topic_config(topics, config_path)
+        return
+    if action == "update":
+        topic_id = form.get("topic_id", [""])[0]
+        for index, topic in enumerate(topics):
+            if topic.id != topic_id:
+                continue
+            topics[index] = update_topic_from_form(
+                topic,
+                label=form.get("label", [""])[0],
+                query=form.get("query", [""])[0],
+                sources=form.get("sources", []),
+                cadence=form.get("cadence", ["daily"])[0],
+                priority=form.get("priority", ["normal"])[0],
+                enabled=form.get("enabled", [""])[0] == "1",
+            )
+            save_topic_config(topics, config_path)
+            return
+        raise ValueError(f"Unknown topic id: {topic_id}")
+    raise ValueError("Unknown topic action")
 
 
 def render_warnings(warnings: list[dict[str, str]]) -> str:
@@ -1351,8 +1494,9 @@ p { margin: 0; }
 .topbar p, .card-head p { color: #57606a; font-size: 12px; }
 .queue-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: end; }
 .control-label { display: grid; gap: 2px; color: #57606a; font-size: 11px; }
-select, button { border: 1px solid #d8dee4; border-radius: 5px; padding: 4px 7px; background: #ffffff; color: #24292f; font: inherit; min-height: 28px; }
+select, button, input { border: 1px solid #d8dee4; border-radius: 5px; padding: 4px 7px; background: #ffffff; color: #24292f; font: inherit; min-height: 28px; box-sizing: border-box; }
 button { cursor: pointer; }
+code { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .secondary-link { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid #d8dee4; border-radius: 5px; padding: 0 8px; color: #24292f; background: #f6f8fa; text-decoration: none; }
 .source-link { color: #0969da; text-decoration: none; }
 .source-link:hover { text-decoration: underline; }
@@ -1459,14 +1603,26 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-list { margin: 0; padding-left: 22px; columns: 2; column-gap: 28px; }
 .active-topic-list { columns: 1; }
 .topic-list li { break-inside: avoid; margin: 0 0 3px; padding-left: 2px; font-size: 12px; }
+.topic-list li span { color: #57606a; font-size: 11px; }
 .topic-note-text { margin-top: 8px; }
+.topic-add-form { display: grid; gap: 8px; }
+.topic-add-form details { border: 1px solid #d8dee4; border-radius: 5px; padding: 6px 8px; }
+.topic-add-form summary { cursor: pointer; color: #57606a; font-size: 12px; }
+.topic-form-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) repeat(2, minmax(120px, 0.4fr)) minmax(96px, 0.3fr); gap: 8px; align-items: end; margin-top: 8px; }
+.topic-table { display: grid; gap: 6px; }
+.topic-row { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.3fr) minmax(180px, 0.8fr) 100px 100px 92px 62px; gap: 6px; align-items: end; border-top: 1px solid #d8dee4; padding-top: 6px; }
+.topic-row:first-child { border-top: 0; padding-top: 0; }
+.source-checks { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; padding: 0; border: 0; min-width: 0; }
+.source-checks legend { color: #57606a; font-size: 12px; padding: 0; margin-bottom: 3px; }
+.inline-check { display: inline-flex; grid-auto-flow: column; gap: 4px; align-items: center; color: #57606a; font-size: 12px; }
+.inline-check input { min-height: auto; }
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
   .topbar p, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note, .topic-note-text { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .health-card, .health-graph, .health-table table, .health-kv, .topic-note, .topic-source { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .links a, button, select, input, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .health-card, .health-graph, .health-table table, .health-kv, .topic-note, .topic-source, .topic-add-form details { background: #161b22; color: #e6edf3; border-color: #30363d; }
   .topic-note strong { color: #e6edf3; }
   button.secondary, .score { background: #21262d; }
   .score-secondary { background: transparent; }
@@ -1484,6 +1640,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-warnings { background: #2d2300; border-color: #9e6a03; }
   .health-table th { background: #21262d; }
   .health-table th, .health-table td { border-color: #30363d; }
+  .topic-row { border-color: #30363d; }
 }
 @media (max-width: 720px) {
   main { padding: 10px; }
@@ -1499,5 +1656,6 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-kv { grid-template-columns: 1fr; }
   .topic-columns { grid-template-columns: 1fr; }
   .topic-list { columns: 1; }
+  .topic-form-grid, .topic-row { grid-template-columns: 1fr; }
 }
 """

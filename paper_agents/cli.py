@@ -53,13 +53,13 @@ from paper_agents.scout import (
     DEFAULT_KEEP_LIMIT,
     DEFAULT_PDF_DIR,
     DEFAULT_SCOUT_DIR,
-    DEFAULT_SCOUT_TOPICS,
     ResearchScout,
     SCOUT_SOURCES,
     create_scout_source,
     run_daily_scout,
 )
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile, save_profile
+from paper_agents.topics import select_topics_for_source
 from paper_agents.web import run_review_ui
 
 
@@ -314,7 +314,7 @@ def main() -> None:
         return
 
     if args.command == "scout-daily":
-        topics = args.topics or DEFAULT_SCOUT_TOPICS
+        topics = args.topics or select_topics_for_source(args.source)
         source_seen_ids = seen_source_ids(args.db, source=args.source) if not args.include_seen else set()
         try:
             output = run_daily_scout(
@@ -348,7 +348,10 @@ def main() -> None:
         print(f"pipeline mode: {mode} (limit_chunks={limit_chunks})")
         try:
             output = run_daily_pipeline(
-                topics=args.topics or DEFAULT_SCOUT_TOPICS,
+                topics=args.topics or select_topics_for_source(
+                    args.source,
+                    cadences=("daily", "weekly") if args.source == "openalex" else ("daily",),
+                ),
                 freshness_months=args.freshness_months,
                 fetch_limit=args.fetch,
                 keep_limit=args.keep,
