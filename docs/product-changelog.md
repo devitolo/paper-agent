@@ -4,6 +4,19 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ## 2026-08-21
 
+### Review Queue feedback visibility
+
+Status: Implemented.
+
+Decision: Lightweight review status and actual feedback presence are separate concepts and need separate filters.
+
+Completed behavior:
+
+- Rename the reviewed queue filter label to `Status: Reviewed`.
+- Add `Has feedback` to show papers with saved structured feedback, or raw feedback if parsing did not produce a structured row.
+- Allow `Has feedback` to include feedback-backed papers outside the current recommendations.
+- Show feedback decision and latest feedback timestamp on feedback-backed cards.
+
 ### Decimal feedback scores
 
 Status: Implemented.

@@ -1357,6 +1357,96 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', html)
 
+    def test_review_queue_has_feedback_filter_includes_structured_feedback_without_reviewed_status(self):
+        recommended_paper_id, _ = self._seed_review_recommendation()
+        feedback_paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "semantic_scholar",
+                "source_id": "feedback-only",
+                "title": "Feedback Only Paper",
+                "url": "https://example.test/feedback-only",
+                "published": "2026-08-20",
+                "abstract": "AIOps root cause analysis.",
+            },
+        )
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=feedback_paper_id,
+            recommendation_id=None,
+            content="Decision: keep\nScore: 4.5\nStrong feedback-only fit.",
+            source="test",
+            status="interested",
+        )
+        self.connection.commit()
+
+        default_html = web.render_review_queue(self.db_path)
+        feedback_html = web.render_review_queue(self.db_path, filter_value="has_feedback")
+
+        self.assertIn("Dense Review Paper", default_html)
+        self.assertNotIn("Feedback Only Paper", default_html)
+        self.assertIn('<option value="has_feedback" selected>Has feedback</option>', feedback_html)
+        self.assertIn("Feedback Only Paper", feedback_html)
+        self.assertIn("Semantic Scholar", feedback_html)
+        self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', feedback_html)
+        self.assertIn("Decision: keep", feedback_html)
+        self.assertIn("Feedback:", feedback_html)
+        self.assertNotEqual(recommended_paper_id, feedback_paper_id)
+
+    def test_review_queue_has_feedback_filter_includes_raw_feedback_without_structured_row(self):
+        feedback_paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "openalex",
+                "source_id": "raw-feedback-only",
+                "title": "Raw Feedback Only Paper",
+                "url": "https://example.test/raw-feedback-only",
+                "published": "2026-08-20",
+                "abstract": "Production operations feedback.",
+            },
+        )
+        db.create_raw_feedback(self.connection, paper_id=feedback_paper_id, content="Raw feedback that did not parse.")
+        self.connection.commit()
+
+        html = web.render_review_queue(self.db_path, filter_value="has_feedback")
+
+        self.assertIn("Raw Feedback Only Paper", html)
+        self.assertIn("Feedback:", html)
+
+    def test_review_queue_reviewed_filter_is_lightweight_status_only(self):
+        reviewed_paper_id, _ = self._seed_review_recommendation()
+        feedback_paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "arxiv",
+                "source_id": "structured-not-reviewed",
+                "title": "Structured But Not Reviewed Paper",
+                "url": "https://example.test/structured-not-reviewed",
+                "published": "2026-08-20",
+                "abstract": "Incident review feedback.",
+            },
+        )
+        self.connection.execute(
+            "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
+            (reviewed_paper_id, "reviewed", "Marked reviewed."),
+        )
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=feedback_paper_id,
+            recommendation_id=None,
+            content="Decision: maybe\nScore: 3.5\nHas discussion feedback.",
+            source="test",
+        )
+        self.connection.commit()
+
+        reviewed_html = web.render_review_queue(self.db_path, filter_value="reviewed")
+        feedback_html = web.render_review_queue(self.db_path, filter_value="has_feedback")
+
+        self.assertIn('<option value="reviewed" selected>Status: Reviewed</option>', reviewed_html)
+        self.assertIn("Dense Review Paper", reviewed_html)
+        self.assertNotIn("Structured But Not Reviewed Paper", reviewed_html)
+        self.assertIn("Structured But Not Reviewed Paper", feedback_html)
+
     def test_source_badge_class_distinguishes_sources(self):
         self.assertEqual(web.source_badge_class("arxiv"), "source-badge-arxiv")
         self.assertEqual(web.source_badge_class("openalex"), "source-badge-openalex")

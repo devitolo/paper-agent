@@ -30,8 +30,9 @@ FILTERS = [
     ("all", "All selected"),
     ("interested", "Interested"),
     ("read_later", "Read later"),
-    ("reviewed", "Reviewed"),
+    ("reviewed", "Status: Reviewed"),
     ("not_interested", "Not interested"),
+    ("has_feedback", "Has feedback"),
 ]
 
 SOURCE_FILTER_ALL = "all"
@@ -306,6 +307,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     feedback_status = card.get("feedback_status")
     feedback_label = f'<span class="feedback-state">Current: {escape(feedback_status)}</span>' if feedback_status else ""
     user_score_html = render_user_score(card.get("user_score"))
+    feedback_meta_html = render_feedback_meta(card)
     summary = card["summary"]
     source_controls = render_source_controls(card)
     source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
@@ -315,7 +317,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     return f"""<article class="paper-card{compact_class}">
   <form method="post" action="/feedback" class="paper-form">
     <input type="hidden" name="paper_id" value="{card['id']}">
-    <input type="hidden" name="recommendation_id" value="{card['recommendation_id']}">
+    <input type="hidden" name="recommendation_id" value="{escape(card['recommendation_id'] or '')}">
     <input type="hidden" name="return_to" value="{escape(return_to)}">
     <input type="hidden" name="status" value="{feedback_status or 'read_later'}">
     <div class="paper-main">
@@ -333,6 +335,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     </div>
     <div class="action-rail">
       {user_score_html}
+      {feedback_meta_html}
       <div class="score {'score-secondary' if card.get('user_score') is not None else ''}"><span>System</span><strong>{card["score"]:.1f}</strong></div>
       <div class="feedback-actions">{feedback_buttons}</div>
       {feedback_label}
@@ -346,6 +349,19 @@ def render_user_score(score: float | None) -> str:
     if score is None:
         return ""
     return f'<div class="user-score"><span>Your score</span><strong>{format_user_score(score)}/5</strong></div>'
+
+
+def render_feedback_meta(card: dict[str, Any]) -> str:
+    if not card.get("has_feedback"):
+        return ""
+    parts = []
+    if card.get("feedback_decision"):
+        parts.append(f"Decision: {escape(card['feedback_decision'])}")
+    if card.get("feedback_received_at"):
+        parts.append(f"Feedback: {escape(card['feedback_received_at'])}")
+    if not parts:
+        parts.append("Feedback saved")
+    return f'<div class="feedback-meta">{"<br>".join(parts)}</div>'
 
 
 def format_user_score(score: float) -> str:
@@ -874,20 +890,27 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
     where_clauses = []
     params: list[Any] = []
     if filter_value == "needs_review":
+        where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status IS NULL")
+    elif filter_value == "has_feedback":
+        where_clauses.append("(latest_structured_feedback.paper_id IS NOT NULL OR latest_raw_feedback.paper_id IS NOT NULL)")
     elif filter_value != "all":
+        where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status = ?")
         params.append(filter_value)
+    else:
+        where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
     if source_value != SOURCE_FILTER_ALL:
         where_clauses.append("EXISTS (SELECT 1 FROM paper_sources source_filter WHERE source_filter.paper_id = papers.id AND source_filter.source = ?)")
         params.append(source_value)
     where_clause = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
-    order_clause = (
-        "ORDER BY latest_recommendation.score DESC, latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
-        if sort_value == "score"
-        else "ORDER BY latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
-    )
+    if sort_value == "score":
+        order_clause = "ORDER BY latest_recommendation.score DESC NULLS LAST, latest_feedback_received_at DESC, papers.id DESC"
+    elif filter_value == "has_feedback":
+        order_clause = "ORDER BY latest_feedback_received_at DESC, latest_recommendation.curator_run_id DESC, papers.id DESC"
+    else:
+        order_clause = "ORDER BY latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
 
     connection = connect_db(db_path)
     try:
@@ -920,10 +943,17 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
             ), latest_structured_feedback AS (
                 SELECT
                     paper_id,
+                    decision,
                     score,
+                    created_at,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id DESC) AS row_number
                 FROM structured_feedback
-                WHERE score IS NOT NULL
+            ), latest_raw_feedback AS (
+                SELECT
+                    paper_id,
+                    received_at,
+                    ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id DESC) AS row_number
+                FROM raw_feedback
             ), primary_source AS (
                 SELECT
                     paper_id,
@@ -958,15 +988,20 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                 latest_feedback.status,
                 latest_feedback.notes,
                 source_rollup.sources,
-                latest_structured_feedback.score
+                latest_structured_feedback.score,
+                latest_structured_feedback.decision,
+                latest_structured_feedback.created_at,
+                latest_raw_feedback.received_at,
+                COALESCE(latest_structured_feedback.created_at, latest_raw_feedback.received_at) AS latest_feedback_received_at
             FROM papers
-            JOIN latest_recommendation
+            LEFT JOIN latest_recommendation
               ON latest_recommendation.paper_id = papers.id
              AND latest_recommendation.row_number = 1
             LEFT JOIN primary_source ON primary_source.paper_id = papers.id AND primary_source.row_number = 1
             LEFT JOIN source_rollup ON source_rollup.paper_id = papers.id
             LEFT JOIN latest_feedback ON latest_feedback.paper_id = papers.id AND latest_feedback.row_number = 1
             LEFT JOIN latest_structured_feedback ON latest_structured_feedback.paper_id = papers.id AND latest_structured_feedback.row_number = 1
+            LEFT JOIN latest_raw_feedback ON latest_raw_feedback.paper_id = papers.id AND latest_raw_feedback.row_number = 1
             {where_clause}
             {order_clause}
             LIMIT 50
@@ -986,6 +1021,9 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     "source_id": row[3] or "unknown",
                     "source_label": source_label(row[2] or "unknown", parse_sources(row[13])),
                     "user_score": row[14],
+                    "feedback_decision": row[15],
+                    "feedback_received_at": row[17] or row[16],
+                    "has_feedback": bool(row[15] is not None or row[16] is not None or row[17] is not None),
                     "title": row[4],
                     "published": row[5],
                     "url": row[7],
@@ -1055,8 +1093,12 @@ def load_source_filter_choices(db_path: Path) -> list[tuple[str, str]]:
             """
             SELECT DISTINCT paper_sources.source
             FROM paper_sources
-            JOIN recommendations ON recommendations.paper_id = paper_sources.paper_id
             WHERE paper_sources.source IS NOT NULL
+              AND (
+                EXISTS (SELECT 1 FROM recommendations WHERE recommendations.paper_id = paper_sources.paper_id)
+                OR EXISTS (SELECT 1 FROM structured_feedback WHERE structured_feedback.paper_id = paper_sources.paper_id)
+                OR EXISTS (SELECT 1 FROM raw_feedback WHERE raw_feedback.paper_id = paper_sources.paper_id)
+              )
             ORDER BY paper_sources.source
             """
         ).fetchall()
@@ -1333,6 +1375,7 @@ button.secondary { background: #f6f8fa; }
 .user-score { text-align: center; border: 1px solid #1a7f37; border-radius: 5px; padding: 6px; background: #dafbe1; color: #116329; }
 .user-score strong { display: block; font-size: 18px; line-height: 1; }
 .feedback-state { color: #57606a; font-size: 11px; text-align: center; }
+.feedback-meta { border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 6px; color: #57606a; background: #ffffff; font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; }
 .tags, .links { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .tag { border: 1px solid #d8dee4; color: #57606a; border-radius: 999px; padding: 1px 6px; font-size: 11px; }
 .source-badge { border-radius: 999px; padding: 1px 7px; font-size: 11px; font-weight: 650; }
@@ -1420,10 +1463,10 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note, .topic-note-text { color: #8b949e; }
+  .topbar p, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note, .topic-note-text { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .health-card, .health-graph, .health-table table, .health-kv, .topic-note, .topic-source { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .links a, button, select, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .health-card, .health-graph, .health-table table, .health-kv, .topic-note, .topic-source { background: #161b22; color: #e6edf3; border-color: #30363d; }
   .topic-note strong { color: #e6edf3; }
   button.secondary, .score { background: #21262d; }
   .score-secondary { background: transparent; }
