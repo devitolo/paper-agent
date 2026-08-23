@@ -1501,6 +1501,19 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Raw Feedback Only Paper", html)
         self.assertIn("Feedback:", html)
 
+    def test_review_queue_scored_filter_includes_lightweight_score_note(self):
+        paper_id, _ = self._seed_review_recommendation()
+        self.connection.execute(
+            "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
+            (paper_id, "reviewed", "Decision: keep\nScore: 4.5\nSaved before structured ingest."),
+        )
+        self.connection.commit()
+
+        html = web.render_review_queue(self.db_path, filter_value="has_feedback")
+
+        self.assertIn("Dense Review Paper", html)
+        self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', html)
+
     def test_review_queue_reviewed_filter_is_lightweight_status_only(self):
         reviewed_paper_id, _ = self._seed_review_recommendation()
         feedback_paper_id, _ = db.upsert_paper(

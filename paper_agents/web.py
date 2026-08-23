@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
-from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob
+from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.topic_inventory import scout_topic_inventory
 from paper_agents.topics import (
     CADENCES,
@@ -1036,7 +1036,13 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status IS NULL")
     elif filter_value == "has_feedback":
-        where_clauses.append("(latest_structured_feedback.paper_id IS NOT NULL OR latest_raw_feedback.paper_id IS NOT NULL)")
+        where_clauses.append(
+            "("
+            "latest_structured_feedback.paper_id IS NOT NULL "
+            "OR latest_raw_feedback.paper_id IS NOT NULL "
+            "OR LOWER(COALESCE(latest_feedback.notes, '')) LIKE '%score:%'"
+            ")"
+        )
     elif filter_value != "all":
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status = ?")
@@ -1156,6 +1162,14 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
         for row in rows:
             paper_id = row[0]
             artifacts = load_artifacts_for_paper(connection, paper_id)
+            lightweight_score = parse_lightweight_feedback_score(row[12])
+            user_score = row[14] if row[14] is not None else lightweight_score
+            has_feedback = bool(
+                row[15] is not None
+                or row[16] is not None
+                or row[17] is not None
+                or lightweight_score is not None
+            )
             cards.append(
                 {
                     "id": paper_id,
@@ -1163,10 +1177,10 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     "source": row[2] or "unknown",
                     "source_id": row[3] or "unknown",
                     "source_label": source_label(row[2] or "unknown", parse_sources(row[13])),
-                    "user_score": row[14],
+                    "user_score": user_score,
                     "feedback_decision": row[15],
                     "feedback_received_at": row[17] or row[16],
-                    "has_feedback": bool(row[15] is not None or row[16] is not None or row[17] is not None),
+                    "has_feedback": has_feedback,
                     "title": row[4],
                     "published": row[5],
                     "url": row[7],
@@ -1182,6 +1196,13 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
     finally:
         connection.close()
     return cards
+
+
+def parse_lightweight_feedback_score(notes: str | None) -> float | None:
+    if not notes:
+        return None
+    parsed = parse_feedback_blob(notes)
+    return parsed["score"]
 
 
 def with_source_abstract(summary: dict[str, Any], abstract: str | None) -> dict[str, Any]:
