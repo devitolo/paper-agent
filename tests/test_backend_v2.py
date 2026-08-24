@@ -1883,6 +1883,33 @@ class BackendV2Tests(unittest.TestCase):
         self.assertLess(html.index("TopicAgent Proposal"), html.index("Source schedule inventory"))
         self.assertNotIn('class="topic-source topic-proposal-panel"', html)
         self.assertIn('name="conversation_json"', html)
+        self.assertIn("New pending", html)
+        self.assertIn("showing pending TopicAgent preview", html)
+        self.assertIn('class="topic-row topic-read-row topic-preview-row"', html)
+
+    def test_topics_page_previews_update_proposal_in_topic_list(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"], enabled=True)],
+            config_path,
+        )
+        proposal = TopicProposal(
+            action="update_existing",
+            matched_topic_id="datalake-operations",
+            label="Datalake operations",
+            query="datalake query",
+            sources=["arxiv"],
+            cadence="daily",
+            priority="normal",
+            enabled=False,
+        )
+
+        html = web.render_topics_page(proposal=proposal, config_path=config_path)
+
+        self.assertIn("Update pending", html)
+        self.assertIn("Apply to save", html)
+        self.assertIn('<span class="topic-status status-disabled">Off</span>', html)
+        self.assertIn('class="topic-source topic-list-details" open', html)
 
     def test_topics_page_renders_topic_agent_conversation(self):
         proposal = TopicProposal(

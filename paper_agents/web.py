@@ -522,10 +522,10 @@ def render_topics_page(
         for item in inventory
     )
     sections = "".join(render_topic_source_section(item) for item in inventory)
-    topic_rows = "".join(render_topic_row(topic) for topic in topics)
+    topic_rows = render_topic_rows(topics, proposal)
     edit_topic = next((topic for topic in topics if topic.id == edit_id), None)
     editor_panel = render_topic_editor_panel(edit_topic) if edit_topic else ""
-    all_topics_open = " open" if edit_topic else ""
+    all_topics_open = " open" if edit_topic or pending_topic_preview(proposal) else ""
     total_topics = len(topics)
     banner = ""
     if saved:
@@ -565,7 +565,7 @@ def render_topics_page(
     <details class="topic-source topic-list-details"{all_topics_open}>
       <summary>
         <span>All Topics</span>
-        <small>{total_topics} configured | expand to search, toggle, or edit</small>
+        <small>{topic_list_summary(total_topics, proposal)}</small>
       </summary>
       <div class="topic-toolbar">
         <label>Search<input id="topic-search" type="search" placeholder="Filter topics"></label>
@@ -749,6 +749,63 @@ def render_topic_row(topic: TopicEntry) -> str:
         <a class="topic-edit-link" href="/topics?edit={escape(topic.id)}">Edit</a>
       </div>
     </div>"""
+
+
+def render_topic_rows(topics: list[TopicEntry], proposal: TopicProposal | None = None) -> str:
+    preview = pending_topic_preview(proposal)
+    if preview is None:
+        return "".join(render_topic_row(topic) for topic in topics)
+    rows: list[str] = []
+    inserted = False
+    for topic in topics:
+        if preview.id == topic.id:
+            rows.append(render_topic_preview_row(preview, proposal))
+            inserted = True
+        else:
+            rows.append(render_topic_row(topic))
+    if not inserted:
+        rows.insert(0, render_topic_preview_row(preview, proposal))
+    return "".join(rows)
+
+
+def pending_topic_preview(proposal: TopicProposal | None) -> TopicEntry | None:
+    if proposal is None or proposal.action not in {"create_new", "update_existing"}:
+        return None
+    if not proposal.label or not proposal.query:
+        return None
+    return TopicEntry(
+        id=proposal.matched_topic_id or f"pending-{proposal.label.casefold().replace(' ', '-')}",
+        label=proposal.label,
+        query=proposal.query,
+        sources=proposal.sources or [],
+        cadence=proposal.cadence,
+        priority=proposal.priority,
+        enabled=proposal.enabled,
+    )
+
+
+def render_topic_preview_row(topic: TopicEntry, proposal: TopicProposal | None) -> str:
+    sources = "".join(
+        f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
+        for source in topic.sources
+    )
+    enabled = "enabled" if topic.enabled else "disabled"
+    action = "New" if proposal and proposal.action == "create_new" else "Update"
+    return f"""<div class="topic-row topic-read-row topic-preview-row" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
+      <div class="topic-cell topic-label"><strong>{escape(topic.label)}</strong> <span class="topic-pending-badge">{escape(action)} pending</span></div>
+      <div class="topic-cell topic-query" title="{escape(topic.query)}">{escape(topic.query)}</div>
+      <div class="topic-cell topic-sources">{sources}</div>
+      <div class="topic-cell"><span class="topic-pill cadence-{escape(topic.cadence)}">{escape(topic.cadence)}</span></div>
+      <div class="topic-cell"><span class="topic-pill priority-{escape(topic.priority)}">{escape(topic.priority)}</span></div>
+      <div class="topic-cell"><span class="topic-status status-{enabled}">{'On' if topic.enabled else 'Off'}</span></div>
+      <div class="topic-actions"><span class="topic-preview-note">Apply to save</span></div>
+    </div>"""
+
+
+def topic_list_summary(total_topics: int, proposal: TopicProposal | None = None) -> str:
+    if pending_topic_preview(proposal) is not None:
+        return f"{total_topics} configured | showing pending TopicAgent preview"
+    return f"{total_topics} configured | expand to search, toggle, or edit"
 
 
 def render_topic_editor_panel(topic: TopicEntry) -> str:
@@ -1924,6 +1981,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-table-head { padding: 5px 10px; background: #f6f8fa; color: #57606a; font-size: 10px; font-weight: 650; text-transform: uppercase; }
 .topic-row { min-height: 30px; padding: 3px 10px; border-top: 1px solid #d8dee4; }
 .topic-read-row:nth-child(odd) { background: #fbfcfd; }
+.topic-preview-row { outline: 1px solid #bf8700; outline-offset: -1px; background: #fff8c5; }
+.topic-pending-badge { display: inline-flex; margin-left: 5px; padding: 0 5px; border: 1px solid #bf8700; border-radius: 999px; color: #9a6700; font-size: 10px; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
+.topic-preview-note { color: #9a6700; font-size: 11px; font-weight: 650; white-space: nowrap; }
 .topic-cell { min-width: 0; font-size: 12px; }
 .topic-label strong, .topic-query { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-label strong { font-size: 12px; }
@@ -1977,6 +2037,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .topic-turn { background: #21262d; border-color: #30363d; }
   .topic-turn-agent { background: #0d263f; border-color: #1f6feb; }
   .topic-table, .topic-read-row:nth-child(odd) { background: #161b22; }
+  .topic-preview-row { background: #2d2300; outline-color: #9e6a03; }
+  .topic-pending-badge { color: #f2cc60; border-color: #9e6a03; }
+  .topic-preview-note { color: #f2cc60; }
   .topic-table-head { background: #21262d; }
   .topic-query { color: #c9d1d9; }
   .topic-edit-link { color: #58a6ff; }
