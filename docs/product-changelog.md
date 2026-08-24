@@ -15,7 +15,7 @@ Completed behavior:
 - Add `config/topics.yaml` as the human-readable Scout topic config.
 - Make `/topics` editable with a one-field fast path for adding topics such as `Datalake operations`.
 - Infer default query, sources, cadence, priority, and enabled state for fast-path topics.
-- Expose advanced add/edit controls for query, source checkboxes, cadence, priority, and enabled state.
+- Keep add-topic minimal; detailed query, source, cadence, priority, and enabled controls are available when editing saved topics.
 - Keep explicit CLI `--topic` overrides working.
 - Let scheduled source jobs select enabled config topics on future runs instead of querying every topic every day.
 - Keep `/topics` read/write only for config management; no `Run now` button in V1.

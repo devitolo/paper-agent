@@ -280,7 +280,7 @@ def render_review_queue(
   <main>
     <header class="topbar">
       <div>
-        <h1 class="brand-title"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Review Queue</span></h1>
+        <h1 class="brand-title"><a class="brand-home" href="/"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Review Queue</span></a></h1>
         <p>{len(cards)} papers | {escape(selected_label(FILTERS, filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}</p>
       </div>
       <form method="get" action="/" class="queue-controls">
@@ -434,7 +434,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
   <main>
     <header class="topbar">
       <div>
-        <h1 class="brand-title"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Health</span></h1>
+        <h1 class="brand-title"><a class="brand-home" href="/"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Health</span></a></h1>
         <p>{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}</p>
       </div>
       <form method="get" action="/health" class="queue-controls">
@@ -491,7 +491,7 @@ def render_topics_page(
     total_topics = len(topics)
     banner = ""
     if saved:
-        banner = '<div class="banner">Topic config saved. Future scheduled runs will use the updated topic rotation.</div>'
+        banner = '<div class="banner">Saved. Changes apply to future scheduled runs.</div>'
     if error:
         banner = f'<div class="banner warning">Topic config was not saved: {escape(error)}</div>'
     return f"""<!doctype html>
@@ -506,7 +506,7 @@ def render_topics_page(
   <main>
     <header class="topbar">
       <div>
-        <h1 class="brand-title"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Scout Topics</span></h1>
+        <h1 class="brand-title"><a class="brand-home" href="/"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Scout Topics</span></a></h1>
         <p>{len(inventory)} sources | {total_topics} configured topics | editable file-backed config</p>
       </div>
       <nav class="queue-controls" aria-label="Primary">
@@ -515,9 +515,6 @@ def render_topics_page(
       </nav>
     </header>
     {banner}
-    <section class="topic-note">
-      Topic changes apply to future scheduled runs.
-    </section>
     {render_topic_add_form()}
     {editor_panel}
     <details class="topic-inventory-details" open>
@@ -593,16 +590,6 @@ def render_topic_add_form() -> str:
         <input type="hidden" name="action" value="add">
         <input name="topic_text" aria-label="Topic" placeholder="Datalake operations" required>
         <button type="submit" class="primary">Add topic</button>
-        <details>
-          <summary>Advanced</summary>
-          <div class="topic-form-grid">
-            <label>Search query<input name="query" placeholder="datalake operations reliability observability production engineering"></label>
-            {render_source_checkboxes(["arxiv", "semantic_scholar", "openalex"])}
-            {render_topic_select("cadence", CADENCES, "daily", "Cadence")}
-            {render_topic_select("priority", PRIORITIES, "normal", "Priority")}
-            <label class="inline-check"><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
-          </div>
-        </details>
       </form>
     </section>"""
 
@@ -688,7 +675,7 @@ def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_
             sources=form.get("sources") or ["arxiv", "semantic_scholar", "openalex"],
             cadence=form.get("cadence", ["daily"])[0],
             priority=form.get("priority", ["normal"])[0],
-            enabled=form.get("enabled", [""])[0] == "1",
+            enabled=form.get("enabled", ["1"])[0] == "1",
         )
         topics.append(topic)
         save_topic_config(topics, config_path)
@@ -1599,7 +1586,8 @@ body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", 
 main { max-width: 1180px; margin: 0 auto; padding: 14px; }
 .topbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 12px; align-items: end; border-bottom: 1px solid #d8dee4; padding-bottom: 8px; margin-bottom: 10px; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 650; }
-.brand-title { display: flex; gap: 10px; align-items: center; }
+.brand-title, .brand-home { display: flex; gap: 10px; align-items: center; }
+.brand-home { color: inherit; text-decoration: none; }
 .brand-logo { display: block; width: 42px; height: 42px; border-radius: 9px; }
 h2 { margin: 0 0 3px; font-size: 15px; font-weight: 650; line-height: 1.25; }
 h3 { margin: 0 0 3px; font-size: 12px; font-weight: 650; color: #57606a; }
@@ -1703,8 +1691,6 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
-.topic-note { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px 9px; margin-bottom: 10px; color: #57606a; }
-.topic-note strong { color: #1f2328; }
 .topic-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0; }
 .topic-tab { text-decoration: none; }
 .topic-sections { display: grid; gap: 10px; }
@@ -1727,9 +1713,6 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-note-text { margin-top: 8px; }
 .topic-add-form { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 7px; align-items: start; }
 .topic-add-form input[name="topic_text"] { min-height: 30px; }
-.topic-add-form details { grid-column: 1 / -1; border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 7px; }
-.topic-add-form summary { cursor: pointer; color: #57606a; font-size: 12px; }
-.topic-form-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) repeat(2, minmax(120px, 0.4fr)) minmax(96px, 0.3fr); gap: 8px; align-items: end; margin-top: 8px; }
 .topic-edit-form { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.4fr) minmax(180px, 0.8fr) 100px 100px 92px auto; gap: 8px; align-items: end; }
 .topic-form-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .topic-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 10px; margin: 0; padding: 0 10px 8px; color: #57606a; font-size: 12px; }
@@ -1768,11 +1751,10 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note, .topic-note-text { color: #8b949e; }
+  .topbar p, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note-text { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .links a, button, select, input, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .health-card, .health-graph, .health-table table, .health-kv, .topic-note, .topic-source, .topic-add-form details, .topic-inventory-details { background: #161b22; color: #e6edf3; border-color: #30363d; }
-  .topic-note strong { color: #e6edf3; }
+  .links a, button, select, input, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .health-card, .health-graph, .health-table table, .health-kv, .topic-source, .topic-inventory-details { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
   .score-secondary { background: transparent; }
   .user-score { background: #0f2a1a; color: #7ee787; border-color: #238636; }
@@ -1814,7 +1796,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-kv { grid-template-columns: 1fr; }
   .topic-columns { grid-template-columns: 1fr; }
   .topic-list { columns: 1; }
-  .topic-add-form, .topic-form-grid, .topic-edit-form, .topic-table-head, .topic-row { grid-template-columns: 1fr; }
+  .topic-add-form, .topic-edit-form, .topic-table-head, .topic-row { grid-template-columns: 1fr; }
   .topic-table-head { display: none; }
   .topic-toolbar, .topic-list-details > summary, .topic-inventory-details > summary { align-items: flex-start; flex-direction: column; }
   .topic-actions, .topic-form-actions { justify-content: flex-start; }

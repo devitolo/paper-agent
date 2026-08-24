@@ -1395,6 +1395,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('class="source-badge source-badge-arxiv"', html)
         self.assertIn('class="action-rail"', html)
         self.assertIn('<h1 class="brand-title">', html)
+        self.assertIn('<a class="brand-home" href="/">', html)
         self.assertIn('srcset="/assets/logo_dark.png"', html)
         self.assertIn('src="/assets/logo_light.png"', html)
         self.assertIn('<span>System</span><strong>72.5</strong>', html)
@@ -1611,16 +1612,22 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("Add Topic", html)
         self.assertIn('name="topic_text"', html)
+        self.assertNotIn("<summary>Advanced</summary>", html)
         self.assertIn('href="/topics?edit=datalake-operations"', html)
         self.assertIn('class="topic-row topic-read-row"', html)
         self.assertIn('class="topic-source topic-list-details"', html)
         self.assertIn("1 configured | expand to search, toggle, or edit", html)
         self.assertIn('title="datalake operations reliability observability production engineering"', html)
         self.assertNotIn('class="topic-source topic-editor-panel"', html)
-        self.assertIn("Topic changes apply to future scheduled runs.", html)
+        self.assertNotIn("Topic changes apply to future scheduled runs.", html)
+        self.assertNotIn('class="topic-note"', html)
         self.assertIn("Datalake operations", html)
         self.assertLess(html.index("Source schedule inventory"), html.index("All Topics"))
         self.assertIn('class="topic-inventory-details" open', html)
+        self.assertIn('<a class="brand-home" href="/">', html)
+
+        saved_html = web.render_topics_page(config_path=config_path, saved=True)
+        self.assertIn("Saved. Changes apply to future scheduled runs.", saved_html)
 
     def test_topics_page_shows_single_selected_editor_panel(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -1648,10 +1655,6 @@ class BackendV2Tests(unittest.TestCase):
             {
                 "action": ["add"],
                 "topic_text": ["datalake operations"],
-                "sources": ["arxiv", "semantic_scholar", "openalex"],
-                "cadence": ["daily"],
-                "priority": ["normal"],
-                "enabled": ["1"],
             },
             config_path=config_path,
         )
@@ -1661,6 +1664,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(loaded[0].label, "Datalake operations")
         self.assertEqual(loaded[0].query, "datalake operations reliability observability production engineering")
         self.assertEqual(loaded[0].sources, ["arxiv", "semantic_scholar", "openalex"])
+        self.assertEqual(loaded[0].cadence, "daily")
+        self.assertEqual(loaded[0].priority, "normal")
+        self.assertTrue(loaded[0].enabled)
 
     def test_topics_post_rejects_duplicate_add(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -2019,7 +2025,7 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page()
 
         self.assertIn("Project Paper Scout Topics", html)
-        self.assertIn("Topic changes apply to future scheduled runs.", html)
+        self.assertNotIn("Topic changes apply to future scheduled runs.", html)
         self.assertIn("Source schedule inventory", html)
         self.assertIn("Add Topic", html)
         self.assertIn('href="/">Review queue</a>', html)
