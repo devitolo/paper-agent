@@ -1752,6 +1752,28 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(proposal.matched_topic_id, "datalake-operations")
         self.assertEqual(proposal.label, "Datalake operations")
 
+    def test_topic_agent_remove_request_disables_existing_topic(self):
+        topics = [
+            TopicEntry(
+                "datalake-operations",
+                "Datalake operations",
+                "datalake operations reliability observability",
+                ["arxiv", "openalex"],
+                enabled=True,
+            )
+        ]
+
+        proposal = suggest_topic_proposal(
+            "remove datalake operations",
+            topics,
+            provider=lambda url, model, prompt, timeout: {"not": "valid"},
+        )
+
+        self.assertEqual(proposal.action, "update_existing")
+        self.assertEqual(proposal.matched_topic_id, "datalake-operations")
+        self.assertFalse(proposal.enabled)
+        self.assertIn("removing this topic", proposal.rationale)
+
     def test_topic_agent_validates_update_matched_topic(self):
         topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"])]
 
@@ -1798,6 +1820,24 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(loaded[0].sources, ["openalex"])
         self.assertEqual(loaded[0].cadence, "weekly")
         self.assertEqual(loaded[0].priority, "high")
+
+    def test_topic_agent_apply_remove_proposal_disables_topic(self):
+        topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"], enabled=True)]
+        proposal = TopicProposal(
+            action="update_existing",
+            matched_topic_id="datalake-operations",
+            label="Datalake operations",
+            query="datalake query",
+            sources=["arxiv"],
+            cadence="daily",
+            priority="normal",
+            enabled=False,
+        )
+
+        updated = apply_topic_proposal(proposal, topics)
+
+        self.assertEqual(len(updated), 1)
+        self.assertFalse(updated[0].enabled)
 
     def test_topic_agent_apply_update_prevents_duplicate_collision(self):
         topics = [

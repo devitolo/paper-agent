@@ -848,6 +848,8 @@ def topic_agent_message(proposal: TopicProposal) -> str:
     if proposal.action == "ask_clarifying_question":
         return proposal.question
     if proposal.action == "update_existing":
+        if not proposal.enabled:
+            return f"I found an existing topic to disable: {proposal.label}."
         return f"I found an existing topic to update: {proposal.label}."
     return f"I prepared a topic proposal: {proposal.label}."
 

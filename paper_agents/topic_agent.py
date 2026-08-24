@@ -151,6 +151,7 @@ def build_topic_prompt(
             "The user describes what they want Project Paper to scout.",
             "Decide whether to create a new topic, update an existing topic, or ask one clarifying question.",
             "Prefer updating an existing topic when the request is a duplicate or close refinement.",
+            "If the user asks to remove, delete, disable, stop, or no longer scout a topic, propose update_existing for the matching topic with enabled false. Do not propose physical deletion.",
             "Return strict JSON only. Do not include markdown.",
             f"Allowed sources: {', '.join(SCOUT_SOURCES)}.",
             f"Allowed cadence values: {', '.join(CADENCES)}.",
@@ -300,6 +301,22 @@ def fallback_topic_proposal(
     error: Exception | None = None,
 ) -> TopicProposal:
     reason = fallback_reason(error)
+    removal_topic = match_removal_topic(user_request, existing_topics)
+    if removal_topic is not None:
+        return TopicProposal(
+            action="update_existing",
+            matched_topic_id=removal_topic.id,
+            label=removal_topic.label,
+            query=removal_topic.query,
+            sources=removal_topic.sources,
+            cadence=removal_topic.cadence,
+            priority=removal_topic.priority,
+            enabled=False,
+            rationale=f"Interpreted the request as removing this topic from future scheduled runs. {reason}",
+            source_rationale="Preserved existing source selection while disabling the topic.",
+            provider="deterministic_fallback",
+            model=model,
+        )
     try:
         topic = create_topic_from_fast_path(user_request, existing_topics=existing_topics)
         return TopicProposal(
@@ -365,6 +382,47 @@ def fallback_reason(error: Exception | None) -> str:
     if len(detail) > 140:
         detail = detail[:137].rstrip() + "..."
     return f"Fallback reason: {detail}"
+
+
+def match_removal_topic(user_request: str, existing_topics: list[TopicEntry]) -> TopicEntry | None:
+    normalized_request = normalize_removal_text(user_request)
+    if not normalized_request:
+        return None
+    removal_terms = ("remove", "delete", "disable", "stop", "turn off", "no longer", "dont scout", "don't scout")
+    if not any(term in normalized_request for term in removal_terms):
+        return None
+    cleaned_request = normalized_request
+    for term in removal_terms:
+        cleaned_request = cleaned_request.replace(term, " ")
+    cleaned_request = " ".join(cleaned_request.split())
+    if not cleaned_request:
+        return None
+    exact = topic_by_label(existing_topics, cleaned_request)
+    if exact is not None:
+        return exact
+    for topic in existing_topics:
+        label = normalize_removal_text(topic.label)
+        query = normalize_removal_text(topic.query)
+        if label and (label in cleaned_request or cleaned_request in label):
+            return topic
+        if query and cleaned_request in query:
+            return topic
+    request_terms = set(cleaned_request.split())
+    best_topic: TopicEntry | None = None
+    best_overlap = 0
+    for topic in existing_topics:
+        topic_terms = set(normalize_removal_text(f"{topic.label} {topic.query}").split())
+        overlap = len(request_terms & topic_terms)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_topic = topic
+    return best_topic if best_overlap >= 2 else None
+
+
+def normalize_removal_text(value: str) -> str:
+    return " ".join(
+        "".join(character.casefold() if character.isalnum() else " " for character in value).split()
+    )
 
 
 def apply_topic_proposal(proposal: TopicProposal, existing_topics: list[TopicEntry]) -> list[TopicEntry]:
