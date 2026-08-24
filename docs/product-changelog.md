@@ -25,6 +25,7 @@ Completed behavior:
 - Refine `/topics` into a collapsed-by-default compact table with one-line rows, source/status/priority chips, quick Enable/Disable actions, and a single focused edit panel.
 - Prevent duplicate topic adds/edits by comparing normalized labels and queries.
 - Treat natural-language `remove`/`delete` as physical removal from `config/topics.yaml`, while `disable`/`turn off` preserves the topic with `enabled: false`.
+- Make TopicAgent's Qwen prompt semantic rather than keyword-driven; deterministic fallback asks a clarifying question for ambiguous change/remove intent instead of guessing.
 
 Backlog:
 

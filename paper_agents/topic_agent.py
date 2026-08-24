@@ -150,9 +150,11 @@ def build_topic_prompt(
             "Project Paper scouts research about AI for SRE, IT operations, observability, incident response, debugging, reliability, infrastructure automation, and engineering workflows.",
             "The user describes what they want Project Paper to scout.",
             "Decide whether to create a new topic, update an existing topic, remove an existing topic, or ask one clarifying question.",
+            "Infer the user's intent semantically from normal language, not by matching exact command words.",
             "Prefer updating an existing topic when the request is a duplicate or close refinement.",
-            "If the user asks to remove, delete, or drop a topic, propose remove_existing for the matching topic.",
-            "If the user asks to disable, turn off, pause, stop scouting, or no longer scout a topic, propose update_existing for the matching topic with enabled false.",
+            "Choose remove_existing when the user means the topic should disappear from managed topic config.",
+            "Choose update_existing with enabled false when the user means the topic should be kept but not selected by future scheduled runs.",
+            "Ask one concise clarifying question when the user intent or matching topic is ambiguous.",
             "Return strict JSON only. Do not include markdown.",
             f"Allowed sources: {', '.join(SCOUT_SOURCES)}.",
             f"Allowed cadence values: {', '.join(CADENCES)}.",
@@ -338,6 +340,22 @@ def fallback_topic_proposal(
             provider="deterministic_fallback",
             model=model,
         )
+    ambiguous_topic = match_related_topic(user_request, existing_topics)
+    if ambiguous_topic is not None and looks_like_topic_change_intent(user_request):
+        return TopicProposal(
+            action="ask_clarifying_question",
+            matched_topic_id=ambiguous_topic.id,
+            question=(
+                f"Do you want to remove {ambiguous_topic.label} from the topic config, "
+                "or keep it but disable it for future scheduled runs?"
+            ),
+            rationale=(
+                "Local Qwen/Ollama was unavailable or returned invalid JSON, and the deterministic fallback "
+                f"could not safely distinguish remove from disable. {reason}"
+            ),
+            provider="deterministic_fallback",
+            model=model,
+        )
     try:
         topic = create_topic_from_fast_path(user_request, existing_topics=existing_topics)
         return TopicProposal(
@@ -434,6 +452,20 @@ def match_topic_action_request(user_request: str, existing_topics: list[TopicEnt
         if query and cleaned_request in query:
             return topic
     request_terms = set(cleaned_request.split())
+    return best_related_topic(request_terms, existing_topics)
+
+
+def match_related_topic(user_request: str, existing_topics: list[TopicEntry]) -> TopicEntry | None:
+    request_terms = set(normalize_removal_text(user_request).split())
+    if not request_terms:
+        return None
+    exact = topic_by_label(existing_topics, " ".join(request_terms))
+    if exact is not None:
+        return exact
+    return best_related_topic(request_terms, existing_topics)
+
+
+def best_related_topic(request_terms: set[str], existing_topics: list[TopicEntry]) -> TopicEntry | None:
     best_topic: TopicEntry | None = None
     best_overlap = 0
     for topic in existing_topics:
@@ -443,6 +475,36 @@ def match_topic_action_request(user_request: str, existing_topics: list[TopicEnt
             best_overlap = overlap
             best_topic = topic
     return best_topic if best_overlap >= 2 else None
+
+
+def looks_like_topic_change_intent(user_request: str) -> bool:
+    normalized = normalize_removal_text(user_request)
+    if not normalized:
+        return False
+    terms = set(normalized.split())
+    change_terms = {
+        "change",
+        "update",
+        "edit",
+        "adjust",
+        "replace",
+        "less",
+        "more",
+        "not",
+        "dont",
+        "don",
+        "anymore",
+        "longer",
+        "care",
+        "irrelevant",
+        "wrong",
+        "bad",
+        "stop",
+        "remove",
+        "delete",
+        "disable",
+    }
+    return bool(terms & change_terms) or "do not" in normalized or "don't" in user_request.casefold()
 
 
 def normalize_removal_text(value: str) -> str:

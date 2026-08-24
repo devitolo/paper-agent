@@ -1705,6 +1705,7 @@ class BackendV2Tests(unittest.TestCase):
         def provider(url, model, prompt, timeout):
             self.assertIn("data lake or lakehouse", prompt)
             self.assertIn("lakehouse reliability", prompt)
+            self.assertIn("Infer the user's intent semantically", prompt)
             return {
                 "action": "create_new",
                 "label": "Lakehouse reliability",
@@ -1727,6 +1728,38 @@ class BackendV2Tests(unittest.TestCase):
         )
 
         self.assertEqual(proposal.label, "Lakehouse reliability")
+
+    def test_topic_agent_llm_can_remove_without_remove_keyword(self):
+        topics = [
+            TopicEntry(
+                "datalake-operations",
+                "Datalake operations",
+                "datalake operations reliability observability",
+                ["arxiv", "openalex"],
+                enabled=True,
+            )
+        ]
+
+        def provider(url, model, prompt, timeout):
+            self.assertIn("Infer the user's intent semantically", prompt)
+            self.assertNotIn("If the user asks to remove, delete, or drop", prompt)
+            return {
+                "action": "remove_existing",
+                "matched_topic_id": "datalake-operations",
+                "label": "Datalake operations",
+                "query": "datalake operations reliability observability",
+                "sources": ["arxiv", "openalex"],
+                "cadence": "daily",
+                "priority": "normal",
+                "enabled": True,
+                "rationale": "The user no longer wants this topic managed.",
+                "source_rationale": "The topic is being removed from all sources.",
+            }
+
+        proposal = suggest_topic_proposal("I do not care about datalake operations anymore", topics, provider=provider)
+
+        self.assertEqual(proposal.action, "remove_existing")
+        self.assertEqual(proposal.matched_topic_id, "datalake-operations")
 
     def test_topic_agent_invalid_json_falls_back_to_deterministic_proposal(self):
         def provider(url, model, prompt, timeout):
@@ -1814,6 +1847,27 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(proposal.action, "update_existing")
         self.assertEqual(proposal.matched_topic_id, "datalake-operations")
         self.assertFalse(proposal.enabled)
+
+    def test_topic_agent_fallback_asks_when_change_intent_is_ambiguous(self):
+        topics = [
+            TopicEntry(
+                "datalake-operations",
+                "Datalake operations",
+                "datalake operations reliability observability",
+                ["arxiv", "openalex"],
+                enabled=True,
+            )
+        ]
+
+        proposal = suggest_topic_proposal(
+            "I do not care about datalake operations anymore",
+            topics,
+            provider=lambda url, model, prompt, timeout: {"not": "valid"},
+        )
+
+        self.assertEqual(proposal.action, "ask_clarifying_question")
+        self.assertIn("remove Datalake operations", proposal.question)
+        self.assertIn("disable it", proposal.question)
 
     def test_topic_agent_validates_update_matched_topic(self):
         topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"])]
