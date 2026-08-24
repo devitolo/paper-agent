@@ -17,6 +17,7 @@ from paper_agents.topic_inventory import scout_topic_inventory
 from paper_agents.topic_agent import (
     TopicProposal,
     apply_topic_proposal,
+    normalize_topic_conversation,
     suggest_topic_proposal,
     topic_proposal_from_json,
     topic_proposal_to_json,
@@ -136,8 +137,16 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 try:
                     action = form.get("action", [""])[0]
                     if action == "propose":
-                        proposal = propose_topic_form(form)
-                        self.respond_html(render_topics_page(proposal=proposal, request_text=form.get("request_text", [""])[0]))
+                        conversation = topic_conversation_from_form(form)
+                        request_text = form.get("request_text", [""])[0]
+                        proposal = propose_topic_form(form, conversation=conversation)
+                        updated_conversation = append_topic_agent_turns(conversation, request_text, proposal)
+                        self.respond_html(
+                            render_topics_page(
+                                proposal=proposal,
+                                conversation=updated_conversation,
+                            )
+                        )
                         return
                     if action == "apply_proposal":
                         apply_topic_proposal_form(form)
@@ -503,6 +512,7 @@ def render_topics_page(
     edit_id: str | None = None,
     proposal: TopicProposal | None = None,
     request_text: str = "",
+    conversation: list[dict[str, str]] | None = None,
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
 ) -> str:
     inventory = scout_topic_inventory(config_path=config_path)
@@ -545,7 +555,7 @@ def render_topics_page(
       </nav>
     </header>
     {banner}
-    {render_topic_agent_panel(request_text, proposal)}
+    {render_topic_agent_panel(request_text, proposal, conversation or [])}
     {editor_panel}
     <details class="topic-inventory-details" open>
       <summary>Source schedule inventory</summary>
@@ -628,16 +638,26 @@ def render_topic_source_section(item: dict[str, Any]) -> str:
     </section>"""
 
 
-def render_topic_agent_panel(request_text: str = "", proposal: TopicProposal | None = None) -> str:
+def render_topic_agent_panel(
+    request_text: str = "",
+    proposal: TopicProposal | None = None,
+    conversation: list[dict[str, str]] | None = None,
+) -> str:
     proposal_html = render_topic_proposal_panel(proposal)
+    conversation = normalize_topic_conversation(conversation or [])
+    conversation_html = render_topic_conversation(conversation)
+    conversation_json = topic_conversation_to_json(conversation)
+    prompt = "Reply to TopicAgent" if proposal and proposal.action == "ask_clarifying_question" else "What do you want Project Paper to scout?"
     return f"""<section class="topic-source topic-editor">
       <div class="topic-source-head">
         <h2>Topic Agent</h2>
         <span>Describe what to scout; Qwen proposes the config</span>
       </div>
+      {conversation_html}
       <form method="post" action="/topics" class="topic-agent-form">
         <input type="hidden" name="action" value="propose">
-        <label>What do you want Project Paper to scout?
+        <input type="hidden" name="conversation_json" value="{escape(conversation_json)}">
+        <label>{escape(prompt)}
           <textarea name="request_text" required placeholder="datalake reliability and operations">{escape(request_text)}</textarea>
         </label>
         <button type="submit" class="primary">Ask TopicAgent</button>
@@ -645,6 +665,16 @@ def render_topic_agent_panel(request_text: str = "", proposal: TopicProposal | N
       </form>
       {proposal_html}
     </section>"""
+
+
+def render_topic_conversation(conversation: list[dict[str, str]]) -> str:
+    if not conversation:
+        return ""
+    turns = "".join(
+        f'<div class="topic-turn topic-turn-{escape(turn["role"])}"><span>{escape(turn["role"])}</span><p>{escape(turn["content"])}</p></div>'
+        for turn in conversation
+    )
+    return f'<div class="topic-conversation" aria-label="TopicAgent conversation">{turns}</div>'
 
 
 def render_topic_proposal_panel(proposal: TopicProposal | None) -> str:
@@ -766,10 +796,15 @@ def render_topic_select(name: str, choices: tuple[str, ...], selected_value: str
 def propose_topic_form(
     form: dict[str, list[str]],
     *,
+    conversation: list[dict[str, str]] | None = None,
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
 ) -> TopicProposal:
     topics = load_topic_config_or_seed(config_path)
-    return suggest_topic_proposal(form.get("request_text", [""])[0], topics)
+    return suggest_topic_proposal(
+        form.get("request_text", [""])[0],
+        topics,
+        conversation=conversation,
+    )
 
 
 def apply_topic_proposal_form(
@@ -780,6 +815,41 @@ def apply_topic_proposal_form(
     topics = load_topic_config_or_seed(config_path)
     proposal = topic_proposal_from_json(form.get("proposal_json", ["{}"])[0], topics)
     save_topic_config(apply_topic_proposal(proposal, topics), config_path)
+
+
+def topic_conversation_from_form(form: dict[str, list[str]]) -> list[dict[str, str]]:
+    raw = form.get("conversation_json", ["[]"])[0]
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return normalize_topic_conversation([turn for turn in decoded if isinstance(turn, dict)])
+
+
+def topic_conversation_to_json(conversation: list[dict[str, str]]) -> str:
+    return json.dumps(normalize_topic_conversation(conversation), separators=(",", ":"))
+
+
+def append_topic_agent_turns(
+    conversation: list[dict[str, str]],
+    user_text: str,
+    proposal: TopicProposal,
+) -> list[dict[str, str]]:
+    turns = normalize_topic_conversation(conversation)
+    if user_text.strip():
+        turns.append({"role": "user", "content": user_text.strip()})
+    turns.append({"role": "agent", "content": topic_agent_message(proposal)})
+    return normalize_topic_conversation(turns)
+
+
+def topic_agent_message(proposal: TopicProposal) -> str:
+    if proposal.action == "ask_clarifying_question":
+        return proposal.question
+    if proposal.action == "update_existing":
+        return f"I found an existing topic to update: {proposal.label}."
+    return f"I prepared a topic proposal: {proposal.label}."
 
 
 def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> None:
@@ -1832,6 +1902,11 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-agent-form { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 7px; align-items: end; }
 .topic-agent-form textarea { min-height: 38px; }
 .topic-agent-status { grid-column: 1 / -1; margin: 0; color: #57606a; font-size: 12px; }
+.topic-conversation { display: grid; gap: 5px; margin-bottom: 8px; }
+.topic-turn { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; align-items: start; padding: 5px 7px; border: 1px solid #d8dee4; border-radius: 6px; background: #f6f8fa; }
+.topic-turn span { color: #57606a; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.topic-turn p { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.topic-turn-agent { background: #eef6ff; border-color: #b6e3ff; }
 .topic-proposal-panel { margin-top: 10px; padding-top: 10px; border-top: 1px solid #d8dee4; }
 .topic-proposal-grid { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 5px 10px; margin: 0 0 8px; }
 .topic-proposal-grid dt { color: #57606a; font-weight: 650; }
@@ -1897,6 +1972,8 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-table th, .health-table td { border-color: #30363d; }
   .topic-table, .topic-table-head, .topic-row { border-color: #30363d; }
   .topic-proposal-panel { border-color: #30363d; }
+  .topic-turn { background: #21262d; border-color: #30363d; }
+  .topic-turn-agent { background: #0d263f; border-color: #1f6feb; }
   .topic-table, .topic-read-row:nth-child(odd) { background: #161b22; }
   .topic-table-head { background: #21262d; }
   .topic-query { color: #c9d1d9; }

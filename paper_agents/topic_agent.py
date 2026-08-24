@@ -97,6 +97,7 @@ def suggest_topic_proposal(
     user_request: str,
     existing_topics: list[TopicEntry],
     *,
+    conversation: list[dict[str, str]] | None = None,
     provider: TopicProvider | None = None,
     model: str | None = None,
     ollama_url: str | None = None,
@@ -113,7 +114,7 @@ def suggest_topic_proposal(
     selected_url = ollama_url or topic_ollama_url()
     selected_timeout = timeout or topic_timeout_seconds()
     topic_provider = provider or call_ollama_topic_json
-    prompt = build_topic_prompt(user_request, existing_topics)
+    prompt = build_topic_prompt(user_request, existing_topics, conversation=conversation)
     try:
         raw = topic_provider(selected_url, selected_model, prompt, selected_timeout)
         proposal = validate_topic_proposal(raw, existing_topics, provider="ollama", model=selected_model)
@@ -122,8 +123,14 @@ def suggest_topic_proposal(
         return fallback_topic_proposal(user_request, existing_topics, model=selected_model, error=error)
 
 
-def build_topic_prompt(user_request: str, existing_topics: list[TopicEntry]) -> str:
+def build_topic_prompt(
+    user_request: str,
+    existing_topics: list[TopicEntry],
+    *,
+    conversation: list[dict[str, str]] | None = None,
+) -> str:
     existing = [topic.as_dict() for topic in existing_topics]
+    turns = normalize_topic_conversation(conversation or [])
     schema = {
         "action": "create_new|update_existing|ask_clarifying_question",
         "matched_topic_id": "existing topic id or null",
@@ -150,6 +157,7 @@ def build_topic_prompt(user_request: str, existing_topics: list[TopicEntry]) -> 
             f"Allowed priority values: {', '.join(PRIORITIES)}.",
             f"JSON schema: {json.dumps(schema, separators=(',', ':'))}",
             f"Existing topics: {json.dumps(existing, separators=(',', ':'))}",
+            f"Conversation so far: {json.dumps(turns, separators=(',', ':'))}",
             f"User request: {user_request.strip()}",
         ]
     )
@@ -269,6 +277,19 @@ def parse_enabled(value: Any) -> bool:
         if normalized in {"true", "1", "yes", "on", "enabled"}:
             return True
     return bool(value)
+
+
+def normalize_topic_conversation(raw_turns: list[dict[str, Any]]) -> list[dict[str, str]]:
+    turns: list[dict[str, str]] = []
+    for raw in raw_turns[-10:]:
+        role = str(raw.get("role") or "").strip().casefold()
+        if role not in {"user", "agent"}:
+            continue
+        content = " ".join(str(raw.get("content") or "").strip().split())
+        if not content:
+            continue
+        turns.append({"role": role, "content": content[:1000]})
+    return turns
 
 
 def fallback_topic_proposal(

@@ -14,6 +14,7 @@ Completed behavior:
 
 - Add `config/topics.yaml` as the human-readable Scout topic config.
 - Make `/topics` editable with a Qwen-powered TopicAgent prompt for adding or updating topics from natural language.
+- Keep TopicAgent prompt, transcript, clarifying questions, and proposal inside one conversational panel.
 - Use local Ollama/Qwen on the Mini, defaulting to `qwen2.5:1.5b-instruct`, to propose structured topic config.
 - Require user approval before saving any TopicAgent proposal.
 - Validate model JSON and fall back to deterministic proposal logic when the model response is invalid or unavailable.

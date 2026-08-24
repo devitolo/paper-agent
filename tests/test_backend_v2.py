@@ -1701,6 +1701,33 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(proposal.provider, "ollama")
         self.assertEqual(proposal.model, "test-qwen")
 
+    def test_topic_agent_prompt_includes_conversation_turns(self):
+        def provider(url, model, prompt, timeout):
+            self.assertIn("data lake or lakehouse", prompt)
+            self.assertIn("lakehouse reliability", prompt)
+            return {
+                "action": "create_new",
+                "label": "Lakehouse reliability",
+                "query": "lakehouse reliability observability production engineering",
+                "sources": ["openalex"],
+                "cadence": "daily",
+                "priority": "normal",
+                "enabled": True,
+            }
+
+        proposal = suggest_topic_proposal(
+            "lakehouse reliability",
+            [],
+            conversation=[
+                {"role": "user", "content": "datalake"},
+                {"role": "agent", "content": "Do you mean data lake or lakehouse operations?"},
+            ],
+            provider=provider,
+            model="test-qwen",
+        )
+
+        self.assertEqual(proposal.label, "Lakehouse reliability")
+
     def test_topic_agent_invalid_json_falls_back_to_deterministic_proposal(self):
         def provider(url, model, prompt, timeout):
             raise ValueError("bad json")
@@ -1815,6 +1842,57 @@ class BackendV2Tests(unittest.TestCase):
         self.assertLess(html.index("What do you want Project Paper to scout?"), html.index("TopicAgent Proposal"))
         self.assertLess(html.index("TopicAgent Proposal"), html.index("Source schedule inventory"))
         self.assertNotIn('class="topic-source topic-proposal-panel"', html)
+        self.assertIn('name="conversation_json"', html)
+
+    def test_topics_page_renders_topic_agent_conversation(self):
+        proposal = TopicProposal(
+            action="ask_clarifying_question",
+            question="Do you mean lakehouse reliability or data pipeline incidents?",
+            rationale="The request was broad.",
+        )
+
+        html = web.render_topics_page(
+            proposal=proposal,
+            conversation=[
+                {"role": "user", "content": "datalake"},
+                {"role": "agent", "content": "Do you mean lakehouse reliability or data pipeline incidents?"},
+            ],
+        )
+
+        self.assertIn("TopicAgent conversation", html)
+        self.assertIn("Reply to TopicAgent", html)
+        self.assertIn("Do you mean lakehouse reliability", html)
+        self.assertIn('name="conversation_json"', html)
+
+    def test_topic_agent_conversation_form_continues_after_question(self):
+        def provider(url, model, prompt, timeout):
+            self.assertIn("data pipeline incidents", prompt)
+            return {
+                "action": "create_new",
+                "label": "Data pipeline incidents",
+                "query": "data pipeline incidents reliability observability production engineering",
+                "sources": ["arxiv", "openalex"],
+                "cadence": "daily",
+                "priority": "normal",
+                "enabled": True,
+            }
+
+        conversation = [
+            {"role": "user", "content": "datalake"},
+            {"role": "agent", "content": "Do you mean lakehouse reliability or data pipeline incidents?"},
+        ]
+        proposal = suggest_topic_proposal(
+            "data pipeline incidents",
+            [],
+            conversation=conversation,
+            provider=provider,
+            model="test-qwen",
+        )
+        updated = web.append_topic_agent_turns(conversation, "data pipeline incidents", proposal)
+
+        self.assertEqual(proposal.label, "Data pipeline incidents")
+        self.assertEqual(updated[-2]["content"], "data pipeline incidents")
+        self.assertIn("I prepared a topic proposal", updated[-1]["content"])
 
     def test_topics_post_rejects_duplicate_add(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
