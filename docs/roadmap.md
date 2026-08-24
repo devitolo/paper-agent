@@ -45,13 +45,11 @@ Status: Implemented as V2 backend.
 - Compare provider quota per useful paper.
 - Monitor weekly Semantic Scholar runs for API-key/rate-limit reliability before increasing cadence.
 - Decide whether any non-arXiv source beyond weekly OpenAlex/Semantic Scholar should graduate into more frequent scheduled operation.
-- Add user-editable Scout topic configuration. Planned/backlog.
-  - Allow users to add or disable topics from the UI or a simple config file.
-  - Support per-source topic selection for arXiv, OpenAlex, and Semantic Scholar.
-  - Add topic priority/cadence controls for daily, weekly, and manual use.
-  - Support ad hoc one-off Scout topics for interests such as `datalake`.
-  - Track topic performance over time before enabling automatic Scout learning.
-  - Track TopicAgent proposal quality; it now uses local Ollama/Qwen on the Mini, likely `qwen2.5:1.5b-instruct`, proposes structured topic config only, requires user approval before save, and falls back to deterministic defaults when model JSON is invalid.
+- Add user-editable Scout topic configuration. Implemented as Topic Management V1.
+  - `/topics` uses local Ollama/Qwen TopicAgent by default, requires approval before save, and keeps manual edit/toggle controls as an escape hatch.
+  - Supports per-source topic selection for arXiv, OpenAlex, and Semantic Scholar, plus priority/cadence controls for daily, weekly, and manual use.
+  - Supports ad hoc topics such as `datalake` for future scheduled runs; explicit CLI `--topic` remains available for one-off Scout runs.
+  - Continue tracking TopicAgent proposal quality and per-topic funnel performance before enabling automatic Scout learning.
 
 ## Phase 4: Automated Acquisition
 

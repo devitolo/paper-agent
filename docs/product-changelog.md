@@ -13,19 +13,23 @@ Decision: Scout topic steering should start as a UI-first, file-backed workflow 
 Completed behavior:
 
 - Add `config/topics.yaml` as the human-readable Scout topic config.
-- Make `/topics` editable with a Qwen-powered TopicAgent prompt for adding or updating topics from natural language.
+- Make `/topics` the Topic Management page, with source schedule inventory above All Topics.
+- Make the default flow a Qwen-powered TopicAgent prompt for adding, updating, disabling, or removing topics from natural language.
 - Keep TopicAgent prompt, transcript, clarifying questions, and proposal inside one conversational panel.
 - Use local Ollama/Qwen on the Mini, defaulting to `qwen2.5:1.5b-instruct`, to propose structured topic config.
+- Support TopicAgent actions `create_new`, `update_existing`, `remove_existing`, and `ask_clarifying_question`; disabling is an update with `enabled: false`.
 - Require user approval before saving any TopicAgent proposal.
 - Validate model JSON and fall back to deterministic proposal logic when the model response is invalid or unavailable.
 - Keep manual detailed query, source, cadence, priority, and enabled controls available as an edit escape hatch.
 - Keep explicit CLI `--topic` overrides working.
 - Let scheduled source jobs select enabled config topics on future runs instead of querying every topic every day.
 - Keep `/topics` read/write only for config management; no `Run now` button in V1.
-- Refine `/topics` into a collapsed-by-default compact table with one-line rows, source/status/priority chips, quick Enable/Disable actions, and a single focused edit panel.
+- Refine `/topics` into a collapsed-by-default compact All Topics table with one-line rows, source/status/priority chips, quick Enable/Disable actions, and a single focused edit panel.
 - Prevent duplicate topic adds/edits by comparing normalized labels and queries.
-- Treat natural-language `remove`/`delete` as physical removal from `config/topics.yaml`, while `disable`/`turn off` preserves the topic with `enabled: false`.
-- Make TopicAgent's Qwen prompt semantic rather than keyword-driven; deterministic fallback asks a clarifying question for ambiguous change/remove intent instead of guessing.
+- Treat natural-language `remove`/`delete`/`drop` as physical removal from `config/topics.yaml`, while `disable`/`turn off`/`pause` preserves the topic with `enabled: false`.
+- Make TopicAgent's Qwen prompt semantic rather than keyword-driven; deterministic fallback is a safety path for safe creates/duplicates/explicit actions and asks a clarifying question for ambiguous change/remove intent instead of guessing.
+- Preview pending TopicAgent changes in the topic list before Apply.
+- Keep `/topics` scoped to future scheduled runs; no Scout run starts from the UI.
 
 Backlog:
 
