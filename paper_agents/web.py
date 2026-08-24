@@ -105,6 +105,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     render_topics_page(
                         saved=params.get("saved", [None])[0] == "1",
                         error=params.get("error", [None])[0],
+                        edit_id=params.get("edit", [None])[0],
                     )
                 )
                 return
@@ -468,7 +469,13 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 </html>"""
 
 
-def render_topics_page(*, saved: bool = False, error: str | None = None, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> str:
+def render_topics_page(
+    *,
+    saved: bool = False,
+    error: str | None = None,
+    edit_id: str | None = None,
+    config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
+) -> str:
     inventory = scout_topic_inventory(config_path=config_path)
     topics = load_topic_config_or_seed(config_path)
     tabs = "".join(
@@ -476,7 +483,7 @@ def render_topics_page(*, saved: bool = False, error: str | None = None, config_
         for item in inventory
     )
     sections = "".join(render_topic_source_section(item) for item in inventory)
-    topic_rows = "".join(render_topic_edit_row(topic) for topic in topics)
+    topic_rows = "".join(render_topic_row(topic, edit_id=edit_id) for topic in topics)
     total_topics = len(topics)
     banner = ""
     if saved:
@@ -515,8 +522,28 @@ def render_topics_page(*, saved: bool = False, error: str | None = None, config_
         <h2>All Topics</h2>
         <span>Edit config rows</span>
       </div>
-      <div class="topic-table">{topic_rows}</div>
+      <div class="topic-toolbar">
+        <label>Search<input id="topic-search" type="search" placeholder="Filter topics"></label>
+        <span>Read-first list. Use Edit to expand one row.</span>
+      </div>
+      <div class="topic-table">
+        <div class="topic-table-head">
+          <span>Label</span><span>Query</span><span>Sources</span><span>Cadence</span><span>Priority</span><span>Enabled</span><span>Actions</span>
+        </div>
+        {topic_rows}
+      </div>
     </section>
+    <script>
+      const topicSearch = document.getElementById("topic-search");
+      if (topicSearch) {{
+        topicSearch.addEventListener("input", () => {{
+          const needle = topicSearch.value.trim().toLowerCase();
+          document.querySelectorAll(".topic-row").forEach((row) => {{
+            row.hidden = needle && !row.dataset.topicText.includes(needle);
+          }});
+        }});
+      }}
+    </script>
   </main>
 </body>
 </html>"""
@@ -572,9 +599,37 @@ def render_topic_add_form() -> str:
     </section>"""
 
 
+def render_topic_row(topic: TopicEntry, *, edit_id: str | None) -> str:
+    if topic.id == edit_id:
+        return render_topic_edit_row(topic)
+    sources = "".join(
+        f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
+        for source in topic.sources
+    )
+    enabled = "enabled" if topic.enabled else "disabled"
+    toggle_label = "Disable" if topic.enabled else "Enable"
+    next_enabled = "0" if topic.enabled else "1"
+    return f"""<div class="topic-row topic-read-row" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
+      <div class="topic-cell topic-label"><strong>{escape(topic.label)}</strong></div>
+      <div class="topic-cell topic-query">{escape(topic.query)}</div>
+      <div class="topic-cell topic-sources">{sources}</div>
+      <div class="topic-cell"><span class="topic-pill cadence-{escape(topic.cadence)}">{escape(topic.cadence)}</span></div>
+      <div class="topic-cell"><span class="topic-pill priority-{escape(topic.priority)}">{escape(topic.priority)}</span></div>
+      <div class="topic-cell"><span class="topic-status status-{enabled}">{enabled}</span></div>
+      <div class="topic-actions">
+        <a class="secondary-link" href="/topics?edit={escape(topic.id)}">Edit</a>
+        <form method="post" action="/topics" class="topic-toggle-form">
+          <input type="hidden" name="action" value="toggle">
+          <input type="hidden" name="topic_id" value="{escape(topic.id)}">
+          <input type="hidden" name="enabled" value="{next_enabled}">
+          <button type="submit" class="secondary">{toggle_label}</button>
+        </form>
+      </div>
+    </div>"""
+
+
 def render_topic_edit_row(topic: TopicEntry) -> str:
-    enabled_label = "enabled" if topic.enabled else "disabled"
-    return f"""<form method="post" action="/topics" class="topic-row">
+    return f"""<form method="post" action="/topics" class="topic-row topic-edit-row" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
       <input type="hidden" name="action" value="update">
       <input type="hidden" name="topic_id" value="{escape(topic.id)}">
       <label>Label<input name="label" value="{escape(topic.label)}" required></label>
@@ -582,8 +637,11 @@ def render_topic_edit_row(topic: TopicEntry) -> str:
       <div>{render_source_checkboxes(topic.sources)}</div>
       {render_topic_select("cadence", CADENCES, topic.cadence, "Cadence")}
       {render_topic_select("priority", PRIORITIES, topic.priority, "Priority")}
-      <label class="inline-check"><input type="checkbox" name="enabled" value="1" {'checked' if topic.enabled else ''}> {enabled_label}</label>
-      <button type="submit" class="secondary">Save</button>
+      <label class="inline-check"><input type="checkbox" name="enabled" value="1" {'checked' if topic.enabled else ''}> Enabled</label>
+      <div class="topic-actions">
+        <button type="submit" class="primary">Save</button>
+        <a class="secondary-link" href="/topics">Cancel</a>
+      </div>
     </form>"""
 
 
@@ -635,6 +693,25 @@ def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_
                 cadence=form.get("cadence", ["daily"])[0],
                 priority=form.get("priority", ["normal"])[0],
                 enabled=form.get("enabled", [""])[0] == "1",
+            )
+            save_topic_config(topics, config_path)
+            return
+        raise ValueError(f"Unknown topic id: {topic_id}")
+    if action == "toggle":
+        topic_id = form.get("topic_id", [""])[0]
+        enabled = form.get("enabled", [""])[0] == "1"
+        for index, topic in enumerate(topics):
+            if topic.id != topic_id:
+                continue
+            topics[index] = TopicEntry(
+                id=topic.id,
+                label=topic.label,
+                query=topic.query,
+                sources=topic.sources,
+                cadence=topic.cadence,
+                priority=topic.priority,
+                enabled=enabled,
+                note=topic.note,
             )
             save_topic_config(topics, config_path)
             return
@@ -1543,15 +1620,15 @@ button.secondary { background: #f6f8fa; }
 .feedback-meta { border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 6px; color: #57606a; background: #ffffff; font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; }
 .tags, .links { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .tag { border: 1px solid #d8dee4; color: #57606a; border-radius: 999px; padding: 1px 6px; font-size: 11px; }
-.source-badge { border-radius: 999px; padding: 1px 7px; font-size: 11px; font-weight: 650; }
+.source-badge { border-radius: 999px; padding: 1px 7px; font-size: 11px; font-weight: 650; border: 1px solid transparent; white-space: nowrap; }
 .source-badge::before { margin-right: 4px; }
-.source-badge-arxiv { color: #8a4600; background: #fff1d6; border: 1px solid #d4a72c; }
+.source-badge-arxiv { color: #8a3f00; background: #fff0c2; border-color: #d29922; }
 .source-badge-arxiv::before { content: "A"; }
-.source-badge-openalex { color: #0969da; background: #ddf4ff; border: 1px solid #54aeef; }
+.source-badge-openalex { color: #075985; background: #dff7ff; border-color: #38bdf8; }
 .source-badge-openalex::before { content: "O"; }
-.source-badge-semantic-scholar { color: #8250df; background: #fbefff; border: 1px solid #d8b9ff; }
+.source-badge-semantic-scholar { color: #6d28d9; background: #f1e8ff; border-color: #c4b5fd; }
 .source-badge-semantic-scholar::before { content: "S"; }
-.source-badge-unknown { color: #57606a; background: #f6f8fa; border: 1px solid #d8dee4; }
+.source-badge-unknown { color: #57606a; background: #f6f8fa; border-color: #d8dee4; }
 .source-badge-unknown::before { content: "?"; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
 .summary-grid section { min-width: 0; }
@@ -1630,9 +1707,30 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-add-form details { border: 1px solid #d8dee4; border-radius: 5px; padding: 6px 8px; }
 .topic-add-form summary { cursor: pointer; color: #57606a; font-size: 12px; }
 .topic-form-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) repeat(2, minmax(120px, 0.4fr)) minmax(96px, 0.3fr); gap: 8px; align-items: end; margin-top: 8px; }
-.topic-table { display: grid; gap: 6px; }
-.topic-row { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.3fr) minmax(180px, 0.8fr) 100px 100px 92px 62px; gap: 6px; align-items: end; border-top: 1px solid #d8dee4; padding-top: 6px; }
-.topic-row:first-child { border-top: 0; padding-top: 0; }
+.topic-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 10px; margin: 6px 0 8px; color: #57606a; font-size: 12px; }
+.topic-toolbar label { max-width: 280px; width: 100%; }
+.topic-table { display: grid; border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; background: #ffffff; }
+.topic-table-head, .topic-row { display: grid; grid-template-columns: minmax(140px, 0.85fr) minmax(240px, 1.45fr) minmax(160px, 0.8fr) 86px 86px 82px 132px; gap: 8px; align-items: center; }
+.topic-table-head { padding: 6px 8px; background: #f6f8fa; color: #57606a; font-size: 11px; font-weight: 650; text-transform: uppercase; }
+.topic-row { min-height: 36px; padding: 6px 8px; border-top: 1px solid #d8dee4; }
+.topic-read-row:nth-child(odd) { background: #fbfcfd; }
+.topic-cell { min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.topic-label strong { font-size: 12px; }
+.topic-query { color: #3f4650; }
+.topic-sources { display: flex; gap: 4px; flex-wrap: wrap; }
+.topic-edit-row { grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.3fr) minmax(180px, 0.8fr) 100px 100px 92px 116px; align-items: end; background: #f0f7ff; }
+.topic-actions { display: flex; gap: 5px; align-items: center; justify-content: flex-end; }
+.topic-actions .secondary-link, .topic-actions button { min-height: 24px; padding: 0 7px; font-size: 12px; }
+.topic-toggle-form { margin: 0; }
+.topic-pill, .topic-status { display: inline-flex; align-items: center; min-height: 20px; border-radius: 999px; padding: 0 7px; border: 1px solid #d8dee4; font-size: 11px; font-weight: 650; text-transform: lowercase; white-space: nowrap; }
+.cadence-daily { color: #0969da; background: #ddf4ff; border-color: #54aeef; }
+.cadence-weekly { color: #8250df; background: #fbefff; border-color: #d8b9ff; }
+.cadence-manual { color: #57606a; background: #f6f8fa; border-color: #d8dee4; }
+.priority-high { color: #a40e26; background: #ffebe9; border-color: #ff8182; }
+.priority-normal { color: #1a7f37; background: #dafbe1; border-color: #4ac26b; }
+.priority-low { color: #57606a; background: #f6f8fa; border-color: #d8dee4; }
+.status-enabled { color: #116329; background: #dafbe1; border-color: #4ac26b; }
+.status-disabled { color: #6e7781; background: #f6f8fa; border-color: #d8dee4; }
 .source-checks { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; padding: 0; border: 0; min-width: 0; }
 .source-checks legend { color: #57606a; font-size: 12px; padding: 0; margin-bottom: 3px; }
 .inline-check { display: inline-flex; grid-auto-flow: column; gap: 4px; align-items: center; color: #57606a; font-size: 12px; }
@@ -1648,9 +1746,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   button.secondary, .score { background: #21262d; }
   .score-secondary { background: transparent; }
   .user-score { background: #0f2a1a; color: #7ee787; border-color: #238636; }
-  .source-badge-arxiv { color: #f0b72f; background: #2d2300; border-color: #9e6a03; }
-  .source-badge-openalex { color: #79c0ff; background: #0d263f; border-color: #1f6feb; }
-  .source-badge-semantic-scholar { color: #d8b9ff; background: #2a163f; border-color: #8250df; }
+  .source-badge-arxiv { color: #ffd166; background: #352400; border-color: #b88700; }
+  .source-badge-openalex { color: #7dd3fc; background: #082f49; border-color: #0284c7; }
+  .source-badge-semantic-scholar { color: #d8b4fe; background: #2e1065; border-color: #7e22ce; }
   .source-badge-unknown { color: #8b949e; background: #21262d; border-color: #30363d; }
   .chart-axis { stroke: #8b949e; }
   .chart-grid { stroke: #30363d; opacity: 1; }
@@ -1661,7 +1759,16 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-warnings { background: #2d2300; border-color: #9e6a03; }
   .health-table th { background: #21262d; }
   .health-table th, .health-table td { border-color: #30363d; }
-  .topic-row { border-color: #30363d; }
+  .topic-table, .topic-table-head, .topic-row { border-color: #30363d; }
+  .topic-table, .topic-read-row:nth-child(odd) { background: #161b22; }
+  .topic-table-head { background: #21262d; }
+  .topic-query { color: #c9d1d9; }
+  .topic-edit-row { background: #0d263f; }
+  .cadence-daily { color: #79c0ff; background: #0d263f; border-color: #1f6feb; }
+  .cadence-weekly { color: #d8b9ff; background: #2a163f; border-color: #8250df; }
+  .cadence-manual, .priority-low, .status-disabled { color: #8b949e; background: #21262d; border-color: #30363d; }
+  .priority-high { color: #ffb3ba; background: #3b1016; border-color: #f85149; }
+  .priority-normal, .status-enabled { color: #7ee787; background: #0f2a1a; border-color: #238636; }
 }
 @media (max-width: 720px) {
   main { padding: 10px; }
@@ -1677,6 +1784,8 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-kv { grid-template-columns: 1fr; }
   .topic-columns { grid-template-columns: 1fr; }
   .topic-list { columns: 1; }
-  .topic-form-grid, .topic-row { grid-template-columns: 1fr; }
+  .topic-form-grid, .topic-table-head, .topic-row, .topic-edit-row { grid-template-columns: 1fr; }
+  .topic-table-head { display: none; }
+  .topic-actions { justify-content: flex-start; }
 }
 """

@@ -1611,9 +1611,28 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("Add Topic", html)
         self.assertIn('name="topic_text"', html)
-        self.assertIn('value="datalake-operations"', html)
+        self.assertIn('href="/topics?edit=datalake-operations"', html)
+        self.assertIn('class="topic-row topic-read-row"', html)
+        self.assertNotIn('class="topic-row topic-edit-row"', html)
         self.assertIn("Future runs only.", html)
         self.assertIn("Datalake operations", html)
+
+    def test_topics_page_expands_only_selected_edit_row(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [
+                TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"]),
+                TopicEntry("incident-response", "Incident response", "incident query", ["openalex"]),
+            ],
+            config_path,
+        )
+
+        html = web.render_topics_page(config_path=config_path, edit_id="datalake-operations")
+
+        self.assertIn('class="topic-row topic-edit-row"', html)
+        self.assertIn('<input type="hidden" name="topic_id" value="datalake-operations">', html)
+        self.assertIn('href="/topics">Cancel</a>', html)
+        self.assertIn('href="/topics?edit=incident-response"', html)
 
     def test_topics_post_adds_fast_path_topic(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -1636,6 +1655,25 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(loaded[0].label, "Datalake operations")
         self.assertEqual(loaded[0].query, "datalake operations reliability observability production engineering")
         self.assertEqual(loaded[0].sources, ["arxiv", "semantic_scholar", "openalex"])
+
+    def test_topics_post_toggles_enabled_from_read_mode(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"], enabled=True)],
+            config_path,
+        )
+
+        web.save_topics_form(
+            {
+                "action": ["toggle"],
+                "topic_id": ["datalake-operations"],
+                "enabled": ["0"],
+            },
+            config_path=config_path,
+        )
+
+        loaded = load_topic_config(config_path)
+        self.assertFalse(loaded[0].enabled)
 
     def test_review_queue_feedback_save_still_inserts_status_and_notes(self):
         paper_id, _ = self._seed_review_recommendation()

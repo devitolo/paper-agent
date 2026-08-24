@@ -6,7 +6,7 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ### Topic Management V1
 
-Status: Implemented.
+Status: Implemented and refined.
 
 Decision: Scout topic steering should start as a UI-first, file-backed workflow before automatic Scout learning.
 
@@ -19,6 +19,7 @@ Completed behavior:
 - Keep explicit CLI `--topic` overrides working.
 - Let scheduled source jobs select enabled config topics on future runs instead of querying every topic every day.
 - Keep `/topics` read/write only for config management; no `Run now` button in V1.
+- Refine `/topics` into a compact read-first table with source/status/priority chips, quick Enable/Disable actions, and one-row-at-a-time editing.
 
 Backlog:
 
