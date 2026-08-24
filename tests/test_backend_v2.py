@@ -1619,6 +1619,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn('class="topic-source topic-editor-panel"', html)
         self.assertIn("Topic changes apply to future scheduled runs.", html)
         self.assertIn("Datalake operations", html)
+        self.assertLess(html.index("Source schedule inventory"), html.index("All Topics"))
+        self.assertIn('class="topic-inventory-details" open', html)
 
     def test_topics_page_shows_single_selected_editor_panel(self):
         config_path = Path(self.tmp.name) / "topics.yaml"

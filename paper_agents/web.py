@@ -520,6 +520,11 @@ def render_topics_page(
     </section>
     {render_topic_add_form()}
     {editor_panel}
+    <details class="topic-inventory-details" open>
+      <summary>Source schedule inventory</summary>
+      <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
+      <div class="topic-sections">{sections}</div>
+    </details>
     <details class="topic-source topic-list-details"{all_topics_open}>
       <summary>
         <span>All Topics</span>
@@ -535,11 +540,6 @@ def render_topics_page(
         </div>
         {topic_rows}
       </div>
-    </details>
-    <details class="topic-inventory-details">
-      <summary>Source schedule inventory</summary>
-      <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
-      <div class="topic-sections">{sections}</div>
     </details>
     <script>
       const topicSearch = document.getElementById("topic-search");
