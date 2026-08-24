@@ -13,9 +13,11 @@ Decision: Scout topic steering should start as a UI-first, file-backed workflow 
 Completed behavior:
 
 - Add `config/topics.yaml` as the human-readable Scout topic config.
-- Make `/topics` editable with a one-field fast path for adding topics such as `Datalake operations`.
-- Infer default query, sources, cadence, priority, and enabled state for fast-path topics.
-- Keep add-topic minimal; detailed query, source, cadence, priority, and enabled controls are available when editing saved topics.
+- Make `/topics` editable with a Qwen-powered TopicAgent prompt for adding or updating topics from natural language.
+- Use local Ollama/Qwen on the Mini, defaulting to `qwen2.5:1.5b-instruct`, to propose structured topic config.
+- Require user approval before saving any TopicAgent proposal.
+- Validate model JSON and fall back to deterministic proposal logic when the model response is invalid or unavailable.
+- Keep manual detailed query, source, cadence, priority, and enabled controls available as an edit escape hatch.
 - Keep explicit CLI `--topic` overrides working.
 - Let scheduled source jobs select enabled config topics on future runs instead of querying every topic every day.
 - Keep `/topics` read/write only for config management; no `Run now` button in V1.
@@ -24,8 +26,7 @@ Completed behavior:
 
 Backlog:
 
-- Track per-topic funnel performance before adding automatic Scout learning or priority recommendations.
-- Future TopicAgent suggestions should use local Ollama/Qwen on the Mini, likely `qwen2.5:1.5b-instruct` unless centralized model config changes. The agent should propose structured topic config only; the user approves before save, and backend validation should reject invalid JSON and fall back to deterministic defaults.
+- Track per-topic funnel performance before automatic priority recommendations.
 
 ## 2026-08-21
 

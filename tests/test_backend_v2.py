@@ -35,6 +35,13 @@ from paper_agents.scout import scout_candidate_record
 from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
 from paper_agents.topic_inventory import OPENALEX_ROTATING_TOPICS, scout_topic_inventory
+from paper_agents.topic_agent import (
+    TopicProposal,
+    apply_topic_proposal,
+    suggest_topic_proposal,
+    topic_proposal_to_json,
+    validate_topic_proposal,
+)
 from paper_agents.topics import (
     DuplicateTopicError,
     TopicEntry,
@@ -1611,8 +1618,9 @@ class BackendV2Tests(unittest.TestCase):
 
         html = web.render_topics_page(config_path=config_path)
 
-        self.assertIn("Add Topic", html)
-        self.assertIn('name="topic_text"', html)
+        self.assertIn("Topic Agent", html)
+        self.assertIn('name="request_text"', html)
+        self.assertIn("Ask TopicAgent", html)
         self.assertNotIn("<summary>Advanced</summary>", html)
         self.assertIn('href="/topics?edit=datalake-operations"', html)
         self.assertIn('class="topic-row topic-read-row"', html)
@@ -1668,6 +1676,142 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(loaded[0].cadence, "daily")
         self.assertEqual(loaded[0].priority, "normal")
         self.assertTrue(loaded[0].enabled)
+
+    def test_topic_agent_create_new_proposal_from_mocked_ollama(self):
+        def provider(url, model, prompt, timeout):
+            self.assertIn("datalake reliability", prompt)
+            return {
+                "action": "create_new",
+                "matched_topic_id": None,
+                "label": "Datalake reliability",
+                "query": "datalake reliability observability production engineering",
+                "sources": ["arxiv", "openalex"],
+                "cadence": "daily",
+                "priority": "normal",
+                "enabled": True,
+                "rationale": "Relevant to operations reliability.",
+                "source_rationale": "arXiv and OpenAlex cover systems research.",
+            }
+
+        proposal = suggest_topic_proposal("datalake reliability", [], provider=provider, model="test-qwen")
+
+        self.assertEqual(proposal.action, "create_new")
+        self.assertEqual(proposal.label, "Datalake reliability")
+        self.assertEqual(proposal.sources, ["arxiv", "openalex"])
+        self.assertEqual(proposal.provider, "ollama")
+        self.assertEqual(proposal.model, "test-qwen")
+
+    def test_topic_agent_invalid_json_falls_back_to_deterministic_proposal(self):
+        def provider(url, model, prompt, timeout):
+            raise ValueError("bad json")
+
+        proposal = suggest_topic_proposal("datalake operations", [], provider=provider, model="test-qwen")
+
+        self.assertEqual(proposal.action, "create_new")
+        self.assertEqual(proposal.label, "Datalake operations")
+        self.assertEqual(proposal.provider, "deterministic_fallback")
+        self.assertEqual(proposal.sources, ["arxiv", "semantic_scholar", "openalex"])
+
+    def test_topic_agent_duplicate_becomes_update_proposal(self):
+        topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"])]
+
+        proposal = suggest_topic_proposal(
+            "datalake operations",
+            topics,
+            provider=lambda url, model, prompt, timeout: {"not": "valid"},
+        )
+
+        self.assertEqual(proposal.action, "update_existing")
+        self.assertEqual(proposal.matched_topic_id, "datalake-operations")
+        self.assertEqual(proposal.label, "Datalake operations")
+
+    def test_topic_agent_validates_update_matched_topic(self):
+        topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"])]
+
+        proposal = validate_topic_proposal(
+            {
+                "action": "update_existing",
+                "matched_topic_id": "datalake-operations",
+                "label": "Datalake operations",
+                "query": "datalake reliability observability",
+                "sources": ["openalex", "semantic_scholar"],
+                "cadence": "weekly",
+                "priority": "high",
+                "enabled": True,
+            },
+            topics,
+        )
+
+        self.assertEqual(proposal.action, "update_existing")
+        self.assertEqual(proposal.sources, ["semantic_scholar", "openalex"])
+
+    def test_topic_agent_apply_proposal_writes_config(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"])]
+        save_topic_config(topics, config_path)
+
+        proposal = TopicProposal(
+            action="update_existing",
+            matched_topic_id="datalake-operations",
+            label="Datalake operations",
+            query="datalake reliability observability",
+            sources=["openalex"],
+            cadence="weekly",
+            priority="high",
+            enabled=True,
+        )
+        web.apply_topic_proposal_form(
+            {"proposal_json": [topic_proposal_to_json(proposal)]},
+            config_path=config_path,
+        )
+
+        loaded = load_topic_config(config_path)
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0].query, "datalake reliability observability")
+        self.assertEqual(loaded[0].sources, ["openalex"])
+        self.assertEqual(loaded[0].cadence, "weekly")
+        self.assertEqual(loaded[0].priority, "high")
+
+    def test_topic_agent_apply_update_prevents_duplicate_collision(self):
+        topics = [
+            TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"]),
+            TopicEntry("incident-response", "Incident response", "incident query", ["openalex"]),
+        ]
+        proposal = TopicProposal(
+            action="update_existing",
+            matched_topic_id="incident-response",
+            label="Datalake operations",
+            query="incident query",
+            sources=["openalex"],
+            cadence="daily",
+            priority="normal",
+            enabled=True,
+        )
+
+        with self.assertRaises(DuplicateTopicError):
+            apply_topic_proposal(proposal, topics)
+
+    def test_topics_page_renders_topic_agent_proposal(self):
+        proposal = TopicProposal(
+            action="create_new",
+            label="Datalake reliability",
+            query="datalake reliability observability",
+            sources=["arxiv", "openalex"],
+            cadence="daily",
+            priority="normal",
+            enabled=True,
+            rationale="Good fit.",
+            source_rationale="Use systems sources.",
+        )
+
+        html = web.render_topics_page(proposal=proposal, request_text="datalake reliability")
+
+        self.assertIn("What do you want Project Paper to scout?", html)
+        self.assertIn("TopicAgent Proposal", html)
+        self.assertIn("Datalake reliability", html)
+        self.assertIn('name="proposal_json"', html)
+        self.assertIn("Apply and save", html)
+        self.assertNotIn('name="topic_text"', html)
 
     def test_topics_post_rejects_duplicate_add(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -2034,7 +2178,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Project Paper Scout Topics", html)
         self.assertNotIn("Topic changes apply to future scheduled runs.", html)
         self.assertIn("Source schedule inventory", html)
-        self.assertIn("Add Topic", html)
+        self.assertIn("Topic Agent", html)
         self.assertIn('href="/">Review queue</a>', html)
         self.assertIn('href="/health">Health</a>', html)
         self.assertIn("Daily default", html)

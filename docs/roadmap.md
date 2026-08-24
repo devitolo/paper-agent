@@ -51,7 +51,7 @@ Status: Implemented as V2 backend.
   - Add topic priority/cadence controls for daily, weekly, and manual use.
   - Support ad hoc one-off Scout topics for interests such as `datalake`.
   - Track topic performance over time before enabling automatic Scout learning.
-  - Future LLM-assisted TopicAgent should use local Ollama/Qwen on the Mini, likely `qwen2.5:1.5b-instruct`, propose structured topic config only, require user approval before save, and fall back to deterministic defaults when model JSON is invalid.
+  - Track TopicAgent proposal quality; it now uses local Ollama/Qwen on the Mini, likely `qwen2.5:1.5b-instruct`, proposes structured topic config only, requires user approval before save, and falls back to deterministic defaults when model JSON is invalid.
 
 ## Phase 4: Automated Acquisition
 

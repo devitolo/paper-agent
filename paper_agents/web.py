@@ -14,6 +14,13 @@ from typing import Any, Callable
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.topic_inventory import scout_topic_inventory
+from paper_agents.topic_agent import (
+    TopicProposal,
+    apply_topic_proposal,
+    suggest_topic_proposal,
+    topic_proposal_from_json,
+    topic_proposal_to_json,
+)
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,
@@ -127,7 +134,15 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 body = self.rfile.read(length).decode("utf-8")
                 form = urllib.parse.parse_qs(body)
                 try:
-                    save_topics_form(form)
+                    action = form.get("action", [""])[0]
+                    if action == "propose":
+                        proposal = propose_topic_form(form)
+                        self.respond_html(render_topics_page(proposal=proposal, request_text=form.get("request_text", [""])[0]))
+                        return
+                    if action == "apply_proposal":
+                        apply_topic_proposal_form(form)
+                    else:
+                        save_topics_form(form)
                     redirect_to = "/topics?saved=1"
                 except DuplicateTopicError as error:
                     redirect_to = (
@@ -484,6 +499,8 @@ def render_topics_page(
     duplicate: bool = False,
     error: str | None = None,
     edit_id: str | None = None,
+    proposal: TopicProposal | None = None,
+    request_text: str = "",
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
 ) -> str:
     inventory = scout_topic_inventory(config_path=config_path)
@@ -526,7 +543,8 @@ def render_topics_page(
       </nav>
     </header>
     {banner}
-    {render_topic_add_form()}
+    {render_topic_agent_panel(request_text)}
+    {render_topic_proposal_panel(proposal)}
     {editor_panel}
     <details class="topic-inventory-details" open>
       <summary>Source schedule inventory</summary>
@@ -591,16 +609,62 @@ def render_topic_source_section(item: dict[str, Any]) -> str:
     </section>"""
 
 
-def render_topic_add_form() -> str:
+def render_topic_agent_panel(request_text: str = "") -> str:
     return f"""<section class="topic-source topic-editor">
       <div class="topic-source-head">
-        <h2>Add Topic</h2>
-        <span>Fast path requires one field</span>
+        <h2>Topic Agent</h2>
+        <span>Describe what to scout; Qwen proposes the config</span>
       </div>
-      <form method="post" action="/topics" class="topic-add-form">
-        <input type="hidden" name="action" value="add">
-        <input name="topic_text" aria-label="Topic" placeholder="Datalake operations" required>
-        <button type="submit" class="primary">Add topic</button>
+      <form method="post" action="/topics" class="topic-agent-form">
+        <input type="hidden" name="action" value="propose">
+        <label>What do you want Project Paper to scout?
+          <textarea name="request_text" required placeholder="datalake reliability and operations">{escape(request_text)}</textarea>
+        </label>
+        <button type="submit" class="primary">Ask TopicAgent</button>
+      </form>
+    </section>"""
+
+
+def render_topic_proposal_panel(proposal: TopicProposal | None) -> str:
+    if proposal is None:
+        return ""
+    if proposal.action == "ask_clarifying_question":
+        return f"""<section class="topic-source topic-proposal-panel">
+          <div class="topic-source-head">
+            <h2>TopicAgent Question</h2>
+            <span>{escape(proposal.provider)}</span>
+          </div>
+          <p>{escape(proposal.question)}</p>
+          <p class="topic-note-text">{escape(proposal.rationale)}</p>
+        </section>"""
+    matched = f"<p><strong>Matched existing:</strong> {escape(proposal.matched_topic_id or '')}</p>" if proposal.matched_topic_id else ""
+    sources = "".join(
+        f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
+        for source in proposal.sources or []
+    )
+    edit_link = f'<a class="secondary-link" href="/topics?edit={escape(proposal.matched_topic_id)}#topic-editor">Edit manually</a>' if proposal.matched_topic_id else ""
+    return f"""<section class="topic-source topic-proposal-panel" id="topic-proposal">
+      <div class="topic-source-head">
+        <h2>TopicAgent Proposal</h2>
+        <span>{escape(proposal.action.replace("_", " "))}</span>
+      </div>
+      {matched}
+      <dl class="topic-proposal-grid">
+        <dt>Label</dt><dd>{escape(proposal.label)}</dd>
+        <dt>Query</dt><dd>{escape(proposal.query)}</dd>
+        <dt>Sources</dt><dd>{sources}</dd>
+        <dt>Cadence</dt><dd>{escape(proposal.cadence)}</dd>
+        <dt>Priority</dt><dd>{escape(proposal.priority)}</dd>
+        <dt>Enabled</dt><dd>{'yes' if proposal.enabled else 'no'}</dd>
+        <dt>Rationale</dt><dd>{escape(proposal.rationale or 'No rationale provided.')}</dd>
+        <dt>Source rationale</dt><dd>{escape(proposal.source_rationale or 'No source rationale provided.')}</dd>
+      </dl>
+      <form method="post" action="/topics" class="topic-proposal-actions">
+        <input type="hidden" name="action" value="apply_proposal">
+        <input type="hidden" name="proposal_json" value="{escape(topic_proposal_to_json(proposal))}">
+        <button type="submit" class="primary">Apply and save</button>
+        {edit_link}
+        <a class="secondary-link" href="/topics">Cancel</a>
       </form>
     </section>"""
 
@@ -673,6 +737,25 @@ def render_topic_select(name: str, choices: tuple[str, ...], selected_value: str
         for choice in choices
     )
     return f'<label>{escape(label)}<select name="{escape(name)}">{options}</select></label>'
+
+
+def propose_topic_form(
+    form: dict[str, list[str]],
+    *,
+    config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
+) -> TopicProposal:
+    topics = load_topic_config_or_seed(config_path)
+    return suggest_topic_proposal(form.get("request_text", [""])[0], topics)
+
+
+def apply_topic_proposal_form(
+    form: dict[str, list[str]],
+    *,
+    config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
+) -> None:
+    topics = load_topic_config_or_seed(config_path)
+    proposal = topic_proposal_from_json(form.get("proposal_json", ["{}"])[0], topics)
+    save_topic_config(apply_topic_proposal(proposal, topics), config_path)
 
 
 def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> None:
@@ -1722,8 +1805,12 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-list li { break-inside: avoid; margin: 0 0 3px; padding-left: 2px; font-size: 12px; }
 .topic-list li span { color: #57606a; font-size: 11px; }
 .topic-note-text { margin-top: 8px; }
-.topic-add-form { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 7px; align-items: start; }
-.topic-add-form input[name="topic_text"] { min-height: 30px; }
+.topic-agent-form { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 7px; align-items: end; }
+.topic-agent-form textarea { min-height: 38px; }
+.topic-proposal-grid { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 5px 10px; margin: 0 0 8px; }
+.topic-proposal-grid dt { color: #57606a; font-weight: 650; }
+.topic-proposal-grid dd { margin: 0; min-width: 0; }
+.topic-proposal-actions { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
 .topic-edit-form { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.4fr) minmax(180px, 0.8fr) 100px 100px 92px auto; gap: 8px; align-items: end; }
 .topic-form-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .topic-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 10px; margin: 0; padding: 0 10px 8px; color: #57606a; font-size: 12px; }
@@ -1807,7 +1894,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-kv { grid-template-columns: 1fr; }
   .topic-columns { grid-template-columns: 1fr; }
   .topic-list { columns: 1; }
-  .topic-add-form, .topic-edit-form, .topic-table-head, .topic-row { grid-template-columns: 1fr; }
+  .topic-agent-form, .topic-edit-form, .topic-table-head, .topic-row, .topic-proposal-grid { grid-template-columns: 1fr; }
   .topic-table-head { display: none; }
   .topic-toolbar, .topic-list-details > summary, .topic-inventory-details > summary { align-items: flex-start; flex-direction: column; }
   .topic-actions, .topic-form-actions { justify-content: flex-start; }
