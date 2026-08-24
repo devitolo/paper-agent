@@ -545,8 +545,7 @@ def render_topics_page(
       </nav>
     </header>
     {banner}
-    {render_topic_agent_panel(request_text)}
-    {render_topic_proposal_panel(proposal)}
+    {render_topic_agent_panel(request_text, proposal)}
     {editor_panel}
     <details class="topic-inventory-details" open>
       <summary>Source schedule inventory</summary>
@@ -629,7 +628,8 @@ def render_topic_source_section(item: dict[str, Any]) -> str:
     </section>"""
 
 
-def render_topic_agent_panel(request_text: str = "") -> str:
+def render_topic_agent_panel(request_text: str = "", proposal: TopicProposal | None = None) -> str:
+    proposal_html = render_topic_proposal_panel(proposal)
     return f"""<section class="topic-source topic-editor">
       <div class="topic-source-head">
         <h2>Topic Agent</h2>
@@ -643,6 +643,7 @@ def render_topic_agent_panel(request_text: str = "") -> str:
         <button type="submit" class="primary">Ask TopicAgent</button>
         <p class="topic-agent-status" aria-live="polite"></p>
       </form>
+      {proposal_html}
     </section>"""
 
 
@@ -650,14 +651,14 @@ def render_topic_proposal_panel(proposal: TopicProposal | None) -> str:
     if proposal is None:
         return ""
     if proposal.action == "ask_clarifying_question":
-        return f"""<section class="topic-source topic-proposal-panel">
+        return f"""<div class="topic-proposal-panel">
           <div class="topic-source-head">
             <h2>TopicAgent Question</h2>
             <span>{escape(proposal.provider)}</span>
           </div>
           <p>{escape(proposal.question)}</p>
           <p class="topic-note-text">{escape(proposal.rationale)}</p>
-        </section>"""
+        </div>"""
     matched = f"<p><strong>Matched existing:</strong> {escape(proposal.matched_topic_id or '')}</p>" if proposal.matched_topic_id else ""
     sources = "".join(
         f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
@@ -666,7 +667,7 @@ def render_topic_proposal_panel(proposal: TopicProposal | None) -> str:
     edit_link = f'<a class="secondary-link" href="/topics?edit={escape(proposal.matched_topic_id)}#topic-editor">Edit manually</a>' if proposal.matched_topic_id else ""
     provider_label = proposal.provider.replace("_", " ")
     proposal_label = f"{proposal.action.replace('_', ' ')} | {provider_label}"
-    return f"""<section class="topic-source topic-proposal-panel" id="topic-proposal">
+    return f"""<div class="topic-proposal-panel" id="topic-proposal">
       <div class="topic-source-head">
         <h2>TopicAgent Proposal</h2>
         <span>{escape(proposal_label)}</span>
@@ -689,7 +690,7 @@ def render_topic_proposal_panel(proposal: TopicProposal | None) -> str:
         {edit_link}
         <a class="secondary-link" href="/topics">Cancel</a>
       </form>
-    </section>"""
+    </div>"""
 
 
 def render_topic_row(topic: TopicEntry) -> str:
@@ -1830,6 +1831,8 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-note-text { margin-top: 8px; }
 .topic-agent-form { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 7px; align-items: end; }
 .topic-agent-form textarea { min-height: 38px; }
+.topic-agent-status { grid-column: 1 / -1; margin: 0; color: #57606a; font-size: 12px; }
+.topic-proposal-panel { margin-top: 10px; padding-top: 10px; border-top: 1px solid #d8dee4; }
 .topic-proposal-grid { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 5px 10px; margin: 0 0 8px; }
 .topic-proposal-grid dt { color: #57606a; font-weight: 650; }
 .topic-proposal-grid dd { margin: 0; min-width: 0; }
@@ -1893,6 +1896,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-table th { background: #21262d; }
   .health-table th, .health-table td { border-color: #30363d; }
   .topic-table, .topic-table-head, .topic-row { border-color: #30363d; }
+  .topic-proposal-panel { border-color: #30363d; }
   .topic-table, .topic-read-row:nth-child(odd) { background: #161b22; }
   .topic-table-head { background: #21262d; }
   .topic-query { color: #c9d1d9; }

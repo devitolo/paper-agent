@@ -1812,6 +1812,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('name="proposal_json"', html)
         self.assertIn("Apply and save", html)
         self.assertNotIn('name="topic_text"', html)
+        self.assertLess(html.index("What do you want Project Paper to scout?"), html.index("TopicAgent Proposal"))
+        self.assertLess(html.index("TopicAgent Proposal"), html.index("Source schedule inventory"))
+        self.assertNotIn('class="topic-source topic-proposal-panel"', html)
 
     def test_topics_post_rejects_duplicate_add(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
