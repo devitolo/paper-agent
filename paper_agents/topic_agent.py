@@ -11,6 +11,7 @@ from paper_agents.scout import SCOUT_SOURCES
 from paper_agents.topics import (
     CADENCES,
     PRIORITIES,
+    DuplicateTopicError,
     TopicEntry,
     create_topic_from_fast_path,
     ensure_unique_topic,
@@ -290,6 +291,21 @@ def fallback_topic_proposal(
             enabled=topic.enabled,
             rationale=f"Generated deterministically because local Qwen/Ollama was unavailable or returned invalid JSON. {reason}",
             source_rationale="Defaulted to all active sources.",
+            provider="deterministic_fallback",
+            model=model,
+        )
+    except DuplicateTopicError as duplicate_error:
+        return TopicProposal(
+            action="update_existing",
+            matched_topic_id=duplicate_error.topic.id,
+            label=duplicate_error.topic.label,
+            query=duplicate_error.topic.query,
+            sources=duplicate_error.topic.sources,
+            cadence=duplicate_error.topic.cadence,
+            priority=duplicate_error.topic.priority,
+            enabled=duplicate_error.topic.enabled,
+            rationale=f"Matched an existing topic deterministically because local Qwen/Ollama was unavailable or returned invalid JSON. {reason}",
+            source_rationale="Preserved existing source selection.",
             provider="deterministic_fallback",
             model=model,
         )

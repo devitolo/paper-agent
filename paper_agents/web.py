@@ -152,6 +152,8 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     )
                 except ValueError as error:
                     redirect_to = "/topics?" + urllib.parse.urlencode({"error": str(error)})
+                except RuntimeError as error:
+                    redirect_to = "/topics?" + urllib.parse.urlencode({"error": str(error)})
                 self.send_response(HTTPStatus.SEE_OTHER)
                 self.send_header("Location", redirect_to)
                 self.end_headers()
