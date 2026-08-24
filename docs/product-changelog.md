@@ -19,7 +19,8 @@ Completed behavior:
 - Keep explicit CLI `--topic` overrides working.
 - Let scheduled source jobs select enabled config topics on future runs instead of querying every topic every day.
 - Keep `/topics` read/write only for config management; no `Run now` button in V1.
-- Refine `/topics` into a compact read-first table with source/status/priority chips, quick Enable/Disable actions, and one-row-at-a-time editing.
+- Refine `/topics` into a collapsed-by-default compact table with one-line rows, source/status/priority chips, quick Enable/Disable actions, and a single focused edit panel.
+- Prevent duplicate topic adds/edits by comparing normalized labels and queries.
 
 Backlog:
 

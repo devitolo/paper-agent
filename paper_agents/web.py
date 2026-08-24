@@ -20,6 +20,7 @@ from paper_agents.topics import (
     PRIORITIES,
     TopicEntry,
     create_topic_from_fast_path,
+    ensure_unique_topic,
     load_topic_config_or_seed,
     save_topic_config,
     update_topic_from_form,
@@ -483,7 +484,10 @@ def render_topics_page(
         for item in inventory
     )
     sections = "".join(render_topic_source_section(item) for item in inventory)
-    topic_rows = "".join(render_topic_row(topic, edit_id=edit_id) for topic in topics)
+    topic_rows = "".join(render_topic_row(topic) for topic in topics)
+    edit_topic = next((topic for topic in topics if topic.id == edit_id), None)
+    editor_panel = render_topic_editor_panel(edit_topic) if edit_topic else ""
+    all_topics_open = " open" if edit_topic else ""
     total_topics = len(topics)
     banner = ""
     if saved:
@@ -512,19 +516,18 @@ def render_topics_page(
     </header>
     {banner}
     <section class="topic-note">
-      <strong>Future runs only.</strong> Add or edit Scout topics here; scheduled jobs pick enabled topics from <code>config/topics.yaml</code> on their next run. This page does not run Scout or change existing recommendations.
+      Topic changes apply to future scheduled runs.
     </section>
     {render_topic_add_form()}
-    <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
-    <div class="topic-sections">{sections}</div>
-    <section class="topic-source">
-      <div class="topic-source-head">
-        <h2>All Topics</h2>
-        <span>Edit config rows</span>
-      </div>
+    {editor_panel}
+    <details class="topic-source topic-list-details"{all_topics_open}>
+      <summary>
+        <span>All Topics</span>
+        <small>{total_topics} configured | expand to search, toggle, or edit</small>
+      </summary>
       <div class="topic-toolbar">
         <label>Search<input id="topic-search" type="search" placeholder="Filter topics"></label>
-        <span>Read-first list. Use Edit to expand one row.</span>
+        <span>Edit opens a focused panel; toggles affect future runs only.</span>
       </div>
       <div class="topic-table">
         <div class="topic-table-head">
@@ -532,7 +535,12 @@ def render_topics_page(
         </div>
         {topic_rows}
       </div>
-    </section>
+    </details>
+    <details class="topic-inventory-details">
+      <summary>Source schedule inventory</summary>
+      <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
+      <div class="topic-sections">{sections}</div>
+    </details>
     <script>
       const topicSearch = document.getElementById("topic-search");
       if (topicSearch) {{
@@ -583,7 +591,8 @@ def render_topic_add_form() -> str:
       </div>
       <form method="post" action="/topics" class="topic-add-form">
         <input type="hidden" name="action" value="add">
-        <label>Topic<input name="topic_text" placeholder="Datalake operations" required></label>
+        <input name="topic_text" aria-label="Topic" placeholder="Datalake operations" required>
+        <button type="submit" class="primary">Add topic</button>
         <details>
           <summary>Advanced</summary>
           <div class="topic-form-grid">
@@ -594,55 +603,59 @@ def render_topic_add_form() -> str:
             <label class="inline-check"><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
           </div>
         </details>
-        <button type="submit" class="primary">Add topic</button>
       </form>
     </section>"""
 
 
-def render_topic_row(topic: TopicEntry, *, edit_id: str | None) -> str:
-    if topic.id == edit_id:
-        return render_topic_edit_row(topic)
+def render_topic_row(topic: TopicEntry) -> str:
     sources = "".join(
         f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
         for source in topic.sources
     )
     enabled = "enabled" if topic.enabled else "disabled"
-    toggle_label = "Disable" if topic.enabled else "Enable"
+    toggle_label = "On" if topic.enabled else "Off"
     next_enabled = "0" if topic.enabled else "1"
     return f"""<div class="topic-row topic-read-row" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
       <div class="topic-cell topic-label"><strong>{escape(topic.label)}</strong></div>
-      <div class="topic-cell topic-query">{escape(topic.query)}</div>
+      <div class="topic-cell topic-query" title="{escape(topic.query)}">{escape(topic.query)}</div>
       <div class="topic-cell topic-sources">{sources}</div>
       <div class="topic-cell"><span class="topic-pill cadence-{escape(topic.cadence)}">{escape(topic.cadence)}</span></div>
       <div class="topic-cell"><span class="topic-pill priority-{escape(topic.priority)}">{escape(topic.priority)}</span></div>
-      <div class="topic-cell"><span class="topic-status status-{enabled}">{enabled}</span></div>
-      <div class="topic-actions">
-        <a class="secondary-link" href="/topics?edit={escape(topic.id)}">Edit</a>
+      <div class="topic-cell">
         <form method="post" action="/topics" class="topic-toggle-form">
           <input type="hidden" name="action" value="toggle">
           <input type="hidden" name="topic_id" value="{escape(topic.id)}">
           <input type="hidden" name="enabled" value="{next_enabled}">
-          <button type="submit" class="secondary">{toggle_label}</button>
+          <button type="submit" class="topic-status topic-toggle-button status-{enabled}" title="Toggle enabled status">{toggle_label}</button>
         </form>
+      </div>
+      <div class="topic-actions">
+        <a class="topic-edit-link" href="/topics?edit={escape(topic.id)}">Edit</a>
       </div>
     </div>"""
 
 
-def render_topic_edit_row(topic: TopicEntry) -> str:
-    return f"""<form method="post" action="/topics" class="topic-row topic-edit-row" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
-      <input type="hidden" name="action" value="update">
-      <input type="hidden" name="topic_id" value="{escape(topic.id)}">
-      <label>Label<input name="label" value="{escape(topic.label)}" required></label>
-      <label>Query<input name="query" value="{escape(topic.query)}" required></label>
-      <div>{render_source_checkboxes(topic.sources)}</div>
-      {render_topic_select("cadence", CADENCES, topic.cadence, "Cadence")}
-      {render_topic_select("priority", PRIORITIES, topic.priority, "Priority")}
-      <label class="inline-check"><input type="checkbox" name="enabled" value="1" {'checked' if topic.enabled else ''}> Enabled</label>
-      <div class="topic-actions">
-        <button type="submit" class="primary">Save</button>
-        <a class="secondary-link" href="/topics">Cancel</a>
+def render_topic_editor_panel(topic: TopicEntry) -> str:
+    return f"""<section class="topic-source topic-editor-panel">
+      <div class="topic-source-head">
+        <h2>Edit Topic</h2>
+        <span>{escape(topic.label)}</span>
       </div>
-    </form>"""
+      <form method="post" action="/topics" class="topic-edit-form" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="topic_id" value="{escape(topic.id)}">
+        <label>Label<input name="label" value="{escape(topic.label)}" required></label>
+        <label>Query<input name="query" value="{escape(topic.query)}" required></label>
+        {render_source_checkboxes(topic.sources)}
+        {render_topic_select("cadence", CADENCES, topic.cadence, "Cadence")}
+        {render_topic_select("priority", PRIORITIES, topic.priority, "Priority")}
+        <label class="inline-check"><input type="checkbox" name="enabled" value="1" {'checked' if topic.enabled else ''}> Enabled</label>
+        <div class="topic-form-actions">
+          <button type="submit" class="primary">Save</button>
+          <a class="secondary-link" href="/topics">Cancel</a>
+        </div>
+      </form>
+    </section>"""
 
 
 def render_source_checkboxes(selected_sources: list[str]) -> str:
@@ -685,7 +698,7 @@ def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_
         for index, topic in enumerate(topics):
             if topic.id != topic_id:
                 continue
-            topics[index] = update_topic_from_form(
+            updated_topic = update_topic_from_form(
                 topic,
                 label=form.get("label", [""])[0],
                 query=form.get("query", [""])[0],
@@ -694,6 +707,8 @@ def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_
                 priority=form.get("priority", ["normal"])[0],
                 enabled=form.get("enabled", [""])[0] == "1",
             )
+            ensure_unique_topic(updated_topic, topics, ignore_id=topic.id)
+            topics[index] = updated_topic
             save_topic_config(topics, config_path)
             return
         raise ValueError(f"Unknown topic id: {topic_id}")
@@ -1690,10 +1705,17 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv dd { margin: 0; }
 .topic-note { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px 9px; margin-bottom: 10px; color: #57606a; }
 .topic-note strong { color: #1f2328; }
-.topic-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+.topic-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0; }
 .topic-tab { text-decoration: none; }
 .topic-sections { display: grid; gap: 10px; }
 .topic-source { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 10px; scroll-margin-top: 10px; }
+.topic-list-details { padding: 0; }
+.topic-list-details > summary, .topic-inventory-details > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: pointer; padding: 8px 10px; font-weight: 650; list-style: none; }
+.topic-list-details > summary::-webkit-details-marker, .topic-inventory-details > summary::-webkit-details-marker { display: none; }
+.topic-list-details > summary::before, .topic-inventory-details > summary::before { content: "▸"; color: #57606a; font-size: 11px; }
+.topic-list-details[open] > summary::before, .topic-inventory-details[open] > summary::before { content: "▾"; }
+.topic-list-details > summary span, .topic-inventory-details > summary span { margin-right: auto; }
+.topic-list-details > summary small, .topic-inventory-details > summary small { color: #57606a; font-size: 12px; font-weight: 500; }
 .topic-source-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 6px; }
 .topic-source-head h2 { margin: 0; }
 .topic-source-head > span, .topic-source > p, .topic-note-text { color: #57606a; font-size: 12px; }
@@ -1703,26 +1725,34 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-list li { break-inside: avoid; margin: 0 0 3px; padding-left: 2px; font-size: 12px; }
 .topic-list li span { color: #57606a; font-size: 11px; }
 .topic-note-text { margin-top: 8px; }
-.topic-add-form { display: grid; gap: 8px; }
-.topic-add-form details { border: 1px solid #d8dee4; border-radius: 5px; padding: 6px 8px; }
+.topic-add-form { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 7px; align-items: start; }
+.topic-add-form input[name="topic_text"] { min-height: 30px; }
+.topic-add-form details { grid-column: 1 / -1; border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 7px; }
 .topic-add-form summary { cursor: pointer; color: #57606a; font-size: 12px; }
 .topic-form-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) repeat(2, minmax(120px, 0.4fr)) minmax(96px, 0.3fr); gap: 8px; align-items: end; margin-top: 8px; }
-.topic-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 10px; margin: 6px 0 8px; color: #57606a; font-size: 12px; }
-.topic-toolbar label { max-width: 280px; width: 100%; }
-.topic-table { display: grid; border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; background: #ffffff; }
-.topic-table-head, .topic-row { display: grid; grid-template-columns: minmax(140px, 0.85fr) minmax(240px, 1.45fr) minmax(160px, 0.8fr) 86px 86px 82px 132px; gap: 8px; align-items: center; }
-.topic-table-head { padding: 6px 8px; background: #f6f8fa; color: #57606a; font-size: 11px; font-weight: 650; text-transform: uppercase; }
-.topic-row { min-height: 36px; padding: 6px 8px; border-top: 1px solid #d8dee4; }
+.topic-edit-form { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.4fr) minmax(180px, 0.8fr) 100px 100px 92px auto; gap: 8px; align-items: end; }
+.topic-form-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.topic-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 10px; margin: 0; padding: 0 10px 8px; color: #57606a; font-size: 12px; }
+.topic-toolbar label { max-width: 240px; width: 100%; }
+.topic-toolbar input { min-height: 28px; }
+.topic-table { display: grid; border-top: 1px solid #d8dee4; background: #ffffff; }
+.topic-table-head, .topic-row { display: grid; grid-template-columns: minmax(150px, 0.9fr) minmax(260px, 1.6fr) minmax(140px, 0.7fr) 70px 70px 62px 42px; gap: 8px; align-items: center; }
+.topic-table-head { padding: 5px 10px; background: #f6f8fa; color: #57606a; font-size: 10px; font-weight: 650; text-transform: uppercase; }
+.topic-row { min-height: 30px; padding: 3px 10px; border-top: 1px solid #d8dee4; }
 .topic-read-row:nth-child(odd) { background: #fbfcfd; }
-.topic-cell { min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.topic-cell { min-width: 0; font-size: 12px; }
+.topic-label strong, .topic-query { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-label strong { font-size: 12px; }
 .topic-query { color: #3f4650; }
-.topic-sources { display: flex; gap: 4px; flex-wrap: wrap; }
-.topic-edit-row { grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.3fr) minmax(180px, 0.8fr) 100px 100px 92px 116px; align-items: end; background: #f0f7ff; }
+.topic-sources { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; }
 .topic-actions { display: flex; gap: 5px; align-items: center; justify-content: flex-end; }
-.topic-actions .secondary-link, .topic-actions button { min-height: 24px; padding: 0 7px; font-size: 12px; }
+.topic-edit-link { color: #0969da; font-size: 12px; text-decoration: none; }
+.topic-edit-link:hover { text-decoration: underline; }
 .topic-toggle-form { margin: 0; }
 .topic-pill, .topic-status { display: inline-flex; align-items: center; min-height: 20px; border-radius: 999px; padding: 0 7px; border: 1px solid #d8dee4; font-size: 11px; font-weight: 650; text-transform: lowercase; white-space: nowrap; }
+.topic-toggle-button { cursor: pointer; min-height: 20px; padding: 0 8px; }
+.topic-inventory-details { margin-top: 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 0; }
+.topic-inventory-details .topic-sections { padding: 0 10px 10px; }
 .cadence-daily { color: #0969da; background: #ddf4ff; border-color: #54aeef; }
 .cadence-weekly { color: #8250df; background: #fbefff; border-color: #d8b9ff; }
 .cadence-manual { color: #57606a; background: #f6f8fa; border-color: #d8dee4; }
@@ -1741,7 +1771,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .topbar p, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note, .topic-note-text { color: #8b949e; }
   .summary-grid p, .source-summary p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .links a, button, select, input, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .health-card, .health-graph, .health-table table, .health-kv, .topic-note, .topic-source, .topic-add-form details { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .links a, button, select, input, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .health-card, .health-graph, .health-table table, .health-kv, .topic-note, .topic-source, .topic-add-form details, .topic-inventory-details { background: #161b22; color: #e6edf3; border-color: #30363d; }
   .topic-note strong { color: #e6edf3; }
   button.secondary, .score { background: #21262d; }
   .score-secondary { background: transparent; }
@@ -1763,7 +1793,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .topic-table, .topic-read-row:nth-child(odd) { background: #161b22; }
   .topic-table-head { background: #21262d; }
   .topic-query { color: #c9d1d9; }
-  .topic-edit-row { background: #0d263f; }
+  .topic-edit-link { color: #58a6ff; }
   .cadence-daily { color: #79c0ff; background: #0d263f; border-color: #1f6feb; }
   .cadence-weekly { color: #d8b9ff; background: #2a163f; border-color: #8250df; }
   .cadence-manual, .priority-low, .status-disabled { color: #8b949e; background: #21262d; border-color: #30363d; }
@@ -1784,8 +1814,10 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-kv { grid-template-columns: 1fr; }
   .topic-columns { grid-template-columns: 1fr; }
   .topic-list { columns: 1; }
-  .topic-form-grid, .topic-table-head, .topic-row, .topic-edit-row { grid-template-columns: 1fr; }
+  .topic-add-form, .topic-form-grid, .topic-edit-form, .topic-table-head, .topic-row { grid-template-columns: 1fr; }
   .topic-table-head { display: none; }
-  .topic-actions { justify-content: flex-start; }
+  .topic-toolbar, .topic-list-details > summary, .topic-inventory-details > summary { align-items: flex-start; flex-direction: column; }
+  .topic-actions, .topic-form-actions { justify-content: flex-start; }
+  .topic-query, .topic-label strong { white-space: normal; }
 }
 """

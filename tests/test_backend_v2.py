@@ -1613,11 +1613,14 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('name="topic_text"', html)
         self.assertIn('href="/topics?edit=datalake-operations"', html)
         self.assertIn('class="topic-row topic-read-row"', html)
-        self.assertNotIn('class="topic-row topic-edit-row"', html)
-        self.assertIn("Future runs only.", html)
+        self.assertIn('class="topic-source topic-list-details"', html)
+        self.assertIn("1 configured | expand to search, toggle, or edit", html)
+        self.assertIn('title="datalake operations reliability observability production engineering"', html)
+        self.assertNotIn('class="topic-source topic-editor-panel"', html)
+        self.assertIn("Topic changes apply to future scheduled runs.", html)
         self.assertIn("Datalake operations", html)
 
-    def test_topics_page_expands_only_selected_edit_row(self):
+    def test_topics_page_shows_single_selected_editor_panel(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
         save_topic_config(
             [
@@ -1629,7 +1632,8 @@ class BackendV2Tests(unittest.TestCase):
 
         html = web.render_topics_page(config_path=config_path, edit_id="datalake-operations")
 
-        self.assertIn('class="topic-row topic-edit-row"', html)
+        self.assertIn('class="topic-source topic-editor-panel"', html)
+        self.assertIn('class="topic-source topic-list-details" open', html)
         self.assertIn('<input type="hidden" name="topic_id" value="datalake-operations">', html)
         self.assertIn('href="/topics">Cancel</a>', html)
         self.assertIn('href="/topics?edit=incident-response"', html)
@@ -1655,6 +1659,57 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(loaded[0].label, "Datalake operations")
         self.assertEqual(loaded[0].query, "datalake operations reliability observability production engineering")
         self.assertEqual(loaded[0].sources, ["arxiv", "semantic_scholar", "openalex"])
+
+    def test_topics_post_rejects_duplicate_add(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"])],
+            config_path,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Topic already exists: Datalake operations"):
+            web.save_topics_form(
+                {
+                    "action": ["add"],
+                    "topic_text": ["  datalake   OPERATIONS  "],
+                    "sources": ["arxiv"],
+                    "cadence": ["daily"],
+                    "priority": ["normal"],
+                    "enabled": ["1"],
+                },
+                config_path=config_path,
+            )
+
+        loaded = load_topic_config(config_path)
+        self.assertEqual(len(loaded), 1)
+
+    def test_topics_post_rejects_duplicate_edit(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [
+                TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"]),
+                TopicEntry("incident-response", "Incident response", "incident query", ["openalex"]),
+            ],
+            config_path,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Topic already exists: Datalake operations"):
+            web.save_topics_form(
+                {
+                    "action": ["update"],
+                    "topic_id": ["incident-response"],
+                    "label": ["Incident response"],
+                    "query": [" DATALAKE   query "],
+                    "sources": ["openalex"],
+                    "cadence": ["daily"],
+                    "priority": ["normal"],
+                    "enabled": ["1"],
+                },
+                config_path=config_path,
+            )
+
+        loaded = load_topic_config(config_path)
+        self.assertEqual(loaded[1].query, "incident query")
 
     def test_topics_post_toggles_enabled_from_read_mode(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -1962,7 +2017,8 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page()
 
         self.assertIn("Project Paper Scout Topics", html)
-        self.assertIn("Future runs only.", html)
+        self.assertIn("Topic changes apply to future scheduled runs.", html)
+        self.assertIn("Source schedule inventory", html)
         self.assertIn("Add Topic", html)
         self.assertIn('href="/">Review queue</a>', html)
         self.assertIn('href="/health">Health</a>', html)

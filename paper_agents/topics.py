@@ -150,6 +150,7 @@ def create_topic_from_fast_path(
         enabled=bool(enabled),
     )
     validate_topics([entry.as_dict()])
+    ensure_unique_topic(entry, existing_topics or [])
     return entry
 
 
@@ -175,6 +176,33 @@ def update_topic_from_form(
     )
     validate_topics([updated.as_dict()])
     return updated
+
+
+def ensure_unique_topic(topic: TopicEntry, existing_topics: list[TopicEntry], *, ignore_id: str | None = None) -> None:
+    duplicate = find_duplicate_topic(topic, existing_topics, ignore_id=ignore_id)
+    if duplicate is not None:
+        raise ValueError(f"Topic already exists: {duplicate.label}")
+
+
+def find_duplicate_topic(
+    topic: TopicEntry,
+    existing_topics: list[TopicEntry],
+    *,
+    ignore_id: str | None = None,
+) -> TopicEntry | None:
+    topic_label = normalize_topic_match_value(topic.label)
+    topic_query = normalize_topic_match_value(topic.query)
+    topic_slug = slug_for_topic_id(topic.label)
+    for existing in existing_topics:
+        if existing.id == ignore_id:
+            continue
+        if existing.id == topic.id or existing.id == topic_slug:
+            return existing
+        if normalize_topic_match_value(existing.label) == topic_label:
+            return existing
+        if normalize_topic_match_value(existing.query) == topic_query:
+            return existing
+    return None
 
 
 def seed_topic_entries() -> list[TopicEntry]:
@@ -378,7 +406,7 @@ def default_query_for_topic(label: str) -> str:
 
 
 def unique_topic_id(label: str, existing_topics: list[TopicEntry]) -> str:
-    base = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "topic"
+    base = slug_for_topic_id(label)
     existing = {topic.id for topic in existing_topics}
     if base not in existing:
         return base
@@ -386,6 +414,14 @@ def unique_topic_id(label: str, existing_topics: list[TopicEntry]) -> str:
     while f"{base}-{index}" in existing:
         index += 1
     return f"{base}-{index}"
+
+
+def slug_for_topic_id(label: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "topic"
+
+
+def normalize_topic_match_value(value: str) -> str:
+    return " ".join((value or "").strip().casefold().split())
 
 
 def normalize_sources(sources: list[str]) -> list[str]:
