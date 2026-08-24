@@ -25,6 +25,7 @@ Completed behavior:
 Backlog:
 
 - Track per-topic funnel performance before adding automatic Scout learning or priority recommendations.
+- Future TopicAgent suggestions should use local Ollama/Qwen on the Mini, likely `qwen2.5:1.5b-instruct` unless centralized model config changes. The agent should propose structured topic config only; the user approves before save, and backend validation should reject invalid JSON and fall back to deterministic defaults.
 
 ## 2026-08-21
 
