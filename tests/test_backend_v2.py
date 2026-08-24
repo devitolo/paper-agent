@@ -1752,7 +1752,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(proposal.matched_topic_id, "datalake-operations")
         self.assertEqual(proposal.label, "Datalake operations")
 
-    def test_topic_agent_remove_request_disables_existing_topic(self):
+    def test_topic_agent_remove_request_removes_existing_topic(self):
         topics = [
             TopicEntry(
                 "datalake-operations",
@@ -1769,10 +1769,51 @@ class BackendV2Tests(unittest.TestCase):
             provider=lambda url, model, prompt, timeout: {"not": "valid"},
         )
 
+        self.assertEqual(proposal.action, "remove_existing")
+        self.assertEqual(proposal.matched_topic_id, "datalake-operations")
+        self.assertIn("removing this topic from the topic config", proposal.rationale)
+
+    def test_topic_agent_delete_request_removes_existing_topic(self):
+        topics = [
+            TopicEntry(
+                "datalake-operations",
+                "Datalake operations",
+                "datalake operations reliability observability",
+                ["arxiv", "openalex"],
+                enabled=True,
+            )
+        ]
+
+        proposal = suggest_topic_proposal(
+            "delete datalake operations",
+            topics,
+            provider=lambda url, model, prompt, timeout: {"not": "valid"},
+        )
+
+        self.assertEqual(proposal.action, "remove_existing")
+        self.assertEqual(proposal.matched_topic_id, "datalake-operations")
+        self.assertIn("removing this topic from the topic config", proposal.rationale)
+
+    def test_topic_agent_disable_request_disables_existing_topic(self):
+        topics = [
+            TopicEntry(
+                "datalake-operations",
+                "Datalake operations",
+                "datalake operations reliability observability",
+                ["arxiv", "openalex"],
+                enabled=True,
+            )
+        ]
+
+        proposal = suggest_topic_proposal(
+            "disable datalake operations",
+            topics,
+            provider=lambda url, model, prompt, timeout: {"not": "valid"},
+        )
+
         self.assertEqual(proposal.action, "update_existing")
         self.assertEqual(proposal.matched_topic_id, "datalake-operations")
         self.assertFalse(proposal.enabled)
-        self.assertIn("removing this topic", proposal.rationale)
 
     def test_topic_agent_validates_update_matched_topic(self):
         topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"])]
@@ -1821,7 +1862,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(loaded[0].cadence, "weekly")
         self.assertEqual(loaded[0].priority, "high")
 
-    def test_topic_agent_apply_remove_proposal_disables_topic(self):
+    def test_topic_agent_apply_disable_proposal_disables_topic(self):
         topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"], enabled=True)]
         proposal = TopicProposal(
             action="update_existing",
@@ -1838,6 +1879,23 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertEqual(len(updated), 1)
         self.assertFalse(updated[0].enabled)
+
+    def test_topic_agent_apply_remove_proposal_deletes_topic(self):
+        topics = [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"], enabled=True)]
+        proposal = TopicProposal(
+            action="remove_existing",
+            matched_topic_id="datalake-operations",
+            label="Datalake operations",
+            query="datalake query",
+            sources=["arxiv"],
+            cadence="daily",
+            priority="normal",
+            enabled=True,
+        )
+
+        updated = apply_topic_proposal(proposal, topics)
+
+        self.assertEqual(updated, [])
 
     def test_topic_agent_apply_update_prevents_duplicate_collision(self):
         topics = [
@@ -1910,6 +1968,30 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Apply to save", html)
         self.assertIn('<span class="topic-status status-disabled">Off</span>', html)
         self.assertIn('class="topic-source topic-list-details" open', html)
+
+    def test_topics_page_previews_remove_proposal_in_topic_list(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [TopicEntry("datalake-operations", "Datalake operations", "datalake query", ["arxiv"], enabled=True)],
+            config_path,
+        )
+        proposal = TopicProposal(
+            action="remove_existing",
+            matched_topic_id="datalake-operations",
+            label="Datalake operations",
+            query="datalake query",
+            sources=["arxiv"],
+            cadence="daily",
+            priority="normal",
+            enabled=True,
+        )
+
+        html = web.render_topics_page(proposal=proposal, config_path=config_path)
+
+        self.assertIn("Remove pending", html)
+        self.assertIn("Apply to remove", html)
+        self.assertIn("Remove topic", html)
+        self.assertIn("Will remove", html)
 
     def test_topics_page_renders_topic_agent_conversation(self):
         proposal = TopicProposal(

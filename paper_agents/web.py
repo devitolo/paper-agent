@@ -694,7 +694,11 @@ def render_topic_proposal_panel(proposal: TopicProposal | None) -> str:
         f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
         for source in proposal.sources or []
     )
-    edit_link = f'<a class="secondary-link" href="/topics?edit={escape(proposal.matched_topic_id)}#topic-editor">Edit manually</a>' if proposal.matched_topic_id else ""
+    edit_link = (
+        f'<a class="secondary-link" href="/topics?edit={escape(proposal.matched_topic_id)}#topic-editor">Edit manually</a>'
+        if proposal.matched_topic_id and proposal.action != "remove_existing"
+        else ""
+    )
     provider_label = proposal.provider.replace("_", " ")
     proposal_label = f"{proposal.action.replace('_', ' ')} | {provider_label}"
     return f"""<div class="topic-proposal-panel" id="topic-proposal">
@@ -716,7 +720,7 @@ def render_topic_proposal_panel(proposal: TopicProposal | None) -> str:
       <form method="post" action="/topics" class="topic-proposal-actions">
         <input type="hidden" name="action" value="apply_proposal">
         <input type="hidden" name="proposal_json" value="{escape(topic_proposal_to_json(proposal))}">
-        <button type="submit" class="primary">Apply and save</button>
+        <button type="submit" class="primary">{'Remove topic' if proposal.action == 'remove_existing' else 'Apply and save'}</button>
         {edit_link}
         <a class="secondary-link" href="/topics">Cancel</a>
       </form>
@@ -769,7 +773,7 @@ def render_topic_rows(topics: list[TopicEntry], proposal: TopicProposal | None =
 
 
 def pending_topic_preview(proposal: TopicProposal | None) -> TopicEntry | None:
-    if proposal is None or proposal.action not in {"create_new", "update_existing"}:
+    if proposal is None or proposal.action not in {"create_new", "update_existing", "remove_existing"}:
         return None
     if not proposal.label or not proposal.query:
         return None
@@ -789,16 +793,17 @@ def render_topic_preview_row(topic: TopicEntry, proposal: TopicProposal | None) 
         f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
         for source in topic.sources
     )
-    enabled = "enabled" if topic.enabled else "disabled"
-    action = "New" if proposal and proposal.action == "create_new" else "Update"
+    is_remove = proposal is not None and proposal.action == "remove_existing"
+    enabled = "disabled" if is_remove else ("enabled" if topic.enabled else "disabled")
+    action = "New" if proposal and proposal.action == "create_new" else ("Remove" if is_remove else "Update")
     return f"""<div class="topic-row topic-read-row topic-preview-row" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
       <div class="topic-cell topic-label"><strong>{escape(topic.label)}</strong> <span class="topic-pending-badge">{escape(action)} pending</span></div>
       <div class="topic-cell topic-query" title="{escape(topic.query)}">{escape(topic.query)}</div>
       <div class="topic-cell topic-sources">{sources}</div>
       <div class="topic-cell"><span class="topic-pill cadence-{escape(topic.cadence)}">{escape(topic.cadence)}</span></div>
       <div class="topic-cell"><span class="topic-pill priority-{escape(topic.priority)}">{escape(topic.priority)}</span></div>
-      <div class="topic-cell"><span class="topic-status status-{enabled}">{'On' if topic.enabled else 'Off'}</span></div>
-      <div class="topic-actions"><span class="topic-preview-note">Apply to save</span></div>
+      <div class="topic-cell"><span class="topic-status status-{enabled}">{'Will remove' if is_remove else ('On' if topic.enabled else 'Off')}</span></div>
+      <div class="topic-actions"><span class="topic-preview-note">{'Apply to remove' if is_remove else 'Apply to save'}</span></div>
     </div>"""
 
 
@@ -904,6 +909,8 @@ def append_topic_agent_turns(
 def topic_agent_message(proposal: TopicProposal) -> str:
     if proposal.action == "ask_clarifying_question":
         return proposal.question
+    if proposal.action == "remove_existing":
+        return f"I found an existing topic to remove: {proposal.label}."
     if proposal.action == "update_existing":
         if not proposal.enabled:
             return f"I found an existing topic to disable: {proposal.label}."

@@ -26,7 +26,7 @@ from paper_agents.topics import (
 )
 
 
-TOPIC_ACTIONS = ("create_new", "update_existing", "ask_clarifying_question")
+TOPIC_ACTIONS = ("create_new", "update_existing", "remove_existing", "ask_clarifying_question")
 DEFAULT_TOPIC_TIMEOUT_SECONDS = 30
 
 
@@ -132,7 +132,7 @@ def build_topic_prompt(
     existing = [topic.as_dict() for topic in existing_topics]
     turns = normalize_topic_conversation(conversation or [])
     schema = {
-        "action": "create_new|update_existing|ask_clarifying_question",
+        "action": "create_new|update_existing|remove_existing|ask_clarifying_question",
         "matched_topic_id": "existing topic id or null",
         "label": "short human-readable topic label",
         "query": "search query",
@@ -149,9 +149,10 @@ def build_topic_prompt(
             "You are Project Paper TopicAgent.",
             "Project Paper scouts research about AI for SRE, IT operations, observability, incident response, debugging, reliability, infrastructure automation, and engineering workflows.",
             "The user describes what they want Project Paper to scout.",
-            "Decide whether to create a new topic, update an existing topic, or ask one clarifying question.",
+            "Decide whether to create a new topic, update an existing topic, remove an existing topic, or ask one clarifying question.",
             "Prefer updating an existing topic when the request is a duplicate or close refinement.",
-            "If the user asks to remove, delete, disable, stop, or no longer scout a topic, propose update_existing for the matching topic with enabled false. Do not propose physical deletion.",
+            "If the user asks to remove, delete, or drop a topic, propose remove_existing for the matching topic.",
+            "If the user asks to disable, turn off, pause, stop scouting, or no longer scout a topic, propose update_existing for the matching topic with enabled false.",
             "Return strict JSON only. Do not include markdown.",
             f"Allowed sources: {', '.join(SCOUT_SOURCES)}.",
             f"Allowed cadence values: {', '.join(CADENCES)}.",
@@ -210,18 +211,22 @@ def validate_topic_proposal(
             model=model,
         )
 
-    label = normalize_label(str(raw.get("label") or ""))
-    query = " ".join(str(raw.get("query") or "").strip().split())
+    matched_topic_id = raw.get("matched_topic_id")
+    if matched_topic_id is not None:
+        matched_topic_id = str(matched_topic_id)
+    matched_topic = topic_by_id(existing_topics, matched_topic_id)
+    if action == "remove_existing" and not matched_topic:
+        raise ValueError(f"Matched topic does not exist: {matched_topic_id}")
+
+    label = normalize_label(str(raw.get("label") or (matched_topic.label if matched_topic else "")))
+    query = " ".join(str(raw.get("query") or (matched_topic.query if matched_topic else "")).strip().split())
     if not label:
         raise ValueError("Topic label is required")
     if not query:
         raise ValueError("Topic query is required")
-    sources = normalize_sources(list(raw.get("sources") or []))
-    cadence = normalize_cadence(str(raw.get("cadence") or "daily"))
-    priority = normalize_priority(str(raw.get("priority") or "normal"))
-    matched_topic_id = raw.get("matched_topic_id")
-    if matched_topic_id is not None:
-        matched_topic_id = str(matched_topic_id)
+    sources = normalize_sources(list(raw.get("sources") or (matched_topic.sources if matched_topic else [])))
+    cadence = normalize_cadence(str(raw.get("cadence") or (matched_topic.cadence if matched_topic else "daily")))
+    priority = normalize_priority(str(raw.get("priority") or (matched_topic.priority if matched_topic else "normal")))
     if action == "update_existing" and not topic_by_id(existing_topics, matched_topic_id):
         raise ValueError(f"Matched topic does not exist: {matched_topic_id}")
 
@@ -301,18 +306,34 @@ def fallback_topic_proposal(
     error: Exception | None = None,
 ) -> TopicProposal:
     reason = fallback_reason(error)
-    removal_topic = match_removal_topic(user_request, existing_topics)
+    removal_topic = match_topic_action_request(user_request, existing_topics, mode="remove")
     if removal_topic is not None:
         return TopicProposal(
-            action="update_existing",
+            action="remove_existing",
             matched_topic_id=removal_topic.id,
             label=removal_topic.label,
             query=removal_topic.query,
             sources=removal_topic.sources,
             cadence=removal_topic.cadence,
             priority=removal_topic.priority,
+            enabled=removal_topic.enabled,
+            rationale=f"Interpreted the request as removing this topic from the topic config. {reason}",
+            source_rationale="Removing this topic means future scheduled runs will not select it.",
+            provider="deterministic_fallback",
+            model=model,
+        )
+    disable_topic = match_topic_action_request(user_request, existing_topics, mode="disable")
+    if disable_topic is not None:
+        return TopicProposal(
+            action="update_existing",
+            matched_topic_id=disable_topic.id,
+            label=disable_topic.label,
+            query=disable_topic.query,
+            sources=disable_topic.sources,
+            cadence=disable_topic.cadence,
+            priority=disable_topic.priority,
             enabled=False,
-            rationale=f"Interpreted the request as removing this topic from future scheduled runs. {reason}",
+            rationale=f"Interpreted the request as disabling this topic for future scheduled runs. {reason}",
             source_rationale="Preserved existing source selection while disabling the topic.",
             provider="deterministic_fallback",
             model=model,
@@ -384,15 +405,20 @@ def fallback_reason(error: Exception | None) -> str:
     return f"Fallback reason: {detail}"
 
 
-def match_removal_topic(user_request: str, existing_topics: list[TopicEntry]) -> TopicEntry | None:
+def match_topic_action_request(user_request: str, existing_topics: list[TopicEntry], *, mode: str) -> TopicEntry | None:
     normalized_request = normalize_removal_text(user_request)
     if not normalized_request:
         return None
-    removal_terms = ("remove", "delete", "disable", "stop", "turn off", "no longer", "dont scout", "don't scout")
-    if not any(term in normalized_request for term in removal_terms):
+    if mode == "remove":
+        action_terms = ("remove", "delete", "drop")
+    elif mode == "disable":
+        action_terms = ("disable", "turn off", "pause", "stop scouting", "no longer scout", "dont scout", "don't scout")
+    else:
+        raise ValueError(f"Unknown topic action match mode: {mode}")
+    if not any(term in normalized_request for term in action_terms):
         return None
     cleaned_request = normalized_request
-    for term in removal_terms:
+    for term in action_terms:
         cleaned_request = cleaned_request.replace(term, " ")
     cleaned_request = " ".join(cleaned_request.split())
     if not cleaned_request:
@@ -467,6 +493,12 @@ def apply_topic_proposal(proposal: TopicProposal, existing_topics: list[TopicEnt
             ensure_unique_topic(updated, existing_topics, ignore_id=topic.id)
             return candidate_topics
         raise ValueError(f"Matched topic does not exist: {proposal.matched_topic_id}")
+    if proposal.action == "remove_existing":
+        updated_topics = [topic for topic in existing_topics if topic.id != proposal.matched_topic_id]
+        if len(updated_topics) == len(existing_topics):
+            raise ValueError(f"Matched topic does not exist: {proposal.matched_topic_id}")
+        validate_topics([item.as_dict() for item in updated_topics])
+        return updated_topics
     raise ValueError(f"Unsupported proposal action: {proposal.action}")
 
 
