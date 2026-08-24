@@ -17,6 +17,7 @@ from paper_agents.topic_inventory import scout_topic_inventory
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,
+    DuplicateTopicError,
     PRIORITIES,
     TopicEntry,
     create_topic_from_fast_path,
@@ -105,6 +106,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self.respond_html(
                     render_topics_page(
                         saved=params.get("saved", [None])[0] == "1",
+                        duplicate=params.get("duplicate", [None])[0] == "1",
                         error=params.get("error", [None])[0],
                         edit_id=params.get("edit", [None])[0],
                     )
@@ -127,6 +129,12 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 try:
                     save_topics_form(form)
                     redirect_to = "/topics?saved=1"
+                except DuplicateTopicError as error:
+                    redirect_to = (
+                        "/topics?"
+                        + urllib.parse.urlencode({"duplicate": "1", "edit": error.topic.id})
+                        + "#topic-editor"
+                    )
                 except ValueError as error:
                     redirect_to = "/topics?" + urllib.parse.urlencode({"error": str(error)})
                 self.send_response(HTTPStatus.SEE_OTHER)
@@ -473,6 +481,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 def render_topics_page(
     *,
     saved: bool = False,
+    duplicate: bool = False,
     error: str | None = None,
     edit_id: str | None = None,
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
@@ -492,6 +501,8 @@ def render_topics_page(
     banner = ""
     if saved:
         banner = '<div class="banner">Saved. Changes apply to future scheduled runs.</div>'
+    if duplicate and edit_topic:
+        banner = f'<div class="banner">Topic already exists. Editing existing topic: {escape(edit_topic.label)}.</div>'
     if error:
         banner = f'<div class="banner warning">Topic config was not saved: {escape(error)}</div>'
     return f"""<!doctype html>
@@ -623,7 +634,7 @@ def render_topic_row(topic: TopicEntry) -> str:
 
 
 def render_topic_editor_panel(topic: TopicEntry) -> str:
-    return f"""<section class="topic-source topic-editor-panel">
+    return f"""<section class="topic-source topic-editor-panel" id="topic-editor">
       <div class="topic-source-head">
         <h2>Edit Topic</h2>
         <span>{escape(topic.label)}</span>
@@ -631,7 +642,7 @@ def render_topic_editor_panel(topic: TopicEntry) -> str:
       <form method="post" action="/topics" class="topic-edit-form" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
         <input type="hidden" name="action" value="update">
         <input type="hidden" name="topic_id" value="{escape(topic.id)}">
-        <label>Label<input name="label" value="{escape(topic.label)}" required></label>
+        <label>Label<input name="label" value="{escape(topic.label)}" required autofocus></label>
         <label>Query<input name="query" value="{escape(topic.query)}" required></label>
         {render_source_checkboxes(topic.sources)}
         {render_topic_select("cadence", CADENCES, topic.cadence, "Cadence")}

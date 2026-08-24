@@ -44,6 +44,12 @@ class TopicEntry:
         return data
 
 
+class DuplicateTopicError(ValueError):
+    def __init__(self, topic: TopicEntry):
+        self.topic = topic
+        super().__init__(f"Topic already exists: {topic.label}")
+
+
 def load_topic_config(path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> list[TopicEntry]:
     if not path.exists():
         raise FileNotFoundError(path)
@@ -181,7 +187,7 @@ def update_topic_from_form(
 def ensure_unique_topic(topic: TopicEntry, existing_topics: list[TopicEntry], *, ignore_id: str | None = None) -> None:
     duplicate = find_duplicate_topic(topic, existing_topics, ignore_id=ignore_id)
     if duplicate is not None:
-        raise ValueError(f"Topic already exists: {duplicate.label}")
+        raise DuplicateTopicError(duplicate)
 
 
 def find_duplicate_topic(

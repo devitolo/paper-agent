@@ -36,6 +36,7 @@ from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
 from paper_agents.topic_inventory import OPENALEX_ROTATING_TOPICS, scout_topic_inventory
 from paper_agents.topics import (
+    DuplicateTopicError,
     TopicEntry,
     create_topic_from_fast_path,
     load_topic_config,
@@ -1675,7 +1676,7 @@ class BackendV2Tests(unittest.TestCase):
             config_path,
         )
 
-        with self.assertRaisesRegex(ValueError, "Topic already exists: Datalake operations"):
+        with self.assertRaisesRegex(DuplicateTopicError, "Topic already exists: Datalake operations") as captured:
             web.save_topics_form(
                 {
                     "action": ["add"],
@@ -1690,6 +1691,12 @@ class BackendV2Tests(unittest.TestCase):
 
         loaded = load_topic_config(config_path)
         self.assertEqual(len(loaded), 1)
+        self.assertEqual(captured.exception.topic.id, "datalake-operations")
+
+        html = web.render_topics_page(config_path=config_path, duplicate=True, edit_id=captured.exception.topic.id)
+        self.assertIn("Topic already exists. Editing existing topic: Datalake operations.", html)
+        self.assertIn('class="topic-source topic-editor-panel" id="topic-editor"', html)
+        self.assertIn('name="label" value="Datalake operations" required autofocus', html)
 
     def test_topics_post_rejects_duplicate_edit(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
