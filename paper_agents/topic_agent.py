@@ -26,7 +26,7 @@ from paper_agents.topics import (
 
 
 TOPIC_ACTIONS = ("create_new", "update_existing", "ask_clarifying_question")
-DEFAULT_TOPIC_TIMEOUT_SECONDS = 180
+DEFAULT_TOPIC_TIMEOUT_SECONDS = 30
 
 
 @dataclass
@@ -117,8 +117,8 @@ def suggest_topic_proposal(
         raw = topic_provider(selected_url, selected_model, prompt, selected_timeout)
         proposal = validate_topic_proposal(raw, existing_topics, provider="ollama", model=selected_model)
         return redirect_duplicate_create_to_update(proposal, existing_topics)
-    except Exception:
-        return fallback_topic_proposal(user_request, existing_topics, model=selected_model)
+    except Exception as error:
+        return fallback_topic_proposal(user_request, existing_topics, model=selected_model, error=error)
 
 
 def build_topic_prompt(user_request: str, existing_topics: list[TopicEntry]) -> str:
@@ -270,7 +270,14 @@ def parse_enabled(value: Any) -> bool:
     return bool(value)
 
 
-def fallback_topic_proposal(user_request: str, existing_topics: list[TopicEntry], *, model: str | None = None) -> TopicProposal:
+def fallback_topic_proposal(
+    user_request: str,
+    existing_topics: list[TopicEntry],
+    *,
+    model: str | None = None,
+    error: Exception | None = None,
+) -> TopicProposal:
+    reason = fallback_reason(error)
     try:
         topic = create_topic_from_fast_path(user_request, existing_topics=existing_topics)
         return TopicProposal(
@@ -281,7 +288,7 @@ def fallback_topic_proposal(user_request: str, existing_topics: list[TopicEntry]
             cadence=topic.cadence,
             priority=topic.priority,
             enabled=topic.enabled,
-            rationale="Generated deterministically because TopicAgent could not produce valid JSON.",
+            rationale=f"Generated deterministically because local Qwen/Ollama was unavailable or returned invalid JSON. {reason}",
             source_rationale="Defaulted to all active sources.",
             provider="deterministic_fallback",
             model=model,
@@ -304,11 +311,23 @@ def fallback_topic_proposal(user_request: str, existing_topics: list[TopicEntry]
             cadence=duplicate.cadence,
             priority=duplicate.priority,
             enabled=duplicate.enabled,
-            rationale="Matched an existing topic deterministically because TopicAgent could not produce valid JSON.",
+            rationale=f"Matched an existing topic deterministically because local Qwen/Ollama was unavailable or returned invalid JSON. {reason}",
             source_rationale="Preserved existing source selection.",
             provider="deterministic_fallback",
             model=model,
         )
+
+
+def fallback_reason(error: Exception | None) -> str:
+    if error is None:
+        return ""
+    detail = str(error).strip()
+    if not detail:
+        detail = error.__class__.__name__
+    detail = " ".join(detail.split())
+    if len(detail) > 140:
+        detail = detail[:137].rstrip() + "..."
+    return f"Fallback reason: {detail}"
 
 
 def apply_topic_proposal(proposal: TopicProposal, existing_topics: list[TopicEntry]) -> list[TopicEntry]:

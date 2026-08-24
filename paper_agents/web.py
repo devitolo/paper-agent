@@ -577,6 +577,24 @@ def render_topics_page(
           }});
         }});
       }}
+      document.querySelectorAll(".topic-agent-form").forEach((form) => {{
+        form.addEventListener("submit", (event) => {{
+          const button = event.submitter || form.querySelector("button[type='submit']");
+          const status = form.querySelector(".topic-agent-status");
+          if (button) {{
+            button.disabled = true;
+            button.textContent = "Asking...";
+          }}
+          if (status) {{
+            status.textContent = "Asking local Qwen. If it is slow, Project Paper will fall back to a deterministic proposal.";
+          }}
+          setTimeout(() => {{
+            if (status) {{
+              status.textContent = "Still waiting on local Qwen. This request should fall back soon.";
+            }}
+          }}, 12000);
+        }});
+      }});
     </script>
   </main>
 </body>
@@ -621,6 +639,7 @@ def render_topic_agent_panel(request_text: str = "") -> str:
           <textarea name="request_text" required placeholder="datalake reliability and operations">{escape(request_text)}</textarea>
         </label>
         <button type="submit" class="primary">Ask TopicAgent</button>
+        <p class="topic-agent-status" aria-live="polite"></p>
       </form>
     </section>"""
 
@@ -643,10 +662,12 @@ def render_topic_proposal_panel(proposal: TopicProposal | None) -> str:
         for source in proposal.sources or []
     )
     edit_link = f'<a class="secondary-link" href="/topics?edit={escape(proposal.matched_topic_id)}#topic-editor">Edit manually</a>' if proposal.matched_topic_id else ""
+    provider_label = proposal.provider.replace("_", " ")
+    proposal_label = f"{proposal.action.replace('_', ' ')} | {provider_label}"
     return f"""<section class="topic-source topic-proposal-panel" id="topic-proposal">
       <div class="topic-source-head">
         <h2>TopicAgent Proposal</h2>
-        <span>{escape(proposal.action.replace("_", " "))}</span>
+        <span>{escape(proposal_label)}</span>
       </div>
       {matched}
       <dl class="topic-proposal-grid">
