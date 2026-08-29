@@ -13,14 +13,16 @@ Decision: The Review Queue should keep paper selection, source context, and feed
 Completed behavior:
 
 - Separate header navigation from queue controls so the top band stays compact.
+- Remove the Apply button, visually hide filter labels, and replace the View dropdown with a Full/Condensed two-button toggle.
 - Make the paper title the primary open affordance and keep Open PDF and Copy next to source/date/source-id metadata.
 - Remove the visible Open paper / Not interested action cluster from paper cards.
 - Remove Open summary/raw JSON from regular cards.
 - Label matched keyword pills as `Signals`.
 - Keep `Why this matches you` for personalized Curator reasoning, while omitting extra keyword-echo rationale text when signal pills are present.
-- Preserve All, Scored, and Needs review filters, source/sort/view controls, Feedback add/view/save behavior, and backend-only lightweight status compatibility.
+- Preserve All papers, Scored, and Needs review filters, source/sort/view controls, Feedback add/view/save behavior, and backend-only lightweight status compatibility.
 - Replace `logo_light.png` and `logo_dark.png` assets while preserving their filenames.
 - Add cache-busted logo URLs so browser refreshes pick up replaced assets after deploy.
+- Crop/zoom the header logo in CSS so the center mark reads larger.
 
 ## 2026-08-28
 

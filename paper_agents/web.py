@@ -44,7 +44,7 @@ FEEDBACK_STATUSES = [
 ]
 
 FILTERS = [
-    ("all", "All"),
+    ("all", "All papers"),
     ("has_feedback", "Scored"),
     ("needs_review", "Needs review"),
 ]
@@ -302,8 +302,7 @@ def render_review_queue(
         {render_select(FILTERS, "filter", filter_value, "Queue")}
         {render_select(source_choices, "source", source_value, "Source")}
         {render_select(SORTS, "sort", sort_value, "Sort")}
-        {render_select(VIEWS, "view", view_value, "View")}
-        <button type="submit" class="secondary">Apply</button>
+        {render_view_toggle(view_value)}
       </form>
     """
 
@@ -1562,10 +1561,23 @@ def render_select(
         selected = " selected" if value == current_value else ""
         options.append(f'<option value="{escape(value)}"{selected}>{escape(option_label)}</option>')
     return (
-        f'<label class="control-label">{escape(label)}'
+        f'<label class="control-label"><span class="visually-hidden">{escape(label)}</span>'
         f'<select name="{escape(name)}" onchange="this.form.submit()">{"".join(options)}</select>'
         "</label>"
     )
+
+
+def render_view_toggle(view_value: str) -> str:
+    options = []
+    for value, label, icon in [("full", "Full", "▦"), ("compact", "Condensed", "☰")]:
+        current = value == view_value
+        options.append(
+            f'<button type="submit" name="view" value="{value}" '
+            f'class="view-option{" current" if current else ""}" '
+            f'aria-label="{label} view" title="{label} view" aria-pressed="{str(current).lower()}">'
+            f'<span aria-hidden="true">{icon}</span><span>{label}</span></button>'
+        )
+    return f'<div class="view-toggle" role="group" aria-label="View density">{"".join(options)}</div>'
 
 
 def render_app_header(page_title: str, subtitle: str, controls_html: str, current_page: str) -> str:
@@ -1575,7 +1587,7 @@ def render_app_header(page_title: str, subtitle: str, controls_html: str, curren
         <div>
           <h1 class="brand-title">
             <a class="brand-home" href="/">
-              <picture><source srcset="/assets/logo_dark.png?v={LOGO_ASSET_VERSION}" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png?v={LOGO_ASSET_VERSION}" alt="" class="brand-logo"></picture>
+              <picture class="logo-frame"><source srcset="/assets/logo_dark.png?v={LOGO_ASSET_VERSION}" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png?v={LOGO_ASSET_VERSION}" alt="" class="brand-logo"></picture>
               <span class="brand-name">Project Paper</span>
               <span class="page-title">{escape(page_title)}</span>
             </a>
@@ -1911,13 +1923,14 @@ def page_css() -> str:
 }
 body { margin: 0; font: 13px/1.42 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at top left, rgba(56, 189, 248, 0.10), transparent 28rem), linear-gradient(180deg, #0a1019 0%, var(--bg) 34rem); color: var(--text); }
 main { max-width: 1180px; margin: 0 auto; padding: 14px; }
-.topbar { display: grid; gap: 9px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px; }
+.topbar { display: grid; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 7px; margin-bottom: 10px; }
 .header-main { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 18px; align-items: center; }
 .header-controls { display: flex; justify-content: flex-end; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 760; letter-spacing: 0; }
 .brand-title, .brand-home { display: flex; gap: 8px; align-items: center; }
 .brand-home { color: inherit; text-decoration: none; }
-.brand-logo { display: block; width: 42px; height: 42px; object-fit: cover; border-radius: 9px; box-shadow: 0 0 0 1px var(--border), 0 12px 24px rgba(0, 0, 0, 0.28); }
+.logo-frame { display: block; width: 42px; height: 42px; overflow: hidden; border-radius: 9px; box-shadow: 0 0 0 1px var(--border), 0 12px 24px rgba(0, 0, 0, 0.28); }
+.brand-logo { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; transform: scale(1.22); }
 .brand-name { font-weight: 750; }
 .page-title { color: var(--muted); font-weight: 650; }
 .title-link { color: var(--text); text-decoration: none; }
@@ -1927,14 +1940,18 @@ h3 { margin: 0 0 3px; font-size: 11px; font-weight: 760; color: var(--muted); le
 p { margin: 0; }
 .topbar p, .card-head p { color: var(--muted); font-size: 12px; }
 .queue-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: end; }
-.primary-nav { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.primary-nav { display: flex; gap: 16px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .control-label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; }
 select, button, input { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; background: var(--surface); color: var(--text); font: inherit; min-height: 28px; box-sizing: border-box; }
 select:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, .secondary-link:focus-visible, .source-link:focus-visible { outline: 2px solid rgba(56, 189, 248, 0.55); outline-offset: 2px; }
 button { cursor: pointer; }
 code { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .secondary-link { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 8px; color: var(--muted-strong); background: rgba(17, 26, 38, 0.78); text-decoration: none; transition: border-color 120ms ease, color 120ms ease, background 120ms ease; }
 .secondary-link.current { font-weight: 700; border-color: rgba(56, 189, 248, 0.55); color: var(--text); background: rgba(56, 189, 248, 0.10); }
+.primary-nav .secondary-link { min-height: 24px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 1px 0 3px; color: var(--muted); background: transparent; font-weight: 680; }
+.primary-nav .secondary-link.current { color: var(--text); border-bottom-color: var(--accent); background: transparent; }
+.primary-nav .secondary-link:hover { color: var(--text); background: transparent; border-bottom-color: rgba(56, 189, 248, 0.48); }
 .source-link { color: var(--accent); text-decoration: none; }
 .source-link:hover, .secondary-link:hover, .topic-edit-link:hover { text-decoration: none; border-color: var(--border-strong); color: var(--text); }
 .primary-action { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid rgba(96, 165, 250, 0.58); border-radius: var(--radius-sm); padding: 0 10px; color: #f7fbff; background: linear-gradient(180deg, rgba(37, 99, 235, 0.96), rgba(29, 78, 216, 0.96)); font-weight: 740; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10); }
@@ -1944,6 +1961,11 @@ code { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; 
 .metadata-action { display: inline-flex; align-items: center; min-height: 22px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 6px; color: var(--muted-strong); background: rgba(17, 26, 38, 0.72); font-size: 11px; font-weight: 650; text-decoration: none; }
 .pdf-action { border-color: rgba(96, 165, 250, 0.30); color: #bdd7ff; background: rgba(37, 99, 235, 0.10); }
 .metadata-action:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-raised); }
+.view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: rgba(17, 26, 38, 0.72); }
+.view-option { display: inline-flex; gap: 4px; align-items: center; min-height: 28px; border: 0; border-right: 1px solid var(--border); border-radius: 0; padding: 0 8px; color: var(--muted-strong); background: transparent; }
+.view-option:last-child { border-right: 0; }
+.view-option.current { color: var(--text); background: rgba(56, 189, 248, 0.14); }
+.view-option:hover { color: var(--text); background: var(--surface-raised); }
 .secondary-action { color: var(--muted-strong); background: rgba(17, 26, 38, 0.86); border-color: var(--border); }
 .secondary-action:hover, button.secondary:hover, .links a:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-raised); }
 .links a { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 7px; background: rgba(17, 26, 38, 0.78); color: var(--muted-strong); text-decoration: none; }
