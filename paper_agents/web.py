@@ -1905,6 +1905,7 @@ code { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; 
 .source-link { color: var(--accent); text-decoration: none; }
 .source-link:hover, .secondary-link:hover, .topic-edit-link:hover { text-decoration: none; border-color: var(--border-strong); color: var(--text); }
 .primary-action { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 0 10px; color: var(--accent-ink); background: linear-gradient(180deg, #7dd3fc, var(--accent)); font-weight: 760; box-shadow: 0 6px 18px rgba(56, 189, 248, 0.16); }
+.source-link.primary-action, .source-link.primary-action:visited, .source-link.primary-action:hover { color: var(--accent-ink); }
 .copy-url { display: inline-flex; align-items: center; min-height: 28px; margin-left: 0; padding: 2px 8px; font-size: 12px; }
 .secondary-action { color: var(--muted-strong); background: rgba(17, 26, 38, 0.86); border-color: var(--border); }
 .secondary-action:hover, button.secondary:hover, .links a:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-raised); }
