@@ -11,6 +11,7 @@ from paper_agents.curator import ResearchCurator
 from paper_agents.db import (
     DEFAULT_DB_PATH,
     DEFAULT_SCHEMA_PATH,
+    cleanup_legacy_feedback_statuses,
     connect_db,
     db_stats,
     health_summary,
@@ -106,6 +107,16 @@ def main() -> None:
     db_health_parser.add_argument("--days", type=int, default=21, help="Number of recent days to summarize")
     db_health_parser.add_argument("--source", default="all", help="Optional source filter, e.g. arxiv/openalex")
     db_health_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    db_cleanup_parser = db_subparsers.add_parser(
+        "cleanup-legacy-feedback",
+        help="Remove obsolete lightweight review statuses from the legacy feedback table",
+    )
+    db_cleanup_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    db_cleanup_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Actually delete matched rows; default is dry-run",
+    )
 
     bootstrap_parser = subparsers.add_parser("bootstrap", help="Backfill known Project Paper seed data")
     bootstrap_subparsers = bootstrap_parser.add_subparsers(dest="bootstrap_command", required=True)
@@ -279,6 +290,12 @@ def main() -> None:
                 print(json.dumps(summary, indent=2, sort_keys=True))
             else:
                 print(format_health_summary(summary))
+            return
+        if args.db_command == "cleanup-legacy-feedback":
+            print_section(
+                "Legacy feedback cleanup",
+                cleanup_legacy_feedback_statuses(args.db, dry_run=not args.yes),
+            )
             return
 
     if args.command == "bootstrap":

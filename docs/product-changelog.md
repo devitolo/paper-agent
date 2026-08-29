@@ -19,7 +19,9 @@ Completed behavior:
 - Keep Not interested as the direct status action.
 - Hide empty feedback inputs behind Add feedback; show View/edit feedback when feedback exists.
 - Keep `Scored` as the main way to find reviewed/feedback-backed papers.
-- Preserve historical lightweight status values in storage/compatibility logic without showing them as primary controls.
+- Preserve historical lightweight status values in compatibility logic without showing them as primary controls.
+- Add `db cleanup-legacy-feedback` so old `interested`, `read_later`, and `reviewed` rows can be removed from the legacy `feedback` table while preserving `not_interested`, `raw_feedback`, and `structured_feedback`.
+- Saving a non-empty feedback blob now avoids writing a duplicate legacy lightweight status row.
 
 ## 2026-08-22
 
@@ -62,10 +64,10 @@ Status: Implemented.
 
 Decision: Lightweight review status and actual feedback presence are separate concepts and need separate filters.
 
-Completed behavior:
+Completed behavior, superseded by the 2026-08-28 simplification:
 
-- Keep `Reviewed` as the lightweight status filter.
-- Use filter labels in this order: All, Scored, Needs review, Interested, Read later, Reviewed, Not interested.
+- Earlier UI exposed `Reviewed` as a lightweight status filter.
+- Earlier filter labels included All, Scored, Needs review, Interested, Read later, Reviewed, and Not interested.
 - Keep the underlying `has_feedback` value for Scored URLs.
 - Add `Scored` to show papers with saved structured feedback, or raw feedback if parsing did not produce a structured row.
 - Allow `Scored` to include feedback-backed papers outside the current recommendations.
@@ -187,7 +189,7 @@ Status: Implemented in commits `4698a43` and `25ee9b2`.
 
 Completed behavior:
 
-- Quick status buttons (`Interested`, `Read later`, `Not interested`, `Reviewed`) save status only and avoid feedback ingestion/profile apply.
+- Earlier quick status buttons saved status only and avoided feedback ingestion/profile apply; this was later narrowed to `Not interested` only.
 - Saving a non-empty Feedback blob is the only Review Queue path that ingests feedback and triggers Gemini profile apply.
 - Quick status submit shows `Saving...` and a visible timeout hint if completion hangs.
 - Cards label Curator ranking as `System` score.
@@ -237,7 +239,7 @@ Product direction:
 - Remove the visible "No ChatGPT review yet" placeholder.
 - Remove the "Copy prompt/link" toggle because it is not needed in the current workflow.
 - Show the score as just the number, without the word "score."
-- Move Interested, Read later, Not interested, and Reviewed into a compact vertical action rail on the right side under the score.
+- Earlier design explored moving all quick statuses into a compact vertical action rail; this was later narrowed to `Not interested` only.
 - Rename the Notes textarea to Feedback.
 
 ### Feedback workflow: blob-first

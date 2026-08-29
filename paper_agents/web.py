@@ -39,10 +39,7 @@ ASSET_DIR = Path(__file__).with_name("assets")
 LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
 
 FEEDBACK_STATUSES = [
-    ("interested", "Interested"),
-    ("read_later", "Read later"),
     ("not_interested", "Not interested"),
-    ("reviewed", "Reviewed"),
 ]
 
 FILTERS = [
@@ -51,12 +48,6 @@ FILTERS = [
     ("needs_review", "Needs review"),
     ("not_interested", "Not interested"),
 ]
-LEGACY_FILTER_LABELS = {
-    "interested": "Interested",
-    "read_later": "Read later",
-    "reviewed": "Reviewed",
-}
-
 SOURCE_FILTER_ALL = "all"
 
 SORTS = [
@@ -192,7 +183,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
             if action not in {"status", "feedback"}:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback action")
                 return
-            if action == "status" and status not in {value for value, _ in FEEDBACK_STATUSES}:
+            if action == "status" and status != "not_interested":
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback status")
                 return
             if action == "feedback" and not feedback_content.strip():
@@ -381,7 +372,6 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     <input type="hidden" name="paper_id" value="{card['id']}">
     <input type="hidden" name="recommendation_id" value="{escape(card['recommendation_id'] or '')}">
     <input type="hidden" name="return_to" value="{escape(return_to)}">
-    <input type="hidden" name="status" value="reviewed">
     <div class="paper-main">
       <div class="card-head">
         <div>
@@ -1604,12 +1594,12 @@ def selected_label(choices: list[tuple[str, str]], value: str) -> str:
 
 
 def normalize_filter_value(value: str) -> str:
-    allowed = {choice for choice, _ in FILTERS} | set(LEGACY_FILTER_LABELS)
+    allowed = {choice for choice, _ in FILTERS}
     return value if value in allowed else "needs_review"
 
 
 def filter_label(value: str) -> str:
-    return dict(FILTERS).get(value) or LEGACY_FILTER_LABELS.get(value) or value
+    return dict(FILTERS).get(value) or value
 
 
 def load_source_filter_choices(db_path: Path) -> list[tuple[str, str]]:

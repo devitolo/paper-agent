@@ -926,6 +926,41 @@ def create_feedback_profile_apply_attempt(
     return int(cursor.lastrowid)
 
 
+def cleanup_legacy_feedback_statuses(
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    dry_run: bool = True,
+    statuses: tuple[str, ...] = ("interested", "read_later", "reviewed"),
+) -> dict[str, Any]:
+    """Remove obsolete lightweight status rows without touching V2 feedback tables."""
+    init_db(db_path)
+    placeholders = ",".join("?" for _ in statuses)
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT status, COUNT(*)
+            FROM feedback
+            WHERE status IN ({placeholders})
+            GROUP BY status
+            ORDER BY status
+            """,
+            statuses,
+        ).fetchall()
+        counts = {row[0]: row[1] for row in rows}
+        total = sum(counts.values())
+        if not dry_run and total:
+            connection.execute(f"DELETE FROM feedback WHERE status IN ({placeholders})", statuses)
+    return {
+        "db_path": str(db_path),
+        "dry_run": dry_run,
+        "statuses": list(statuses),
+        "rows_matched": total,
+        "rows_deleted": 0 if dry_run else total,
+        "counts": counts,
+        "preserved": ["not_interested", "raw_feedback", "structured_feedback"],
+    }
+
+
 def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     init_db(db_path)
     tracked = [

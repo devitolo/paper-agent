@@ -1536,7 +1536,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Dense Review Paper", html)
         self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', html)
 
-    def test_review_queue_legacy_reviewed_filter_still_loads_status_rows(self):
+    def test_review_queue_legacy_reviewed_filter_falls_back_to_needs_review(self):
         paper_id, _ = self._seed_review_recommendation()
         self.connection.execute(
             "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
@@ -1547,8 +1547,8 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_review_queue(self.db_path, filter_value="reviewed")
 
         self.assertNotIn('<option value="reviewed"', html)
-        self.assertIn("Reviewed | All sources", html)
-        self.assertIn("Dense Review Paper", html)
+        self.assertIn("Needs review | All sources", html)
+        self.assertNotIn("Dense Review Paper", html)
 
 
     def test_source_badge_class_distinguishes_sources(self):
@@ -2167,17 +2167,23 @@ class BackendV2Tests(unittest.TestCase):
         loaded = load_topic_config(config_path)
         self.assertFalse(loaded[0].enabled)
 
-    def test_review_queue_feedback_save_still_inserts_status_and_notes(self):
+    def test_cleanup_legacy_feedback_statuses_preserves_not_interested(self):
         paper_id, _ = self._seed_review_recommendation()
+        for status in ["read_later", "interested", "reviewed", "not_interested"]:
+            self.connection.execute(
+                "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
+                (paper_id, status, f"{status} note"),
+            )
         self.connection.commit()
 
-        web.save_feedback(self.db_path, paper_id=paper_id, status="reviewed", notes="Dense feedback blob")
+        dry_run = db.cleanup_legacy_feedback_statuses(self.db_path)
+        self.assertEqual(dry_run["rows_matched"], 3)
+        self.assertEqual(dry_run["rows_deleted"], 0)
 
-        row = self.connection.execute(
-            "SELECT status, notes FROM feedback WHERE paper_id = ? ORDER BY id DESC",
-            (paper_id,),
-        ).fetchone()
-        self.assertEqual(row, ("reviewed", "Dense feedback blob"))
+        applied = db.cleanup_legacy_feedback_statuses(self.db_path, dry_run=False)
+        self.assertEqual(applied["rows_deleted"], 3)
+        rows = self.connection.execute("SELECT status, notes FROM feedback ORDER BY id").fetchall()
+        self.assertEqual(rows, [("not_interested", "not_interested note")])
 
     def test_review_queue_quick_status_controls_are_status_only(self):
         self._seed_review_recommendation()
@@ -2237,11 +2243,11 @@ class BackendV2Tests(unittest.TestCase):
 
         raw = self.connection.execute("SELECT content FROM raw_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
         structured = self.connection.execute("SELECT decision, score FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
-        lightweight = self.connection.execute("SELECT status, notes FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()
+        lightweight_count = self.connection.execute("SELECT COUNT(*) FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0]
         current = db.current_profile_version(self.connection)
         self.assertEqual(raw[0], "Decision: keep\nScore: 4\nGood fit.\n")
         self.assertEqual(structured, ("keep", 4))
-        self.assertEqual(lightweight, ("interested", "Decision: keep\nScore: 4\nGood fit."))
+        self.assertEqual(lightweight_count, 0)
         self.assertEqual(result["profile_apply"]["status"], "applied")
         self.assertEqual(current["profile"]["interests"], ["auto-applied"])
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 1)
@@ -2309,7 +2315,7 @@ class BackendV2Tests(unittest.TestCase):
         )
 
         self.assertEqual(result["profile_apply_error"], "provider unavailable")
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 0)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM raw_feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 1)
