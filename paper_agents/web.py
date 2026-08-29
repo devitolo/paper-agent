@@ -1575,7 +1575,7 @@ def render_view_toggle(view_value: str) -> str:
             f'<button type="submit" name="view" value="{value}" '
             f'class="view-option{" current" if current else ""}" '
             f'aria-label="{label} view" title="{label} view" aria-pressed="{str(current).lower()}">'
-            f'<span aria-hidden="true">{icon}</span><span>{label}</span></button>'
+            f'<span aria-hidden="true">{icon}</span></button>'
         )
     return f'<div class="view-toggle" role="group" aria-label="View density">{"".join(options)}</div>'
 
@@ -1962,7 +1962,7 @@ code { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; 
 .pdf-action { border-color: rgba(96, 165, 250, 0.30); color: #bdd7ff; background: rgba(37, 99, 235, 0.10); }
 .metadata-action:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-raised); }
 .view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: rgba(17, 26, 38, 0.72); }
-.view-option { display: inline-flex; gap: 4px; align-items: center; min-height: 28px; border: 0; border-right: 1px solid var(--border); border-radius: 0; padding: 0 8px; color: var(--muted-strong); background: transparent; }
+.view-option { display: inline-flex; justify-content: center; align-items: center; min-width: 30px; min-height: 28px; border: 0; border-right: 1px solid var(--border); border-radius: 0; padding: 0 8px; color: var(--muted-strong); background: transparent; }
 .view-option:last-child { border-right: 0; }
 .view-option.current { color: var(--text); background: rgba(56, 189, 248, 0.14); }
 .view-option:hover { color: var(--text); background: var(--surface-raised); }
