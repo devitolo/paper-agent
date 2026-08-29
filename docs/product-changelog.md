@@ -2,6 +2,25 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-08-29
+
+### Review Queue card layout and logo polish
+
+Status: Implemented in commits `cfdfa1c` and `ab237ee`.
+
+Decision: The Review Queue should keep paper selection, source context, and feedback as the primary workflow while moving secondary affordances out of the main action path.
+
+Completed behavior:
+
+- Separate header navigation from queue controls so the top band stays compact.
+- Make the paper title the primary open affordance and keep Copy next to source/date/source-id metadata.
+- Remove the visible Open paper / Not interested action cluster from paper cards.
+- Move artifact links such as Open PDF and Open summary into collapsed Artifacts details.
+- Label matched keyword pills as `Signals`.
+- Keep `Why this matches you` for personalized Curator reasoning, while rendering simple keyword-echo rationales such as `Matched X, Y` as `Matched your current profile signals.`
+- Preserve All, Scored, and Needs review filters, source/sort/view controls, Feedback add/view/save behavior, and backend-only lightweight status compatibility.
+- Replace `logo_light.png` and `logo_dark.png` assets while preserving their filenames.
+
 ## 2026-08-28
 
 ### Review Queue workflow simplification
