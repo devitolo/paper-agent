@@ -15,10 +15,10 @@ Completed behavior:
 - Use a shared Project Paper shell/header across Review Queue, Topics, and Health.
 - Default Review Queue sorting to Highest score, with Newest still available.
 - Keep source filtering and source badges.
-- Remove Read later, Interested, and explicit Reviewed from primary paper-card actions.
-- Keep Not interested as the direct status action.
+- Remove Read later, Interested, explicit Reviewed, and Not interested from primary paper-card actions.
 - Limit the Review Queue filter dropdown to All, Scored, and Needs review.
 - Add a visual identity pass that keeps the dense dark UI while treating Curator ranking as `Match Score` and rationale as `Why this matches you`.
+- Move paper opening to the title, keep Copy with the source/date/source-id metadata, and collapse artifact links out of the regular action path.
 - Hide empty feedback inputs behind Add feedback; show View/edit feedback when feedback exists.
 - Keep `Scored` as the main way to find reviewed/feedback-backed papers.
 - Preserve historical lightweight status values in compatibility logic without showing them as primary controls.

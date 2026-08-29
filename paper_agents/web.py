@@ -303,7 +303,6 @@ def render_review_queue(
         {render_select(SORTS, "sort", sort_value, "Sort")}
         {render_select(VIEWS, "view", view_value, "View")}
         <button type="submit" class="secondary">Apply</button>
-        {render_primary_nav("review")}
       </form>
     """
 
@@ -317,7 +316,7 @@ def render_review_queue(
 </head>
 <body>
   <main>
-    {render_app_header("Review Queue", f"{len(cards)} papers | {escape(filter_label(filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}", controls)}
+    {render_app_header("Review Queue", f"{len(cards)} papers | {escape(filter_label(filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}", controls, "review")}
     {saved_banner}
     <div class="cards">{card_html}</div>
     <script>
@@ -354,16 +353,18 @@ def render_review_queue(
 
 
 def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str:
-    tags = "".join(f'<span class="tag">{escape(keyword)}</span>' for keyword in card["matched_keywords"][:6])
+    signal_tags = "".join(f'<span class="tag">{escape(keyword)}</span>' for keyword in card["matched_keywords"][:6])
+    tags = f'<div class="tags"><span class="signals-label">Signals</span>{signal_tags}</div>' if signal_tags else ""
     links = render_artifact_links(card["artifacts"])
     notes = escape(card.get("feedback_notes") or "")
     user_score_html = render_user_score(card.get("user_score"))
     feedback_meta_html = render_feedback_meta(card)
     summary = card["summary"]
     source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
+    title_html = render_title_link(card)
     compact_class = " compact" if view_value == "compact" else ""
     summary_html = render_summary(summary, compact=view_value == "compact")
-    rationale_html = escape(card.get("ranking_reason") or "Matched the active profile and Scout signals.")
+    rationale_html = escape(display_rationale(card))
     feedback_summary = "View/edit feedback" if card.get("has_feedback") else "Add feedback"
 
     return f"""<article class="paper-card{compact_class}">
@@ -374,18 +375,19 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     <div class="paper-main">
       <div class="card-head">
         <div>
-          <h2>{escape(card["title"])}</h2>
-          <p>{source_badge} {escape(card.get("published") or "date unknown")} | {escape(card["source_id"])}</p>
-        </div>
-        <div class="card-actions">
-          {render_source_controls(card)}
-          <button type="submit" name="status" value="not_interested" class="{button_class(card, 'not_interested')} secondary-action" data-quick-status="1">Not interested</button>
+          <h2>{title_html}</h2>
+          <div class="paper-meta">
+            {source_badge}
+            <span>{escape(card.get("published") or "date unknown")}</span>
+            <span class="source-id">{escape(card["source_id"])}</span>
+            {render_copy_control(card)}
+          </div>
         </div>
       </div>
-      <div class="tags">{tags}</div>
+      {tags}
       <section class="match-rationale"><h3>Why this matches you</h3><p>{rationale_html}</p></section>
       {summary_html}
-      <div class="links">{links}</div>
+      {render_artifact_details(links)}
       {feedback_meta_html}
       <details class="feedback-editor">
         <summary>{feedback_summary}</summary>
@@ -406,6 +408,15 @@ def render_user_score(score: float | None) -> str:
     if score is None:
         return ""
     return f'<div class="user-score"><span>Your score</span><strong>{format_user_score(score)}/5</strong></div>'
+
+
+def display_rationale(card: dict[str, Any]) -> str:
+    reason = (card.get("ranking_reason") or "").strip()
+    if not reason:
+        return "Matched your current profile signals."
+    if reason.lower().startswith("matched ") and card.get("matched_keywords"):
+        return "Matched your current profile signals."
+    return reason
 
 
 def render_feedback_meta(card: dict[str, Any]) -> str:
@@ -450,7 +461,6 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
       <form method="get" action="/health" class="queue-controls">
         {render_select([("7", "7 days"), ("21", "21 days"), ("30", "30 days"), ("90", "90 days")], "days", str(days), "Range")}
         {render_select(source_choices, "source", source_value, "Source")}
-        {render_primary_nav("health")}
       </form>
     """
 
@@ -464,7 +474,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 </head>
 <body>
   <main>
-    {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls)}
+    {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
     {warning_html}
     <div class="health-cards">{card_html}</div>
     {graph_html}
@@ -521,11 +531,7 @@ def render_topics_page(
         banner = f'<div class="banner">Topic already exists. Editing existing topic: {escape(edit_topic.label)}.</div>'
     if error:
         banner = f'<div class="banner warning">Topic config was not saved: {escape(error)}</div>'
-    controls = f"""
-      <nav class="queue-controls" aria-label="Primary">
-        {render_primary_nav("topics")}
-      </nav>
-    """
+    controls = ""
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -536,7 +542,7 @@ def render_topics_page(
 </head>
 <body>
   <main>
-    {render_app_header("Topics", f"{len(inventory)} sources | {total_topics} configured topics | editable file-backed config", controls)}
+    {render_app_header("Topics", f"{len(inventory)} sources | {total_topics} configured topics | editable file-backed config", controls, "topics")}
     {banner}
     {render_topic_agent_panel(request_text, proposal, conversation or [])}
     {editor_panel}
@@ -1306,15 +1312,29 @@ def render_artifact_links(artifacts: dict[str, dict[str, Any]]) -> str:
     return "".join(links)
 
 
+def render_artifact_details(links: str) -> str:
+    if not links:
+        return ""
+    return f'<details class="artifact-details"><summary>Artifacts</summary><div class="links">{links}</div></details>'
 
-def render_source_controls(card: dict[str, Any]) -> str:
+
+def render_title_link(card: dict[str, Any]) -> str:
+    title = escape(card["title"])
     url = card.get("url")
     if not url:
-        return "source link unavailable"
+        return title
+    return f'<a class="title-link" href="{escape(url)}" target="_blank" rel="noreferrer">{title}</a>'
+
+
+
+def render_copy_control(card: dict[str, Any]) -> str:
+    url = card.get("url")
+    if not url:
+        return ""
     escaped_url = escape(url)
     return (
-        f'<a class="source-link open-paper primary-action" href="{escaped_url}" target="_blank" rel="noreferrer">Open paper</a>'
-        f'<button type="button" class="copy-url secondary-action" data-copy-value="{escaped_url}" aria-label="Copy paper URL">Copy link</button>'
+        f'<button type="button" class="copy-url secondary-action" '
+        f'data-copy-value="{escaped_url}" aria-label="Copy paper URL">Copy</button>'
     )
 
 
@@ -1546,19 +1566,25 @@ def render_select(
     )
 
 
-def render_app_header(page_title: str, subtitle: str, controls_html: str) -> str:
+def render_app_header(page_title: str, subtitle: str, controls_html: str, current_page: str) -> str:
+    controls_block = f'<div class="header-controls">{controls_html}</div>' if controls_html.strip() else ""
     return f"""<header class="topbar">
-      <div>
-        <h1 class="brand-title">
-          <a class="brand-home" href="/">
-            <picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture>
-            <span class="brand-name">Project Paper</span>
-            <span class="page-title">{escape(page_title)}</span>
-          </a>
-        </h1>
-        <p>{subtitle}</p>
+      <div class="header-main">
+        <div>
+          <h1 class="brand-title">
+            <a class="brand-home" href="/">
+              <picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture>
+              <span class="brand-name">Project Paper</span>
+              <span class="page-title">{escape(page_title)}</span>
+            </a>
+          </h1>
+          <p>{subtitle}</p>
+        </div>
+        <nav class="primary-nav" aria-label="Primary">
+          {render_primary_nav(current_page)}
+        </nav>
       </div>
-      {controls_html}
+      {controls_block}
     </header>"""
 
 
@@ -1883,18 +1909,23 @@ def page_css() -> str:
 }
 body { margin: 0; font: 13px/1.42 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at top left, rgba(56, 189, 248, 0.10), transparent 28rem), linear-gradient(180deg, #0a1019 0%, var(--bg) 34rem); color: var(--text); }
 main { max-width: 1180px; margin: 0 auto; padding: 14px; }
-.topbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 12px; align-items: end; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px; }
+.topbar { display: grid; gap: 9px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px; }
+.header-main { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 18px; align-items: center; }
+.header-controls { display: flex; justify-content: flex-end; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 760; letter-spacing: 0; }
 .brand-title, .brand-home { display: flex; gap: 8px; align-items: center; }
 .brand-home { color: inherit; text-decoration: none; }
 .brand-logo { display: block; width: 42px; height: 42px; border-radius: 9px; box-shadow: 0 0 0 1px var(--border), 0 12px 24px rgba(0, 0, 0, 0.28); }
 .brand-name { font-weight: 750; }
 .page-title { color: var(--muted); font-weight: 650; }
+.title-link { color: var(--text); text-decoration: none; }
+.title-link:hover { color: #cbeafe; text-decoration: underline; text-decoration-color: rgba(56, 189, 248, 0.55); text-underline-offset: 3px; }
 h2 { margin: 0 0 3px; font-size: 15px; font-weight: 720; line-height: 1.25; letter-spacing: 0; }
 h3 { margin: 0 0 3px; font-size: 11px; font-weight: 760; color: var(--muted); letter-spacing: 0.02em; text-transform: uppercase; }
 p { margin: 0; }
 .topbar p, .card-head p { color: var(--muted); font-size: 12px; }
 .queue-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: end; }
+.primary-nav { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .control-label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; }
 select, button, input { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; background: var(--surface); color: var(--text); font: inherit; min-height: 28px; box-sizing: border-box; }
 select:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, .secondary-link:focus-visible, .source-link:focus-visible { outline: 2px solid rgba(56, 189, 248, 0.55); outline-offset: 2px; }
@@ -1904,9 +1935,10 @@ code { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; 
 .secondary-link.current { font-weight: 700; border-color: rgba(56, 189, 248, 0.55); color: var(--text); background: rgba(56, 189, 248, 0.10); }
 .source-link { color: var(--accent); text-decoration: none; }
 .source-link:hover, .secondary-link:hover, .topic-edit-link:hover { text-decoration: none; border-color: var(--border-strong); color: var(--text); }
-.primary-action { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 0 10px; color: var(--accent-ink); background: linear-gradient(180deg, #7dd3fc, var(--accent)); font-weight: 760; box-shadow: 0 6px 18px rgba(56, 189, 248, 0.16); }
-.source-link.primary-action, .source-link.primary-action:visited, .source-link.primary-action:hover { color: var(--accent-ink); }
-.copy-url { display: inline-flex; align-items: center; min-height: 28px; margin-left: 0; padding: 2px 8px; font-size: 12px; }
+.primary-action { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid rgba(96, 165, 250, 0.58); border-radius: var(--radius-sm); padding: 0 10px; color: #f7fbff; background: linear-gradient(180deg, rgba(37, 99, 235, 0.96), rgba(29, 78, 216, 0.96)); font-weight: 740; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10); }
+.primary-action:hover { border-color: rgba(125, 211, 252, 0.68); background: linear-gradient(180deg, rgba(37, 99, 235, 1), rgba(30, 64, 175, 1)); }
+.source-link.primary-action, .source-link.primary-action:visited, .source-link.primary-action:hover { color: #f7fbff; }
+.copy-url { display: inline-flex; align-items: center; min-height: 22px; margin-left: 0; padding: 1px 6px; font-size: 11px; }
 .secondary-action { color: var(--muted-strong); background: rgba(17, 26, 38, 0.86); border-color: var(--border); }
 .secondary-action:hover, button.secondary:hover, .links a:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-raised); }
 .links a { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 7px; background: rgba(17, 26, 38, 0.78); color: var(--muted-strong); text-decoration: none; }
@@ -1919,8 +1951,9 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .paper-card:hover { border-color: var(--border-strong); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(56, 189, 248, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.045); }
 .paper-form { display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 12px; align-items: start; }
 .paper-main { min-width: 0; }
-.card-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; }
-.card-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.card-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; }
+.paper-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.25; }
+.paper-meta .source-id { color: #75859a; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 .match-score { text-align: center; border: 1px solid rgba(56, 189, 248, 0.45); border-radius: var(--radius-sm); padding: 6px; background: linear-gradient(180deg, rgba(56, 189, 248, 0.15), rgba(56, 189, 248, 0.055)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); }
 .match-score strong { display: block; font-size: 20px; line-height: 1; color: #e0f7ff; }
 .match-score span, .user-score span { display: block; color: var(--muted); font-size: 9px; line-height: 1.05; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -1932,6 +1965,7 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .feedback-meta { display: inline-block; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 7px; color: var(--muted); background: rgba(17, 26, 38, 0.74); font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; margin-top: 6px; }
 .tags, .links { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .tag { border: 1px solid var(--border); color: var(--muted); border-radius: 999px; padding: 1px 6px; font-size: 11px; background: rgba(148, 163, 184, 0.07); }
+.signals-label { color: #7ea0bd; font-size: 10px; font-weight: 760; letter-spacing: 0.04em; text-transform: uppercase; }
 .source-badge { border-radius: 999px; padding: 1px 7px; font-size: 11px; font-weight: 650; border: 1px solid transparent; white-space: nowrap; }
 .source-badge::before { margin-right: 4px; }
 .source-badge-arxiv { color: #ffd166; background: rgba(251, 191, 36, 0.13); border-color: rgba(251, 191, 36, 0.58); }
@@ -1949,6 +1983,10 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .source-summary p { max-height: 88px; overflow: auto; }
 .compact-summary { margin: 6px 0; line-height: 1.35; }
 .links { margin-bottom: 7px; }
+.artifact-details { margin: 6px 0; }
+.artifact-details > summary { display: inline-flex; align-items: center; min-height: 22px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 7px; color: var(--muted); background: rgba(17, 26, 38, 0.62); cursor: pointer; font-size: 11px; font-weight: 650; list-style: none; }
+.artifact-details > summary::-webkit-details-marker { display: none; }
+.artifact-details[open] > summary { margin-bottom: 6px; }
 .match-rationale { margin-top: 7px; border: 1px solid rgba(56, 189, 248, 0.24); border-left-color: rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 7px 9px; background: linear-gradient(90deg, rgba(56, 189, 248, 0.105), rgba(56, 189, 248, 0.025)); }
 .match-rationale h3 { color: #b9eaff; }
 .match-rationale p { color: #d7e8f5; font-size: 12px; }
@@ -2083,7 +2121,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .topbar p, .page-title, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .match-score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note-text { color: var(--muted); }
   .summary-grid p, .source-summary p, .match-rationale p { color: var(--muted-strong); }
   .source-link { color: var(--accent); }
-  .links a, button, select, input, .secondary-link, textarea, .feedback-meta, .feedback-editor > summary, .health-card, .health-graph, .health-table table, .health-kv, .topic-source, .topic-inventory-details { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .links a, button, select, input, .secondary-link, textarea, .feedback-meta, .feedback-editor > summary, .artifact-details > summary, .health-card, .health-graph, .health-table table, .health-kv, .topic-source, .topic-inventory-details { background: var(--surface); color: var(--text); border-color: var(--border); }
   .paper-card, .empty { background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); border-color: var(--border); }
   button.secondary { background: rgba(17, 26, 38, 0.86); }
   .score-secondary { background: transparent; }
@@ -2120,10 +2158,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 }
 @media (max-width: 720px) {
   main { padding: 10px; }
-  .topbar, .paper-form { grid-template-columns: 1fr; }
-  .queue-controls { justify-content: flex-start; }
-  .card-head { grid-template-columns: 1fr; }
-  .card-actions { justify-content: flex-start; }
+  .header-main, .paper-form { grid-template-columns: 1fr; }
+  .header-controls { justify-content: flex-start; }
+  .queue-controls, .primary-nav { justify-content: flex-start; }
   .summary-grid { grid-template-columns: 1fr; }
   .action-rail { grid-template-columns: 64px 1fr; align-items: start; }
   .feedback-state { text-align: left; grid-column: 1 / -1; }

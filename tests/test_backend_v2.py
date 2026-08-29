@@ -1408,6 +1408,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('src="/assets/logo_light.png"', html)
         self.assertIn('<span class="brand-name">Project Paper</span>', html)
         self.assertIn('<span class="page-title">Review Queue</span>', html)
+        self.assertIn('<div class="header-controls">', html)
+        self.assertIn('<nav class="primary-nav" aria-label="Primary">', html)
         self.assertIn('<option value="score" selected>Highest score</option>', html)
         self.assertIn('<option value="latest">Newest</option>', html)
         self.assertIn('<option value="all">All</option>', html)
@@ -1415,14 +1417,17 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<option value="needs_review" selected>Needs review</option>', html)
         self.assertNotIn('<option value="not_interested"', html)
         self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
+        self.assertIn('<div class="paper-meta">', html)
         self.assertIn('data-copy-value="https://example.test/2607.reviewv1"', html)
-        self.assertIn('class="source-link open-paper primary-action"', html)
-        self.assertIn(">Open paper</a>", html)
-        self.assertIn(">Copy link</button>", html)
-        self.assertIn(">Not interested</button>", html)
+        self.assertIn('class="title-link"', html)
+        self.assertIn('aria-label="Copy paper URL">Copy</button>', html)
+        self.assertNotIn(">Open paper</a>", html)
+        self.assertNotIn(">Not interested</button>", html)
+        self.assertIn('<span class="signals-label">Signals</span>', html)
         self.assertIn("<summary>Add feedback</summary>", html)
         self.assertIn('<textarea name="notes" placeholder="Paste your ChatGPT discussion feedback blob here">', html)
         self.assertIn("Why this matches you", html)
+        self.assertIn("Strong match.", html)
         self.assertNotIn("No ChatGPT review yet", html)
         self.assertNotIn("Copy prompt/link", html)
         self.assertNotIn(">Read later</button>", html)
@@ -1430,6 +1435,16 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn(">Reviewed</button>", html)
         self.assertNotIn("<span>score</span>", html)
         self.assertNotIn(">Notes<textarea", html)
+
+    def test_review_queue_collapses_keyword_echo_rationale(self):
+        card = {"ranking_reason": "Matched incident, automation.", "matched_keywords": ["incident", "automation"]}
+
+        self.assertEqual(web.display_rationale(card), "Matched your current profile signals.")
+
+    def test_review_queue_preserves_specific_rationale(self):
+        card = {"ranking_reason": "Strong match.", "matched_keywords": ["incident", "automation"]}
+
+        self.assertEqual(web.display_rationale(card), "Strong match.")
 
     def test_review_queue_renders_profile_apply_queued_banner(self):
         html = web.render_review_queue(self.db_path, saved=True, profile_apply_queued=True)
@@ -2216,7 +2231,7 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_review_queue(self.db_path)
 
         self.assertIn('name="action" value="feedback"', html)
-        self.assertIn('data-quick-status="1">Not interested</button>', html)
+        self.assertNotIn('data-quick-status="1">Not interested</button>', html)
         self.assertNotIn('data-quick-status="1">Read later</button>', html)
         self.assertIn('<span class="submit-state" aria-live="polite"></span>', html)
 
