@@ -17,6 +17,7 @@ Completed behavior:
 - Keep source filtering and source badges.
 - Remove Read later, Interested, and explicit Reviewed from primary paper-card actions.
 - Keep Not interested as the direct status action.
+- Limit the Review Queue filter dropdown to All, Scored, and Needs review.
 - Hide empty feedback inputs behind Add feedback; show View/edit feedback when feedback exists.
 - Keep `Scored` as the main way to find reviewed/feedback-backed papers.
 - Preserve historical lightweight status values in compatibility logic without showing them as primary controls.

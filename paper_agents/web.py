@@ -46,7 +46,6 @@ FILTERS = [
     ("all", "All"),
     ("has_feedback", "Scored"),
     ("needs_review", "Needs review"),
-    ("not_interested", "Not interested"),
 ]
 SOURCE_FILTER_ALL = "all"
 
