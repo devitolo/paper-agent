@@ -37,6 +37,7 @@ from paper_agents.topics import (
 
 ASSET_DIR = Path(__file__).with_name("assets")
 LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
+LOGO_ASSET_VERSION = "20260829"
 
 FEEDBACK_STATUSES = [
     ("not_interested", "Not interested"),
@@ -354,8 +355,6 @@ def render_review_queue(
 
 def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str:
     signal_tags = "".join(f'<span class="tag">{escape(keyword)}</span>' for keyword in card["matched_keywords"][:6])
-    tags = f'<div class="tags"><span class="signals-label">Signals</span>{signal_tags}</div>' if signal_tags else ""
-    links = render_artifact_links(card["artifacts"])
     notes = escape(card.get("feedback_notes") or "")
     user_score_html = render_user_score(card.get("user_score"))
     feedback_meta_html = render_feedback_meta(card)
@@ -364,7 +363,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     title_html = render_title_link(card)
     compact_class = " compact" if view_value == "compact" else ""
     summary_html = render_summary(summary, compact=view_value == "compact")
-    rationale_html = escape(display_rationale(card))
+    rationale_html = render_match_rationale(card, signal_tags)
     feedback_summary = "View/edit feedback" if card.get("has_feedback") else "Add feedback"
 
     return f"""<article class="paper-card{compact_class}">
@@ -380,14 +379,13 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
             {source_badge}
             <span>{escape(card.get("published") or "date unknown")}</span>
             <span class="source-id">{escape(card["source_id"])}</span>
+            {render_pdf_control(card)}
             {render_copy_control(card)}
           </div>
         </div>
       </div>
-      {tags}
-      <section class="match-rationale"><h3>Why this matches you</h3><p>{rationale_html}</p></section>
+      {rationale_html}
       {summary_html}
-      {render_artifact_details(links)}
       {feedback_meta_html}
       <details class="feedback-editor">
         <summary>{feedback_summary}</summary>
@@ -397,8 +395,8 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
       <span class="submit-state" aria-live="polite"></span>
     </div>
     <div class="action-rail">
-      {user_score_html}
       <div class="match-score {'score-secondary' if card.get('user_score') is not None else ''}"><span>Match Score</span><strong>{card["score"]:.1f}</strong></div>
+      {user_score_html}
     </div>
   </form>
 </article>"""
@@ -417,6 +415,17 @@ def display_rationale(card: dict[str, Any]) -> str:
     if reason.lower().startswith("matched ") and card.get("matched_keywords"):
         return "Matched your current profile signals."
     return reason
+
+
+def render_match_rationale(card: dict[str, Any], signal_tags: str) -> str:
+    rationale = display_rationale(card)
+    signals_html = f'<div class="tags"><span class="signals-label">Signals</span>{signal_tags}</div>' if signal_tags else ""
+    rationale_html = "" if rationale == "Matched your current profile signals." and signal_tags else f"<p>{escape(rationale)}</p>"
+    return f"""<section class="match-rationale">
+        <h3>Why this matches you</h3>
+        {rationale_html}
+        {signals_html}
+      </section>"""
 
 
 def render_feedback_meta(card: dict[str, Any]) -> str:
@@ -1298,32 +1307,22 @@ def render_key_values(values: dict[str, Any]) -> str:
     return f'<dl class="health-kv">{items}</dl>'
 
 
-def render_artifact_links(artifacts: dict[str, dict[str, Any]]) -> str:
-    labels = {
-        "pdf": "Open PDF",
-        "triage_summary": "Open summary",
-        "chatgpt_review": "Open review",
-    }
-    links = []
-    for artifact_type, label in labels.items():
-        artifact = artifacts.get(artifact_type)
-        if artifact:
-            links.append(f'<a href="/artifact/{artifact["id"]}" target="_blank" rel="noreferrer">{label}</a>')
-    return "".join(links)
-
-
-def render_artifact_details(links: str) -> str:
-    if not links:
-        return ""
-    return f'<details class="artifact-details"><summary>Artifacts</summary><div class="links">{links}</div></details>'
-
-
 def render_title_link(card: dict[str, Any]) -> str:
     title = escape(card["title"])
     url = card.get("url")
     if not url:
         return title
     return f'<a class="title-link" href="{escape(url)}" target="_blank" rel="noreferrer">{title}</a>'
+
+
+def render_pdf_control(card: dict[str, Any]) -> str:
+    pdf_artifact = card.get("artifacts", {}).get("pdf")
+    if pdf_artifact:
+        return f'<a class="metadata-action pdf-action" href="/artifact/{pdf_artifact["id"]}" target="_blank" rel="noreferrer">Open PDF</a>'
+    pdf_url = card.get("pdf_url")
+    if pdf_url:
+        return f'<a class="metadata-action pdf-action" href="{escape(pdf_url)}" target="_blank" rel="noreferrer">Open PDF</a>'
+    return ""
 
 
 
@@ -1333,7 +1332,7 @@ def render_copy_control(card: dict[str, Any]) -> str:
         return ""
     escaped_url = escape(url)
     return (
-        f'<button type="button" class="copy-url secondary-action" '
+        f'<button type="button" class="metadata-action copy-url secondary-action" '
         f'data-copy-value="{escaped_url}" aria-label="Copy paper URL">Copy</button>'
     )
 
@@ -1446,6 +1445,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     source,
                     source_id,
                     url,
+                    pdf_url,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id ASC) AS row_number
                 FROM paper_sources
             ), source_rollup AS (
@@ -1468,6 +1468,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                 papers.published,
                 papers.abstract,
                 primary_source.url,
+                primary_source.pdf_url,
                 latest_recommendation.score,
                 latest_recommendation.matched_signals_json,
                 latest_recommendation.rationale,
@@ -1499,12 +1500,12 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
         for row in rows:
             paper_id = row[0]
             artifacts = load_artifacts_for_paper(connection, paper_id)
-            lightweight_score = parse_lightweight_feedback_score(row[12])
-            user_score = row[14] if row[14] is not None else lightweight_score
+            lightweight_score = parse_lightweight_feedback_score(row[13])
+            user_score = row[15] if row[15] is not None else lightweight_score
             has_feedback = bool(
-                row[15] is not None
-                or row[16] is not None
+                row[16] is not None
                 or row[17] is not None
+                or row[18] is not None
                 or lightweight_score is not None
             )
             cards.append(
@@ -1513,19 +1514,20 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     "recommendation_id": row[1],
                     "source": row[2] or "unknown",
                     "source_id": row[3] or "unknown",
-                    "source_label": source_label(row[2] or "unknown", parse_sources(row[13])),
+                    "source_label": source_label(row[2] or "unknown", parse_sources(row[14])),
                     "user_score": user_score,
-                    "feedback_decision": row[15],
-                    "feedback_received_at": row[17] or row[16],
+                    "feedback_decision": row[16],
+                    "feedback_received_at": row[18] or row[17],
                     "has_feedback": has_feedback,
                     "title": row[4],
                     "published": row[5],
                     "url": row[7],
-                    "score": float(row[8] or 0),
-                    "matched_keywords": decode_json(row[9], []),
-                    "ranking_reason": row[10],
-                    "feedback_status": row[11],
-                    "feedback_notes": row[12],
+                    "pdf_url": row[8],
+                    "score": float(row[9] or 0),
+                    "matched_keywords": decode_json(row[10], []),
+                    "ranking_reason": row[11],
+                    "feedback_status": row[12],
+                    "feedback_notes": row[13],
                     "artifacts": artifacts,
                     "summary": with_source_abstract(load_summary(artifacts.get("triage_summary")), row[6]),
                 }
@@ -1573,7 +1575,7 @@ def render_app_header(page_title: str, subtitle: str, controls_html: str, curren
         <div>
           <h1 class="brand-title">
             <a class="brand-home" href="/">
-              <picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture>
+              <picture><source srcset="/assets/logo_dark.png?v={LOGO_ASSET_VERSION}" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png?v={LOGO_ASSET_VERSION}" alt="" class="brand-logo"></picture>
               <span class="brand-name">Project Paper</span>
               <span class="page-title">{escape(page_title)}</span>
             </a>
@@ -1939,6 +1941,9 @@ code { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; 
 .primary-action:hover { border-color: rgba(125, 211, 252, 0.68); background: linear-gradient(180deg, rgba(37, 99, 235, 1), rgba(30, 64, 175, 1)); }
 .source-link.primary-action, .source-link.primary-action:visited, .source-link.primary-action:hover { color: #f7fbff; }
 .copy-url { display: inline-flex; align-items: center; min-height: 22px; margin-left: 0; padding: 1px 6px; font-size: 11px; }
+.metadata-action { display: inline-flex; align-items: center; min-height: 22px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 6px; color: var(--muted-strong); background: rgba(17, 26, 38, 0.72); font-size: 11px; font-weight: 650; text-decoration: none; }
+.pdf-action { border-color: rgba(96, 165, 250, 0.30); color: #bdd7ff; background: rgba(37, 99, 235, 0.10); }
+.metadata-action:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-raised); }
 .secondary-action { color: var(--muted-strong); background: rgba(17, 26, 38, 0.86); border-color: var(--border); }
 .secondary-action:hover, button.secondary:hover, .links a:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-raised); }
 .links a { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 7px; background: rgba(17, 26, 38, 0.78); color: var(--muted-strong); text-decoration: none; }
@@ -1955,10 +1960,10 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .paper-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.25; }
 .paper-meta .source-id { color: #75859a; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 .match-score { text-align: center; border: 1px solid rgba(56, 189, 248, 0.45); border-radius: var(--radius-sm); padding: 6px; background: linear-gradient(180deg, rgba(56, 189, 248, 0.15), rgba(56, 189, 248, 0.055)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); }
-.match-score strong { display: block; font-size: 20px; line-height: 1; color: #e0f7ff; }
+.match-score strong { display: block; font-size: 18px; line-height: 1; color: #e0f7ff; }
 .match-score span, .user-score span { display: block; color: var(--muted); font-size: 9px; line-height: 1.05; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
 .score-secondary { background: transparent; }
-.score-secondary strong { font-size: 14px; color: var(--muted-strong); }
+.score-secondary strong { font-size: 18px; color: #e0f7ff; }
 .user-score { text-align: center; border: 1px solid rgba(52, 211, 153, 0.48); border-radius: var(--radius-sm); padding: 6px; background: rgba(52, 211, 153, 0.12); color: #9ff3cf; }
 .user-score strong { display: block; font-size: 18px; line-height: 1; }
 .feedback-state { color: var(--muted); font-size: 11px; text-align: center; }
@@ -1983,13 +1988,9 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .source-summary p { max-height: 88px; overflow: auto; }
 .compact-summary { margin: 6px 0; line-height: 1.35; }
 .links { margin-bottom: 7px; }
-.artifact-details { margin: 6px 0; }
-.artifact-details > summary { display: inline-flex; align-items: center; min-height: 22px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 7px; color: var(--muted); background: rgba(17, 26, 38, 0.62); cursor: pointer; font-size: 11px; font-weight: 650; list-style: none; }
-.artifact-details > summary::-webkit-details-marker { display: none; }
-.artifact-details[open] > summary { margin-bottom: 6px; }
 .match-rationale { margin-top: 7px; border: 1px solid rgba(56, 189, 248, 0.24); border-left-color: rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 7px 9px; background: linear-gradient(90deg, rgba(56, 189, 248, 0.105), rgba(56, 189, 248, 0.025)); }
 .match-rationale h3 { color: #b9eaff; }
-.match-rationale p { color: #d7e8f5; font-size: 12px; }
+.match-rationale p { color: #d7e8f5; font-size: 12px; margin-bottom: 5px; }
 .paper-card.compact { padding: 8px 10px; }
 .paper-card.compact .tags, .paper-card.compact .links { margin-top: 5px; }
 .action-rail { display: grid; gap: 6px; }
@@ -2121,7 +2122,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .topbar p, .page-title, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .match-score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note-text { color: var(--muted); }
   .summary-grid p, .source-summary p, .match-rationale p { color: var(--muted-strong); }
   .source-link { color: var(--accent); }
-  .links a, button, select, input, .secondary-link, textarea, .feedback-meta, .feedback-editor > summary, .artifact-details > summary, .health-card, .health-graph, .health-table table, .health-kv, .topic-source, .topic-inventory-details { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .links a, button, select, input, .secondary-link, textarea, .feedback-meta, .feedback-editor > summary, .health-card, .health-graph, .health-table table, .health-kv, .topic-source, .topic-inventory-details { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .metadata-action { background: rgba(17, 26, 38, 0.72); color: var(--muted-strong); border-color: var(--border); }
+  .pdf-action { border-color: rgba(96, 165, 250, 0.30); color: #bdd7ff; background: rgba(37, 99, 235, 0.10); }
   .paper-card, .empty { background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); border-color: var(--border); }
   button.secondary { background: rgba(17, 26, 38, 0.86); }
   .score-secondary { background: transparent; }

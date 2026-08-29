@@ -1404,8 +1404,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('class="action-rail"', html)
         self.assertIn('<h1 class="brand-title">', html)
         self.assertIn('<a class="brand-home" href="/">', html)
-        self.assertIn('srcset="/assets/logo_dark.png"', html)
-        self.assertIn('src="/assets/logo_light.png"', html)
+        self.assertIn('srcset="/assets/logo_dark.png?v=', html)
+        self.assertIn('src="/assets/logo_light.png?v=', html)
         self.assertIn('<span class="brand-name">Project Paper</span>', html)
         self.assertIn('<span class="page-title">Review Queue</span>', html)
         self.assertIn('<div class="header-controls">', html)
@@ -1420,7 +1420,12 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<div class="paper-meta">', html)
         self.assertIn('data-copy-value="https://example.test/2607.reviewv1"', html)
         self.assertIn('class="title-link"', html)
+        self.assertIn('class="metadata-action pdf-action"', html)
+        self.assertIn(">Open PDF</a>", html)
         self.assertIn('aria-label="Copy paper URL">Copy</button>', html)
+        self.assertLess(html.index(">Open PDF</a>"), html.index('aria-label="Copy paper URL">Copy</button>'))
+        self.assertNotIn("Artifacts</summary>", html)
+        self.assertNotIn(">Open summary</a>", html)
         self.assertNotIn(">Open paper</a>", html)
         self.assertNotIn(">Not interested</button>", html)
         self.assertIn('<span class="signals-label">Signals</span>', html)
@@ -1440,6 +1445,9 @@ class BackendV2Tests(unittest.TestCase):
         card = {"ranking_reason": "Matched incident, automation.", "matched_keywords": ["incident", "automation"]}
 
         self.assertEqual(web.display_rationale(card), "Matched your current profile signals.")
+        rendered = web.render_match_rationale(card, '<span class="tag">incident</span>')
+        self.assertIn('<span class="tag">incident</span>', rendered)
+        self.assertNotIn("<p>Matched your current profile signals.</p>", rendered)
 
     def test_review_queue_preserves_specific_rationale(self):
         card = {"ranking_reason": "Strong match.", "matched_keywords": ["incident", "automation"]}
@@ -1470,6 +1478,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("<summary>View/edit feedback</summary>", html)
         self.assertIn('class="match-score score-secondary"', html)
         self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
+        self.assertLess(html.index('<span>Match Score</span><strong>72.5</strong>'), html.index('<div class="user-score"><span>Your score</span><strong>2/5</strong></div>'))
 
     def test_review_queue_renders_decimal_user_feedback_score(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
@@ -2528,6 +2537,7 @@ class BackendV2Tests(unittest.TestCase):
                 "source_id": source_id,
                 "title": "Dense Review Paper",
                 "url": f"https://example.test/{source_id}",
+                "pdf_url": f"https://example.test/{source_id}.pdf",
                 "published": "2026-07-30",
                 "abstract": "Applied incident review automation.",
             },
