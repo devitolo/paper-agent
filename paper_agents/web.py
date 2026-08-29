@@ -357,6 +357,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     notes = escape(card.get("feedback_notes") or "")
     user_score_html = render_user_score(card.get("user_score"))
     feedback_meta_html = render_feedback_meta(card)
+    discussion_prompt = escape(build_discussion_prompt(card))
     summary = card["summary"]
     source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
     title_html = render_title_link(card)
@@ -386,9 +387,12 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
       {rationale_html}
       {summary_html}
       {feedback_meta_html}
+      <div class="feedback-tools">
+        <button type="button" class="metadata-action discussion-prompt" data-copy-value="{discussion_prompt}" aria-label="Copy Paper Discussion prompt">Copy discussion prompt</button>
+      </div>
       <details class="feedback-editor">
         <summary>{feedback_summary}</summary>
-        <label>Feedback<textarea name="notes" placeholder="Paste your ChatGPT discussion feedback blob here">{notes}</textarea></label>
+        <label>Feedback<textarea name="notes" placeholder="Paste final feedback blob from Paper Discussion here">{notes}</textarea></label>
         <button type="submit" name="action" value="feedback" class="secondary save-feedback">Save feedback</button>
       </details>
       <span class="submit-state" aria-live="polite"></span>
@@ -438,6 +442,64 @@ def render_feedback_meta(card: dict[str, Any]) -> str:
     if not parts:
         parts.append("Feedback saved")
     return f'<div class="feedback-meta">{"<br>".join(parts)}</div>'
+
+
+def build_discussion_prompt(card: dict[str, Any]) -> str:
+    summary = card.get("summary") or {}
+    summary_lines = discussion_summary_lines(summary)
+    summary_block = "\n".join(summary_lines) if summary_lines else "No local triage summary or source abstract is available yet."
+    signals = ", ".join(str(keyword) for keyword in card.get("matched_keywords", []) if keyword) or "Not available"
+    user_score = card.get("user_score")
+    user_score_line = f"User score: {format_user_score(user_score)}/5\n" if user_score is not None else ""
+    return (
+        "I want to discuss this paper for my Project Paper workflow.\n\n"
+        "Paper:\n"
+        f"{card.get('title') or 'Untitled paper'}\n"
+        f"Source: {card.get('source_label') or 'Unknown source'}\n"
+        f"Date: {card.get('published') or 'unknown'}\n"
+        f"Link: {card.get('url') or 'not available'}\n"
+        f"PDF: {discussion_pdf_link(card)}\n"
+        f"Match score: {float(card.get('score') or 0):.1f}\n"
+        f"{user_score_line}"
+        f"Why this matches me: {display_rationale(card)}\n"
+        f"Signals: {signals}\n\n"
+        "Available local context:\n"
+        f"{summary_block}\n\n"
+        "Please help me review it in an audio-friendly way:\n"
+        "1. Give me a concise orientation: what problem it addresses, why it matters, and the approach.\n"
+        "2. Walk me through the paper section by section in plain language.\n"
+        "3. Call out what is practically useful for AI applied to SRE, production operations, observability, incident response, debugging, reliability, or engineering workflows.\n"
+        "4. Call out limitations, weak evidence, or reasons it may not be worth my time.\n"
+        "5. At the end, produce a final feedback blob for Project Paper in this exact shape:\n\n"
+        "Decision: keep|maybe|reject\n"
+        "Score: 1-5, where 5 is highest\n"
+        "Reason: ...\n"
+        "Positive signals: ...\n"
+        "Negative signals: ...\n"
+        "What I want more of: ...\n"
+        "What I want less of: ...\n"
+    )
+
+
+def discussion_pdf_link(card: dict[str, Any]) -> str:
+    pdf_artifact = card.get("artifacts", {}).get("pdf")
+    if pdf_artifact:
+        return f"/artifact/{pdf_artifact['id']}"
+    return card.get("pdf_url") or "not available"
+
+
+def discussion_summary_lines(summary: dict[str, Any]) -> list[str]:
+    lines = []
+    for label, key in [
+        ("Problem", "research_problem"),
+        ("Why it matters", "why_it_matters"),
+        ("Approach", "approach"),
+        ("Source abstract", "source_abstract"),
+    ]:
+        value = (summary.get(key) or "").strip()
+        if value:
+            lines.append(f"{label}: {value}")
+    return lines
 
 
 def format_user_score(score: float) -> str:
@@ -1990,6 +2052,8 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .user-score strong { display: block; font-size: 18px; line-height: 1; }
 .feedback-state { color: var(--muted); font-size: 11px; text-align: center; }
 .feedback-meta { display: inline-block; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 7px; color: var(--muted); background: rgba(17, 26, 38, 0.74); font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; margin-top: 6px; }
+.feedback-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.discussion-prompt { color: #d3e6ff; border-color: rgba(96, 165, 250, 0.34); background: rgba(37, 99, 235, 0.12); }
 .tags, .links { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .tag { border: 1px solid var(--border); color: var(--muted); border-radius: 999px; padding: 1px 6px; font-size: 11px; background: rgba(148, 163, 184, 0.07); }
 .signals-label { color: #7ea0bd; font-size: 10px; font-weight: 760; letter-spacing: 0.04em; text-transform: uppercase; }
@@ -2147,6 +2211,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .links a, button, select, input, .secondary-link, textarea, .feedback-meta, .feedback-editor > summary, .health-card, .health-graph, .health-table table, .health-kv, .topic-source, .topic-inventory-details { background: var(--surface); color: var(--text); border-color: var(--border); }
   .metadata-action { background: rgba(17, 26, 38, 0.72); color: var(--muted-strong); border-color: var(--border); }
   .pdf-action { border-color: rgba(96, 165, 250, 0.30); color: #bdd7ff; background: rgba(37, 99, 235, 0.10); }
+  .discussion-prompt { color: #d3e6ff; border-color: rgba(96, 165, 250, 0.34); background: rgba(37, 99, 235, 0.12); }
   .paper-card, .empty { background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); border-color: var(--border); }
   button.secondary { background: rgba(17, 26, 38, 0.86); }
   .score-secondary { background: transparent; }

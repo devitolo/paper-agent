@@ -15,6 +15,7 @@ Completed behavior:
 - Separate header navigation from queue controls so the top band stays compact.
 - Remove the Apply button, visually hide filter labels, and replace the View dropdown with a Full/Condensed two-button toggle.
 - Make the paper title the primary open affordance and keep Open PDF and Copy next to source/date/source-id metadata.
+- Add `Copy discussion prompt` as a lightweight handoff to the external Paper Discussion ChatGPT conversation.
 - Remove the visible Open paper / Not interested action cluster from paper cards.
 - Remove Open summary/raw JSON from regular cards.
 - Label matched keyword pills as `Signals`.

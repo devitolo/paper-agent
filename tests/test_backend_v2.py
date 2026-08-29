@@ -1439,8 +1439,12 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn(">Open paper</a>", html)
         self.assertNotIn(">Not interested</button>", html)
         self.assertIn('<span class="signals-label">Signals</span>', html)
+        self.assertIn('aria-label="Copy Paper Discussion prompt">Copy discussion prompt</button>', html)
+        self.assertIn("I want to discuss this paper for my Project Paper workflow.", html)
+        self.assertIn("Decision: keep|maybe|reject", html)
+        self.assertIn("Score: 1-5, where 5 is highest", html)
         self.assertIn("<summary>Add feedback</summary>", html)
-        self.assertIn('<textarea name="notes" placeholder="Paste your ChatGPT discussion feedback blob here">', html)
+        self.assertIn('<textarea name="notes" placeholder="Paste final feedback blob from Paper Discussion here">', html)
         self.assertIn("Why this matches you", html)
         self.assertIn("Strong match.", html)
         self.assertNotIn("No ChatGPT review yet", html)
@@ -1463,6 +1467,39 @@ class BackendV2Tests(unittest.TestCase):
         card = {"ranking_reason": "Strong match.", "matched_keywords": ["incident", "automation"]}
 
         self.assertEqual(web.display_rationale(card), "Strong match.")
+
+    def test_review_queue_discussion_prompt_includes_existing_card_context(self):
+        card = {
+            "title": "Prompt Paper",
+            "source_label": "Semantic Scholar",
+            "published": "2026-08-29",
+            "url": "https://example.test/prompt-paper",
+            "pdf_url": "https://example.test/prompt-paper.pdf",
+            "score": 87.25,
+            "user_score": 4.5,
+            "ranking_reason": "Strong practical SRE match.",
+            "matched_keywords": ["aiops", "incident response"],
+            "artifacts": {},
+            "summary": {
+                "research_problem": "Reducing incident triage time.",
+                "why_it_matters": "Production engineers need faster context.",
+                "approach": "Retrieval-grounded root cause analysis.",
+            },
+        }
+
+        prompt = web.build_discussion_prompt(card)
+
+        self.assertIn("Paper:\nPrompt Paper", prompt)
+        self.assertIn("Source: Semantic Scholar", prompt)
+        self.assertIn("Date: 2026-08-29", prompt)
+        self.assertIn("Link: https://example.test/prompt-paper", prompt)
+        self.assertIn("PDF: https://example.test/prompt-paper.pdf", prompt)
+        self.assertIn("Match score: 87.2", prompt)
+        self.assertIn("User score: 4.5/5", prompt)
+        self.assertIn("Why this matches me: Strong practical SRE match.", prompt)
+        self.assertIn("Signals: aiops, incident response", prompt)
+        self.assertIn("Problem: Reducing incident triage time.", prompt)
+        self.assertIn("Decision: keep|maybe|reject", prompt)
 
     def test_review_queue_renders_profile_apply_queued_banner(self):
         html = web.render_review_queue(self.db_path, saved=True, profile_apply_queued=True)
