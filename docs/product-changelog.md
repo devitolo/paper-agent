@@ -18,6 +18,7 @@ Completed behavior:
 - Remove Read later, Interested, and explicit Reviewed from primary paper-card actions.
 - Keep Not interested as the direct status action.
 - Limit the Review Queue filter dropdown to All, Scored, and Needs review.
+- Add a visual identity pass that keeps the dense dark UI while treating Curator ranking as `Match Score` and rationale as `Why this matches you`.
 - Hide empty feedback inputs behind Add feedback; show View/edit feedback when feedback exists.
 - Keep `Scored` as the main way to find reviewed/feedback-backed papers.
 - Preserve historical lightweight status values in compatibility logic without showing them as primary controls.
@@ -84,7 +85,7 @@ Completed behavior:
 
 - Change `structured_feedback.score` to `REAL` and migrate existing SQLite databases during init.
 - Parse `Score: 4.5` style feedback values when they are within 1 to 5.
-- Display decimal user scores as `Your score: N/5` in the Review Queue without confusing them with the Curator system score.
+- Display decimal user scores as `Your score: N/5` in the Review Queue without confusing them with the Curator match score.
 
 ### Non-blocking Review Queue feedback save
 
@@ -193,8 +194,8 @@ Completed behavior:
 - Earlier quick status buttons saved status only and avoided feedback ingestion/profile apply; this was later narrowed to `Not interested` only.
 - Saving a non-empty Feedback blob is the only Review Queue path that ingests feedback and triggers Gemini profile apply.
 - Quick status submit shows `Saving...` and a visible timeout hint if completion hangs.
-- Cards label Curator ranking as `System` score.
-- Parsed user feedback scores render as `Your score: N/5` and visually demote the system score.
+- Cards now label Curator ranking as `Match Score`.
+- Parsed user feedback scores render as `Your score: N/5` and visually demote the match score.
 - Source badges have distinct compact styling for arXiv, OpenAlex, Semantic Scholar, and unknown sources.
 
 ## 2026-07-31

@@ -1414,14 +1414,15 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<option value="has_feedback">Scored</option>', html)
         self.assertIn('<option value="needs_review" selected>Needs review</option>', html)
         self.assertNotIn('<option value="not_interested"', html)
-        self.assertIn('<span>System</span><strong>72.5</strong>', html)
+        self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
         self.assertIn('data-copy-value="https://example.test/2607.reviewv1"', html)
+        self.assertIn('class="source-link open-paper primary-action"', html)
         self.assertIn(">Open paper</a>", html)
         self.assertIn(">Copy link</button>", html)
         self.assertIn(">Not interested</button>", html)
         self.assertIn("<summary>Add feedback</summary>", html)
         self.assertIn('<textarea name="notes" placeholder="Paste your ChatGPT discussion feedback blob here">', html)
-        self.assertIn("Why recommended", html)
+        self.assertIn("Why this matches you", html)
         self.assertNotIn("No ChatGPT review yet", html)
         self.assertNotIn("Copy prompt/link", html)
         self.assertNotIn(">Read later</button>", html)
@@ -1452,8 +1453,8 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn('<div class="user-score"><span>Your score</span><strong>2/5</strong></div>', html)
         self.assertIn("<summary>View/edit feedback</summary>", html)
-        self.assertIn('class="score score-secondary"', html)
-        self.assertIn('<span>System</span><strong>72.5</strong>', html)
+        self.assertIn('class="match-score score-secondary"', html)
+        self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
 
     def test_review_queue_renders_decimal_user_feedback_score(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
