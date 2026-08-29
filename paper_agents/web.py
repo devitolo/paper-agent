@@ -1351,6 +1351,8 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
     if filter_value == "needs_review":
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status IS NULL")
+        where_clauses.append("latest_structured_feedback.paper_id IS NULL")
+        where_clauses.append("latest_raw_feedback.paper_id IS NULL")
     elif filter_value == "has_feedback":
         where_clauses.append(
             "("

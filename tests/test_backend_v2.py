@@ -1444,7 +1444,7 @@ class BackendV2Tests(unittest.TestCase):
         )
         self.connection.commit()
 
-        html = web.render_review_queue(self.db_path)
+        html = web.render_review_queue(self.db_path, filter_value="has_feedback")
 
         self.assertIn('<div class="user-score"><span>Your score</span><strong>2/5</strong></div>', html)
         self.assertIn("<summary>View/edit feedback</summary>", html)
@@ -1463,9 +1463,28 @@ class BackendV2Tests(unittest.TestCase):
         )
         self.connection.commit()
 
-        html = web.render_review_queue(self.db_path)
+        html = web.render_review_queue(self.db_path, filter_value="has_feedback")
 
         self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', html)
+
+    def test_review_queue_needs_review_excludes_structured_feedback(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 4\nAlready scored.",
+            source="test",
+            status="reviewed",
+        )
+        self.connection.commit()
+
+        needs_review_html = web.render_review_queue(self.db_path, filter_value="needs_review")
+        scored_html = web.render_review_queue(self.db_path, filter_value="has_feedback")
+
+        self.assertNotIn("Dense Review Paper", needs_review_html)
+        self.assertIn("Dense Review Paper", scored_html)
+        self.assertIn('<div class="user-score"><span>Your score</span><strong>4/5</strong></div>', scored_html)
 
     def test_review_queue_has_feedback_filter_includes_structured_feedback_without_reviewed_status(self):
         recommended_paper_id, _ = self._seed_review_recommendation()
