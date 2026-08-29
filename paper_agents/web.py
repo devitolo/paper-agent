@@ -1915,7 +1915,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 14px; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 760; letter-spacing: 0; }
 .brand-title, .brand-home { display: flex; gap: 8px; align-items: center; }
 .brand-home { color: inherit; text-decoration: none; }
-.brand-logo { display: block; width: 42px; height: 42px; border-radius: 9px; box-shadow: 0 0 0 1px var(--border), 0 12px 24px rgba(0, 0, 0, 0.28); }
+.brand-logo { display: block; width: 42px; height: 42px; object-fit: cover; border-radius: 9px; box-shadow: 0 0 0 1px var(--border), 0 12px 24px rgba(0, 0, 0, 0.28); }
 .brand-name { font-weight: 750; }
 .page-title { color: var(--muted); font-weight: 650; }
 .title-link { color: var(--text); text-decoration: none; }
