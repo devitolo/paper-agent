@@ -1385,7 +1385,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(output["status"], "no_feedback")
         self.assertEqual(output["message"], "No structured feedback rows found for profile rebuild.")
 
-    def test_review_queue_renders_dense_feedback_controls(self):
+    def test_review_queue_renders_simplified_review_workflow(self):
         self._seed_review_recommendation()
         self.connection.commit()
 
@@ -1406,11 +1406,23 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<a class="brand-home" href="/">', html)
         self.assertIn('srcset="/assets/logo_dark.png"', html)
         self.assertIn('src="/assets/logo_light.png"', html)
+        self.assertIn('<span class="brand-name">Project Paper</span>', html)
+        self.assertIn('<span class="page-title">Review Queue</span>', html)
+        self.assertIn('<option value="score" selected>Highest score</option>', html)
+        self.assertIn('<option value="latest">Newest</option>', html)
         self.assertIn('<span>System</span><strong>72.5</strong>', html)
         self.assertIn('data-copy-value="https://example.test/2607.reviewv1"', html)
-        self.assertIn("Feedback<textarea name=\"notes\">", html)
+        self.assertIn(">Open paper</a>", html)
+        self.assertIn(">Copy link</button>", html)
+        self.assertIn(">Not interested</button>", html)
+        self.assertIn("<summary>Add feedback</summary>", html)
+        self.assertIn('<textarea name="notes" placeholder="Paste your ChatGPT discussion feedback blob here">', html)
+        self.assertIn("Why recommended", html)
         self.assertNotIn("No ChatGPT review yet", html)
         self.assertNotIn("Copy prompt/link", html)
+        self.assertNotIn(">Read later</button>", html)
+        self.assertNotIn(">Interested</button>", html)
+        self.assertNotIn(">Reviewed</button>", html)
         self.assertNotIn("<span>score</span>", html)
         self.assertNotIn(">Notes<textarea", html)
 
@@ -1435,6 +1447,7 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_review_queue(self.db_path)
 
         self.assertIn('<div class="user-score"><span>Your score</span><strong>2/5</strong></div>', html)
+        self.assertIn("<summary>View/edit feedback</summary>", html)
         self.assertIn('class="score score-secondary"', html)
         self.assertIn('<span>System</span><strong>72.5</strong>', html)
 
@@ -1523,39 +1536,20 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Dense Review Paper", html)
         self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', html)
 
-    def test_review_queue_reviewed_filter_is_lightweight_status_only(self):
-        reviewed_paper_id, _ = self._seed_review_recommendation()
-        feedback_paper_id, _ = db.upsert_paper(
-            self.connection,
-            {
-                "source": "arxiv",
-                "source_id": "structured-not-reviewed",
-                "title": "Structured But Not Reviewed Paper",
-                "url": "https://example.test/structured-not-reviewed",
-                "published": "2026-08-20",
-                "abstract": "Incident review feedback.",
-            },
-        )
+    def test_review_queue_legacy_reviewed_filter_still_loads_status_rows(self):
+        paper_id, _ = self._seed_review_recommendation()
         self.connection.execute(
             "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
-            (reviewed_paper_id, "reviewed", "Marked reviewed."),
-        )
-        ingest_feedback_blob(
-            self.connection,
-            paper_id=feedback_paper_id,
-            recommendation_id=None,
-            content="Decision: maybe\nScore: 3.5\nHas discussion feedback.",
-            source="test",
+            (paper_id, "reviewed", "Marked reviewed."),
         )
         self.connection.commit()
 
-        reviewed_html = web.render_review_queue(self.db_path, filter_value="reviewed")
-        feedback_html = web.render_review_queue(self.db_path, filter_value="has_feedback")
+        html = web.render_review_queue(self.db_path, filter_value="reviewed")
 
-        self.assertIn('<option value="reviewed" selected>Reviewed</option>', reviewed_html)
-        self.assertIn("Dense Review Paper", reviewed_html)
-        self.assertNotIn("Structured But Not Reviewed Paper", reviewed_html)
-        self.assertIn("Structured But Not Reviewed Paper", feedback_html)
+        self.assertNotIn('<option value="reviewed"', html)
+        self.assertIn("Reviewed | All sources", html)
+        self.assertIn("Dense Review Paper", html)
+
 
     def test_source_badge_class_distinguishes_sources(self):
         self.assertEqual(web.source_badge_class("arxiv"), "source-badge-arxiv")
@@ -2192,7 +2186,8 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_review_queue(self.db_path)
 
         self.assertIn('name="action" value="feedback"', html)
-        self.assertIn('data-quick-status="1">Read later</button>', html)
+        self.assertIn('data-quick-status="1">Not interested</button>', html)
+        self.assertNotIn('data-quick-status="1">Read later</button>', html)
         self.assertIn('<span class="submit-state" aria-live="polite"></span>', html)
 
     def test_review_queue_status_only_save_does_not_ingest_existing_notes(self):
@@ -2204,7 +2199,7 @@ class BackendV2Tests(unittest.TestCase):
             self.db_path,
             paper_id=paper_id,
             recommendation_id=recommendation_id,
-            status="read_later",
+            status="not_interested",
             notes="Decision: keep\nScore: 5\nExisting pasted feedback.",
             feedback_content="",
             profile_provider_fn=lambda payload, model: calls.append(payload),
@@ -2331,7 +2326,7 @@ class BackendV2Tests(unittest.TestCase):
             self.db_path,
             paper_id=paper_id,
             recommendation_id=recommendation_id,
-            status="reviewed",
+            status="not_interested",
             notes="",
             feedback_content="",
             profile_provider_fn=lambda payload, model: calls.append(payload),
@@ -2442,7 +2437,7 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("Project Paper Health", html)
         self.assertIn('<form method="get" action="/health"', html)
-        self.assertIn('href="/">Review queue</a>', html)
+        self.assertIn('href="/">Review Queue</a>', html)
         self.assertIn('<select name="days"', html)
         self.assertIn('<option value="openalex" selected>OpenAlex</option>', html)
         self.assertIn('class="health-graphs"', html)
@@ -2463,7 +2458,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn("Topic changes apply to future scheduled runs.", html)
         self.assertIn("Source schedule inventory", html)
         self.assertIn("Topic Agent", html)
-        self.assertIn('href="/">Review queue</a>', html)
+        self.assertIn('href="/">Review Queue</a>', html)
         self.assertIn('href="/health">Health</a>', html)
         self.assertIn("Daily default", html)
         self.assertIn("Rotating source job", html)

@@ -2,6 +2,25 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-08-28
+
+### Review Queue workflow simplification
+
+Status: Implemented.
+
+Decision: The Review Queue should optimize for choosing a paper, opening/copying it, discussing it externally, and returning to save feedback.
+
+Completed behavior:
+
+- Use a shared Project Paper shell/header across Review Queue, Topics, and Health.
+- Default Review Queue sorting to Highest score, with Newest still available.
+- Keep source filtering and source badges.
+- Remove Read later, Interested, and explicit Reviewed from primary paper-card actions.
+- Keep Not interested as the direct status action.
+- Hide empty feedback inputs behind Add feedback; show View/edit feedback when feedback exists.
+- Keep `Scored` as the main way to find reviewed/feedback-backed papers.
+- Preserve historical lightweight status values in storage/compatibility logic without showing them as primary controls.
+
 ## 2026-08-22
 
 ### Topic Management V1

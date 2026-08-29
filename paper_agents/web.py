@@ -49,17 +49,19 @@ FILTERS = [
     ("all", "All"),
     ("has_feedback", "Scored"),
     ("needs_review", "Needs review"),
-    ("interested", "Interested"),
-    ("read_later", "Read later"),
-    ("reviewed", "Reviewed"),
     ("not_interested", "Not interested"),
 ]
+LEGACY_FILTER_LABELS = {
+    "interested": "Interested",
+    "read_later": "Read later",
+    "reviewed": "Reviewed",
+}
 
 SOURCE_FILTER_ALL = "all"
 
 SORTS = [
-    ("latest", "Latest"),
-    ("score", "Score"),
+    ("score", "Highest score"),
+    ("latest", "Newest"),
 ]
 
 VIEWS = [
@@ -94,7 +96,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         profile_apply_failed=params.get("profile_apply_failed", [None])[0] == "1",
                         filter_value=params.get("filter", ["needs_review"])[0],
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
-                        sort_value=params.get("sort", ["latest"])[0],
+                        sort_value=params.get("sort", ["score"])[0],
                         view_value=params.get("view", ["full"])[0],
                     )
                 )
@@ -181,17 +183,20 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid paper id")
                 return
 
-            status = form.get("status", [""])[-1]
+            status = form.get("status", [""])[-1] or None
             action = form.get("action", ["status"])[-1]
             submitted_notes = form.get("notes", [""])[0]
             notes = submitted_notes.strip()
             feedback_content = submitted_notes if action == "feedback" else ""
             recommendation_id = parse_optional_int(form.get("recommendation_id", [""])[0])
-            if status not in {value for value, _ in FEEDBACK_STATUSES}:
-                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback status")
-                return
             if action not in {"status", "feedback"}:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback action")
+                return
+            if action == "status" and status not in {value for value, _ in FEEDBACK_STATUSES}:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid feedback status")
+                return
+            if action == "feedback" and not feedback_content.strip():
+                self.send_error(HTTPStatus.BAD_REQUEST, "Feedback content is required")
                 return
 
             result = save_feedback(
@@ -280,13 +285,13 @@ def render_review_queue(
     profile_apply_failed: bool = False,
     filter_value: str = "needs_review",
     source_value: str = SOURCE_FILTER_ALL,
-    sort_value: str = "latest",
+    sort_value: str = "score",
     view_value: str = "full",
 ) -> str:
-    filter_value = normalize_choice(filter_value, FILTERS, "needs_review")
+    filter_value = normalize_filter_value(filter_value)
     source_choices = load_source_filter_choices(db_path)
     source_value = normalize_choice(source_value, source_choices, SOURCE_FILTER_ALL)
-    sort_value = normalize_choice(sort_value, SORTS, "latest")
+    sort_value = normalize_choice(sort_value, SORTS, "score")
     view_value = normalize_choice(view_value, VIEWS, "full")
     cards = load_review_cards(db_path, filter_value=filter_value, source_value=source_value, sort_value=sort_value)
     banners = []
@@ -301,6 +306,16 @@ def render_review_queue(
     card_html = "\n".join(render_card(card, view_value=view_value, return_to=request_path) for card in cards)
     if not card_html:
         card_html = '<section class="empty">No selected papers are waiting in the registry yet.</section>'
+    controls = f"""
+      <form method="get" action="/" class="queue-controls">
+        {render_select(FILTERS, "filter", filter_value, "Queue")}
+        {render_select(source_choices, "source", source_value, "Source")}
+        {render_select(SORTS, "sort", sort_value, "Sort")}
+        {render_select(VIEWS, "view", view_value, "View")}
+        <button type="submit" class="secondary">Apply</button>
+        {render_primary_nav("review")}
+      </form>
+    """
 
     return f"""<!doctype html>
 <html lang="en">
@@ -312,21 +327,7 @@ def render_review_queue(
 </head>
 <body>
   <main>
-    <header class="topbar">
-      <div>
-        <h1 class="brand-title"><a class="brand-home" href="/"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Review Queue</span></a></h1>
-        <p>{len(cards)} papers | {escape(selected_label(FILTERS, filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}</p>
-      </div>
-      <form method="get" action="/" class="queue-controls">
-        {render_select(FILTERS, "filter", filter_value, "Status")}
-        {render_select(source_choices, "source", source_value, "Source")}
-        {render_select(SORTS, "sort", sort_value, "Sort")}
-        {render_select(VIEWS, "view", view_value, "View")}
-        <button type="submit" class="secondary">Apply</button>
-        <a class="secondary-link" href="/topics">Topics</a>
-        <a class="secondary-link" href="/health">Health</a>
-      </form>
-    </header>
+    {render_app_header("Review Queue", f"{len(cards)} papers | {escape(filter_label(filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}", controls)}
     {saved_banner}
     <div class="cards">{card_html}</div>
     <script>
@@ -365,47 +366,48 @@ def render_review_queue(
 def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str:
     tags = "".join(f'<span class="tag">{escape(keyword)}</span>' for keyword in card["matched_keywords"][:6])
     links = render_artifact_links(card["artifacts"])
-    feedback_buttons = "".join(
-        f'<button type="submit" name="status" value="{value}" class="{button_class(card, value)}" data-quick-status="1">{label}</button>'
-        for value, label in FEEDBACK_STATUSES
-    )
     notes = escape(card.get("feedback_notes") or "")
-    feedback_status = card.get("feedback_status")
-    feedback_label = f'<span class="feedback-state">Current: {escape(feedback_status)}</span>' if feedback_status else ""
     user_score_html = render_user_score(card.get("user_score"))
     feedback_meta_html = render_feedback_meta(card)
     summary = card["summary"]
-    source_controls = render_source_controls(card)
     source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
     compact_class = " compact" if view_value == "compact" else ""
     summary_html = render_summary(summary, compact=view_value == "compact")
+    rationale_html = escape(card.get("ranking_reason") or "Matched the active profile and Scout signals.")
+    feedback_summary = "View/edit feedback" if card.get("has_feedback") else "Add feedback"
 
     return f"""<article class="paper-card{compact_class}">
   <form method="post" action="/feedback" class="paper-form">
     <input type="hidden" name="paper_id" value="{card['id']}">
     <input type="hidden" name="recommendation_id" value="{escape(card['recommendation_id'] or '')}">
     <input type="hidden" name="return_to" value="{escape(return_to)}">
-    <input type="hidden" name="status" value="{feedback_status or 'read_later'}">
+    <input type="hidden" name="status" value="reviewed">
     <div class="paper-main">
       <div class="card-head">
         <div>
           <h2>{escape(card["title"])}</h2>
-          <p>{source_badge} {escape(card.get("published") or "date unknown")} | {escape(card["source_id"])} | {source_controls}</p>
+          <p>{source_badge} {escape(card.get("published") or "date unknown")} | {escape(card["source_id"])}</p>
+        </div>
+        <div class="card-actions">
+          {render_source_controls(card)}
+          <button type="submit" name="status" value="not_interested" class="{button_class(card, 'not_interested')}" data-quick-status="1">Not interested</button>
         </div>
       </div>
       <div class="tags">{tags}</div>
+      <section class="rationale"><h3>Why recommended</h3><p>{rationale_html}</p></section>
       {summary_html}
       <div class="links">{links}</div>
-      <label>Feedback<textarea name="notes">{notes}</textarea></label>
-      <button type="submit" name="action" value="feedback" class="secondary save-feedback">Save feedback</button>
+      {feedback_meta_html}
+      <details class="feedback-editor">
+        <summary>{feedback_summary}</summary>
+        <label>Feedback<textarea name="notes" placeholder="Paste your ChatGPT discussion feedback blob here">{notes}</textarea></label>
+        <button type="submit" name="action" value="feedback" class="secondary save-feedback">Save feedback</button>
+      </details>
+      <span class="submit-state" aria-live="polite"></span>
     </div>
     <div class="action-rail">
       {user_score_html}
-      {feedback_meta_html}
       <div class="score {'score-secondary' if card.get('user_score') is not None else ''}"><span>System</span><strong>{card["score"]:.1f}</strong></div>
-      <div class="feedback-actions">{feedback_buttons}</div>
-      {feedback_label}
-      <span class="submit-state" aria-live="polite"></span>
     </div>
   </form>
 </article>"""
@@ -455,6 +457,13 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
         for title, value, detail in cards
     )
     graph_html = render_health_graphs(summary)
+    controls = f"""
+      <form method="get" action="/health" class="queue-controls">
+        {render_select([("7", "7 days"), ("21", "21 days"), ("30", "30 days"), ("90", "90 days")], "days", str(days), "Range")}
+        {render_select(source_choices, "source", source_value, "Source")}
+        {render_primary_nav("health")}
+      </form>
+    """
 
     return f"""<!doctype html>
 <html lang="en">
@@ -466,18 +475,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 </head>
 <body>
   <main>
-    <header class="topbar">
-      <div>
-        <h1 class="brand-title"><a class="brand-home" href="/"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Health</span></a></h1>
-        <p>{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}</p>
-      </div>
-      <form method="get" action="/health" class="queue-controls">
-        {render_select([("7", "7 days"), ("21", "21 days"), ("30", "30 days"), ("90", "90 days")], "days", str(days), "Range")}
-        {render_select(source_choices, "source", source_value, "Source")}
-        <a class="secondary-link" href="/topics">Topics</a>
-        <a class="secondary-link" href="/">Review queue</a>
-      </form>
-    </header>
+    {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls)}
     {warning_html}
     <div class="health-cards">{card_html}</div>
     {graph_html}
@@ -534,6 +532,11 @@ def render_topics_page(
         banner = f'<div class="banner">Topic already exists. Editing existing topic: {escape(edit_topic.label)}.</div>'
     if error:
         banner = f'<div class="banner warning">Topic config was not saved: {escape(error)}</div>'
+    controls = f"""
+      <nav class="queue-controls" aria-label="Primary">
+        {render_primary_nav("topics")}
+      </nav>
+    """
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -544,16 +547,7 @@ def render_topics_page(
 </head>
 <body>
   <main>
-    <header class="topbar">
-      <div>
-        <h1 class="brand-title"><a class="brand-home" href="/"><picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture><span>Project Paper Scout Topics</span></a></h1>
-        <p>{len(inventory)} sources | {total_topics} configured topics | editable file-backed config</p>
-      </div>
-      <nav class="queue-controls" aria-label="Primary">
-        <a class="secondary-link" href="/">Review queue</a>
-        <a class="secondary-link" href="/health">Health</a>
-      </nav>
-    </header>
+    {render_app_header("Topics", f"{len(inventory)} sources | {total_topics} configured topics | editable file-backed config", controls)}
     {banner}
     {render_topic_agent_panel(request_text, proposal, conversation or [])}
     {editor_panel}
@@ -1328,11 +1322,10 @@ def render_source_controls(card: dict[str, Any]) -> str:
     url = card.get("url")
     if not url:
         return "source link unavailable"
-    label = "arXiv" if card.get("source") == "arxiv" else "source"
     escaped_url = escape(url)
     return (
-        f'<a class="source-link" href="{escaped_url}" target="_blank" rel="noreferrer">{label}</a>'
-        f'<button type="button" class="copy-url" data-copy-value="{escaped_url}" aria-label="Copy paper URL">Copy</button>'
+        f'<a class="source-link open-paper" href="{escaped_url}" target="_blank" rel="noreferrer">Open paper</a>'
+        f'<button type="button" class="copy-url" data-copy-value="{escaped_url}" aria-label="Copy paper URL">Copy link</button>'
     )
 
 
@@ -1562,6 +1555,34 @@ def render_select(
     )
 
 
+def render_app_header(page_title: str, subtitle: str, controls_html: str) -> str:
+    return f"""<header class="topbar">
+      <div>
+        <h1 class="brand-title">
+          <a class="brand-home" href="/">
+            <picture><source srcset="/assets/logo_dark.png" media="(prefers-color-scheme: dark)"><img src="/assets/logo_light.png" alt="" class="brand-logo"></picture>
+            <span class="brand-name">Project Paper</span>
+            <span class="page-title">{escape(page_title)}</span>
+          </a>
+        </h1>
+        <p>{subtitle}</p>
+      </div>
+      {controls_html}
+    </header>"""
+
+
+def render_primary_nav(current_page: str) -> str:
+    links = [
+        ("review", "/", "Review Queue"),
+        ("topics", "/topics", "Topics"),
+        ("health", "/health", "Health"),
+    ]
+    return "".join(
+        f'<a class="secondary-link{" current" if key == current_page else ""}" href="{href}">{label}</a>'
+        for key, href, label in links
+    )
+
+
 def build_queue_href(filter_value: str, source_value: str, sort_value: str, view_value: str) -> str:
     return "/?" + urllib.parse.urlencode({"filter": filter_value, "source": source_value, "sort": sort_value, "view": view_value})
 
@@ -1580,6 +1601,15 @@ def normalize_choice(value: str, choices: list[tuple[str, str]], default: str) -
 
 def selected_label(choices: list[tuple[str, str]], value: str) -> str:
     return dict(choices).get(value, value)
+
+
+def normalize_filter_value(value: str) -> str:
+    allowed = {choice for choice, _ in FILTERS} | set(LEGACY_FILTER_LABELS)
+    return value if value in allowed else "needs_review"
+
+
+def filter_label(value: str) -> str:
+    return dict(FILTERS).get(value) or LEGACY_FILTER_LABELS.get(value) or value
 
 
 def load_source_filter_choices(db_path: Path) -> list[tuple[str, str]]:
@@ -1696,7 +1726,7 @@ def save_feedback(
     db_path: Path,
     *,
     paper_id: int,
-    status: str,
+    status: str | None,
     notes: str,
     feedback_content: str | None = None,
     recommendation_id: int | None = None,
@@ -1708,12 +1738,16 @@ def save_feedback(
         raise ValueError(f"Unknown profile apply mode: {profile_apply_mode}")
     init_db(db_path)
     ingest_output = None
+    has_feedback_content = bool(feedback_content and feedback_content.strip())
     with connect_db(db_path) as connection:
-        connection.execute(
-            "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
-            (paper_id, status, notes),
-        )
-        if feedback_content and feedback_content.strip():
+        if not has_feedback_content:
+            if status not in {value for value, _ in FEEDBACK_STATUSES}:
+                raise ValueError("Only not_interested is supported as a lightweight status")
+            connection.execute(
+                "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
+                (paper_id, status, notes),
+            )
+        if has_feedback_content:
             ingest_output = ingest_feedback_blob(
                 connection,
                 paper_id=paper_id,
@@ -1840,9 +1874,11 @@ body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", 
 main { max-width: 1180px; margin: 0 auto; padding: 14px; }
 .topbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 12px; align-items: end; border-bottom: 1px solid #d8dee4; padding-bottom: 8px; margin-bottom: 10px; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 650; }
-.brand-title, .brand-home { display: flex; gap: 10px; align-items: center; }
+.brand-title, .brand-home { display: flex; gap: 8px; align-items: center; }
 .brand-home { color: inherit; text-decoration: none; }
 .brand-logo { display: block; width: 42px; height: 42px; border-radius: 9px; }
+.brand-name { font-weight: 750; }
+.page-title { color: #57606a; font-weight: 600; }
 h2 { margin: 0 0 3px; font-size: 15px; font-weight: 650; line-height: 1.25; }
 h3 { margin: 0 0 3px; font-size: 12px; font-weight: 650; color: #57606a; }
 p { margin: 0; }
@@ -1853,6 +1889,7 @@ select, button, input { border: 1px solid #d8dee4; border-radius: 5px; padding: 
 button { cursor: pointer; }
 code { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .secondary-link { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid #d8dee4; border-radius: 5px; padding: 0 8px; color: #24292f; background: #f6f8fa; text-decoration: none; }
+.secondary-link.current { font-weight: 650; border-color: #0969da; }
 .source-link { color: #0969da; text-decoration: none; }
 .source-link:hover { text-decoration: underline; }
 .copy-url { display: inline-flex; align-items: center; min-height: 22px; margin-left: 6px; padding: 1px 6px; font-size: 12px; }
@@ -1863,9 +1900,10 @@ button.secondary { background: #f6f8fa; }
 .banner.warning { border-color: #bf8700; background: #fff8c5; }
 .cards { display: grid; gap: 8px; }
 .paper-card, .empty { background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; padding: 10px; }
-.paper-form { display: grid; grid-template-columns: minmax(0, 1fr) 116px; gap: 12px; align-items: start; }
+.paper-form { display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 12px; align-items: start; }
 .paper-main { min-width: 0; }
-.card-head { display: grid; gap: 4px; align-items: start; }
+.card-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.card-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
 .score { text-align: center; border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 6px; background: #f6f8fa; }
 .score strong { display: block; font-size: 17px; line-height: 1; }
 .score span, .user-score span { display: block; color: #57606a; font-size: 10px; line-height: 1; margin-bottom: 3px; text-transform: uppercase; }
@@ -1874,7 +1912,7 @@ button.secondary { background: #f6f8fa; }
 .user-score { text-align: center; border: 1px solid #1a7f37; border-radius: 5px; padding: 6px; background: #dafbe1; color: #116329; }
 .user-score strong { display: block; font-size: 18px; line-height: 1; }
 .feedback-state { color: #57606a; font-size: 11px; text-align: center; }
-.feedback-meta { border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 6px; color: #57606a; background: #ffffff; font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; }
+.feedback-meta { display: inline-block; border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 6px; color: #57606a; background: #ffffff; font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; margin-top: 6px; }
 .tags, .links { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .tag { border: 1px solid #d8dee4; color: #57606a; border-radius: 999px; padding: 1px 6px; font-size: 11px; }
 .source-badge { border-radius: 999px; padding: 1px 7px; font-size: 11px; font-weight: 650; border: 1px solid transparent; white-space: nowrap; }
@@ -1894,15 +1932,19 @@ button.secondary { background: #f6f8fa; }
 .source-summary p { max-height: 88px; overflow: auto; }
 .compact-summary { margin: 6px 0; line-height: 1.35; }
 .links { margin-bottom: 7px; }
+.rationale { margin-top: 7px; }
+.rationale p { color: #3f4650; font-size: 12px; }
 .paper-card.compact { padding: 8px 10px; }
 .paper-card.compact .tags, .paper-card.compact .links { margin-top: 5px; }
 .action-rail { display: grid; gap: 6px; }
-.feedback-actions { display: grid; gap: 5px; }
-.feedback-actions button { width: 100%; min-height: 26px; padding: 3px 6px; text-align: left; }
 .submit-state { color: #57606a; font-size: 11px; line-height: 1.25; }
 label { display: grid; gap: 3px; color: #57606a; font-size: 12px; }
 textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertical; border: 1px solid #d8dee4; border-radius: 5px; padding: 6px; font: inherit; color: #1f2328; background: #ffffff; }
 .save-feedback { margin-top: 5px; }
+.feedback-editor { margin-top: 7px; }
+.feedback-editor > summary { display: inline-flex; align-items: center; min-height: 26px; border: 1px solid #d8dee4; border-radius: 5px; padding: 0 8px; color: #24292f; background: #f6f8fa; cursor: pointer; font-weight: 650; list-style: none; }
+.feedback-editor > summary::-webkit-details-marker { display: none; }
+.feedback-editor[open] > summary { margin-bottom: 6px; }
 .health-cards { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
 .health-card { border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; min-width: 0; }
 .health-card h2 { color: #57606a; font-size: 11px; margin-bottom: 5px; text-transform: uppercase; }
@@ -2019,10 +2061,10 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 @media (prefers-color-scheme: dark) {
   body { background: #0d1117; color: #e6edf3; }
   .topbar { border-color: #30363d; }
-  .topbar p, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note-text { color: #8b949e; }
-  .summary-grid p, .source-summary p { color: #c9d1d9; }
+  .topbar p, .page-title, .card-head p, h3, .feedback-state, .feedback-meta, .submit-state, .tag, label, .compact-summary, .score span, .user-score span, .health-card h2, .health-card span, .graph-head span, .chart-legend, .health-table th, .health-kv dt, .topic-source-head > span, .topic-source > p, .topic-note-text { color: #8b949e; }
+  .summary-grid p, .source-summary p, .rationale p { color: #c9d1d9; }
   .source-link { color: #58a6ff; }
-  .links a, button, select, input, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .health-card, .health-graph, .health-table table, .health-kv, .topic-source, .topic-inventory-details { background: #161b22; color: #e6edf3; border-color: #30363d; }
+  .links a, button, select, input, .secondary-link, .paper-card, .empty, textarea, .feedback-meta, .feedback-editor > summary, .health-card, .health-graph, .health-table table, .health-kv, .topic-source, .topic-inventory-details { background: #161b22; color: #e6edf3; border-color: #30363d; }
   button.secondary, .score { background: #21262d; }
   .score-secondary { background: transparent; }
   .user-score { background: #0f2a1a; color: #7ee787; border-color: #238636; }
@@ -2060,9 +2102,10 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   main { padding: 10px; }
   .topbar, .paper-form { grid-template-columns: 1fr; }
   .queue-controls { justify-content: flex-start; }
+  .card-head { grid-template-columns: 1fr; }
+  .card-actions { justify-content: flex-start; }
   .summary-grid { grid-template-columns: 1fr; }
   .action-rail { grid-template-columns: 64px 1fr; align-items: start; }
-  .feedback-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .feedback-state { text-align: left; grid-column: 1 / -1; }
   .health-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .health-graphs { grid-template-columns: 1fr; }
