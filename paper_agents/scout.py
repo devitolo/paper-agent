@@ -575,6 +575,7 @@ def run_daily_scout(
     timeout: int = DEFAULT_ARXIV_TIMEOUT,
     seen_source_ids: set[str] | None = None,
     include_seen: bool = False,
+    guidance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the deterministic daily scout MVP and return a run report."""
     source = source or ArxivSource(request_delay=request_delay, retries=retries, timeout=timeout)
@@ -586,6 +587,13 @@ def run_daily_scout(
         f"fetch_limit={fetch_limit} keep={keep_limit} freshness_months={freshness_months} "
         f"request_delay={request_delay}s retries={retries} timeout={timeout}s"
     )
+    if guidance:
+        print(
+            "Scout guidance: "
+            f"boost={guidance.get('boost_terms', [])[:5]} "
+            f"avoid={guidance.get('avoid_terms', [])[:5]} "
+            f"feedback_count={guidance.get('feedback_count', 0)}"
+        )
     fetched = source.fetch(topics, max_results=fetch_limit, freshness_months=freshness_months)
     print(f"fetched {len(fetched)} raw candidates")
     candidates = dedupe_candidates(fetched)
@@ -608,6 +616,7 @@ def run_daily_scout(
         "candidate_count": len(candidates),
         "stored_count": len(candidates),
         "seen_filtered_count": filtered_seen_count,
+        "guidance": guidance or {},
         "output_path": str(output_path),
         "candidates": [scout_candidate_record(candidate) for candidate in candidates],
     }

@@ -32,6 +32,7 @@ from paper_agents.scout import semantic_scholar_paper_to_candidate
 from paper_agents.scout import rank_candidates
 from paper_agents.scout import run_daily_scout
 from paper_agents.scout import scout_candidate_record
+from paper_agents.scout_guidance import build_scout_guidance, topics_with_guidance
 from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
 from paper_agents.topic_inventory import OPENALEX_ROTATING_TOPICS, scout_topic_inventory
@@ -706,6 +707,166 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(active["id"], second)
         inactive_count = self.connection.execute("SELECT COUNT(*) FROM scouting_guidance WHERE active = 0").fetchone()[0]
         self.assertEqual(inactive_count, 1)
+
+    def test_scout_guidance_uses_profile_and_recent_structured_feedback(self):
+        keep_paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "semantic_scholar",
+                "source_id": "keep-guidance",
+                "title": "RAG observability for production incident response",
+                "abstract": "Root cause analysis with telemetry and context grounding.",
+                "categories": ["Software engineering"],
+            },
+        )
+        reject_paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "openalex",
+                "source_id": "reject-guidance",
+                "title": "Weak illustrative monitoring benchmark",
+                "abstract": "No empirical production evidence.",
+                "categories": ["Software engineering"],
+            },
+        )
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=keep_paper_id,
+            recommendation_id=None,
+            content="Decision: keep\nScore: 4.5\nRAG and context grounding are useful for incident response.",
+            source="test",
+        )
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=reject_paper_id,
+            recommendation_id=None,
+            content="Decision: reject\nScore: 1\nToo illustrative and weak evidence.",
+            source="test",
+        )
+
+        rows = db.recent_structured_feedback_with_papers(self.connection, limit=10)
+        guidance = build_scout_guidance(db.current_profile_version(self.connection), rows)
+
+        self.assertIn("incident management", guidance.include_terms)
+        self.assertIn("rag", guidance.boost_terms)
+        self.assertIn("context grounding", guidance.boost_terms)
+        self.assertIn("weak evidence", guidance.avoid_terms)
+        self.assertIn("illustrative", guidance.avoid_terms)
+        self.assertEqual(guidance.feedback_count, 2)
+        self.assertEqual(guidance.profile_version_id, self.profile_id)
+
+    def test_scout_agent_records_feedback_guidance_and_guided_topics(self):
+        feedback_paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "semantic_scholar",
+                "source_id": "guidance-feedback",
+                "title": "RAG observability for production incidents",
+                "abstract": "Context grounding for incident response.",
+            },
+        )
+        ingest_feedback_blob(
+            self.connection,
+            paper_id=feedback_paper_id,
+            recommendation_id=None,
+            content="Decision: keep\nScore: 5\nMore RAG context grounding for incident response.",
+            source="test",
+        )
+        source = FakeSource([candidate("2601.guidedv1", "Guided candidate")])
+
+        result = ScoutAgent(source=source).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(topics=["microservice diagnosis"], max_candidates=5),
+        )
+
+        row = self.connection.execute(
+            "SELECT topics_json, guidance_id, diagnostics_json FROM scout_runs WHERE id = ?",
+            (result["scout_run_id"],),
+        ).fetchone()
+        topics = json.loads(row[0])
+        diagnostics = json.loads(row[2])
+        guidance_row = self.connection.execute(
+            "SELECT active, metadata_json FROM scouting_guidance WHERE id = ?",
+            (row[1],),
+        ).fetchone()
+        self.assertIn("rag", topics)
+        self.assertEqual(guidance_row[0], 0)
+        self.assertEqual(json.loads(guidance_row[1])["source"], "feedback_profile")
+        self.assertIn("scout_guidance", diagnostics)
+        self.assertIn("rag", result["guidance"]["boost_terms"])
+
+    def test_scout_agent_excludes_clear_feedback_avoid_matches(self):
+        profile_version = db.current_profile_version(self.connection)
+        db.create_profile_version(
+            self.connection,
+            profile=profile_version["profile"] | {"negative_signals": ["toy benchmark", "weak evidence"]},
+            source_structured_feedback_id=None,
+            change_summary="test negative signals",
+        )
+        source = FakeSource(
+            [
+                ScoutCandidate(
+                    source="arxiv",
+                    source_id="2601.badguidancev1",
+                    title="Toy benchmark with weak evidence",
+                    abstract="An illustrative paper with no production signal.",
+                    authors=[],
+                    published="2026-01-01",
+                    updated=None,
+                    url="https://example.test/bad",
+                    pdf_url=None,
+                    categories=["cs.SE"],
+                ),
+                candidate("2601.goodguidancev1", "Incident response observability"),
+            ]
+        )
+
+        result = ScoutAgent(source=source).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(topics=["AIOps"], max_candidates=5),
+        )
+
+        self.assertEqual(result["eligible_count"], 1)
+        rows = self.connection.execute(
+            """
+            SELECT papers.title, scout_candidates.excluded, scout_candidates.exclusion_reason,
+                   scout_candidates.source_diagnostics_json
+            FROM scout_candidates
+            JOIN papers ON papers.id = scout_candidates.paper_id
+            ORDER BY scout_candidates.retrieval_order
+            """
+        ).fetchall()
+        bad = next(row for row in rows if row[0] == "Toy benchmark with weak evidence")
+        self.assertEqual(bad[1], 1)
+        self.assertEqual(bad[2], "feedback_avoid_terms")
+        diagnostics = json.loads(bad[3])
+        self.assertEqual(diagnostics["feedback_guidance"]["feedback_avoid_hits"], ["toy benchmark", "weak evidence"])
+
+    def test_topics_with_guidance_preserves_explicit_topic_and_bounds_expansion(self):
+        guidance = build_scout_guidance(
+            {"id": 9, "profile": {"interests": ["observability"], "positive_signals": [], "negative_signals": []}},
+            [
+                {
+                    "decision": "keep",
+                    "score": 5,
+                    "title": "RAG context grounding for production incidents",
+                    "abstract": "RAG and telemetry for incident response.",
+                    "categories": [],
+                    "observations": [],
+                    "preference_signals": [],
+                }
+            ],
+        )
+
+        topics = topics_with_guidance(["microservice diagnosis"], guidance, max_topics=5)
+
+        self.assertEqual(topics[0], "microservice diagnosis")
+        self.assertLessEqual(len(topics), 5)
+        self.assertIn("rag", topics)
 
 
     def test_reviewer_card_uses_extraction_summary_fields(self):

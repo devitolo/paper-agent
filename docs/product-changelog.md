@@ -2,6 +2,23 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-08-31
+
+### Feedback-guided Scout retrieval
+
+Status: Implemented.
+
+Decision: Scout should begin using the active profile and recent structured feedback deterministically, without adding an LLM ScoutAgent or deep paper reading yet.
+
+Completed behavior:
+
+- Build per-run Scout guidance from active `profile_versions` plus recent `structured_feedback`.
+- Add boost/include terms from high-scored `keep` feedback and avoid terms from low-scored `reject` feedback.
+- Expand source query topics with a small bounded set of feedback-derived boost terms.
+- Record the exact guidance used in `scouting_guidance` and `scout_runs.diagnostics_json`.
+- Exclude only clear avoid-heavy candidate matches with no positive guidance hits; otherwise keep penalties visible in source diagnostics.
+- Print guidance summaries from `scout-daily` and `pipeline-daily` logs.
+
 ## 2026-08-29
 
 ### Review Queue card layout and logo polish

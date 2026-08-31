@@ -874,6 +874,50 @@ def all_structured_feedback(connection: sqlite3.Connection, limit: int | None = 
     ]
 
 
+def recent_structured_feedback_with_papers(connection: sqlite3.Connection, limit: int = 12) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT
+            structured_feedback.id,
+            structured_feedback.paper_id,
+            structured_feedback.decision,
+            structured_feedback.score,
+            structured_feedback.observations_json,
+            structured_feedback.preference_signals_json,
+            structured_feedback.created_at,
+            papers.title,
+            papers.abstract,
+            papers.categories_json,
+            paper_sources.source
+        FROM structured_feedback
+        LEFT JOIN papers ON papers.id = structured_feedback.paper_id
+        LEFT JOIN paper_sources ON paper_sources.paper_id = papers.id
+         AND paper_sources.id = (
+             SELECT MIN(id) FROM paper_sources WHERE paper_sources.paper_id = papers.id
+         )
+        ORDER BY structured_feedback.id DESC
+        LIMIT ?
+        """,
+        (max(1, limit),),
+    ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "paper_id": row[1],
+            "decision": row[2],
+            "score": row[3],
+            "observations": decode_json(row[4], []),
+            "preference_signals": decode_json(row[5], []),
+            "created_at": row[6],
+            "title": row[7],
+            "abstract": row[8],
+            "categories": decode_json(row[9], []),
+            "source": row[10],
+        }
+        for row in rows
+    ]
+
+
 def create_feedback_profile_applications(
     connection: sqlite3.Connection,
     structured_feedback_ids: list[int],

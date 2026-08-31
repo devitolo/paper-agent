@@ -13,7 +13,7 @@ Scout
 
 ## Role Boundaries
 
-Scout retrieves configured sources, normalizes candidate records, deduplicates source results, marks previously discovered papers as excluded, records source/query telemetry, and writes candidate pools. Scout does not score, rank, recommend, or persist preference scores.
+Scout retrieves configured sources, normalizes candidate records, expands source queries with deterministic feedback/profile guidance, deduplicates source results, marks previously discovered papers and clear feedback-avoid matches as excluded, records source/query telemetry, and writes candidate pools. Scout does not score, rank, recommend, or persist preference scores.
 
 Curator reads the Scout candidate pool, the active profile version, historical state, and active guidance. It evaluates every eligible candidate, stores scores and rationales, recommends at most three papers, and writes active guidance for later Scout runs. Re-scout requests are bounded by the workflow cycle's maximum Scout attempt count.
 
@@ -110,6 +110,8 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 `--keep` is capped at three recommendations. `--max-scout-attempts` controls the bounded re-scout loop.
 
 arXiv remains the default Scout source and the daily cron source. Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. When no explicit `--topic` is supplied, source jobs select an enabled topic from `config/topics.yaml`; explicit `--topic` values still override config for that one run. OpenAlex is available through a separate weekly rotating script rather than the daily arXiv path.
+
+Scout also reads the active profile plus recent structured feedback to build deterministic guidance for every run. High-scored `keep` feedback can add a few boost terms to the source query set; low-scored `reject` feedback contributes avoid terms. Candidate diagnostics record feedback boost/avoid hits, and only clear avoid-heavy matches with no positive hits are excluded before Curator. The sample size is still small, so this path is deliberately conservative.
 
 Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
 

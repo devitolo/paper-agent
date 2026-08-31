@@ -15,6 +15,13 @@ from paper_agents.scout import (
     PaperSource,
     dedupe_candidates,
 )
+from paper_agents.scout_guidance import (
+    apply_guidance_to_candidates,
+    guidance_summary,
+    guidance_text,
+    load_scout_guidance,
+    topics_with_guidance,
+)
 
 DEFAULT_TARGET_CANDIDATES = 20
 
@@ -49,7 +56,23 @@ class ScoutAgent:
             retries=config.retries,
             timeout=config.timeout,
         )
-        guidance = db.active_scouting_guidance(connection)
+        active_guidance = db.active_scouting_guidance(connection)
+        scout_guidance = load_scout_guidance(connection)
+        guided_topics = topics_with_guidance(config.topics or DEFAULT_SCOUT_TOPICS, scout_guidance)
+        guidance_id = db.create_scouting_guidance(
+            connection,
+            curator_run_id=None,
+            guidance_text=guidance_text(scout_guidance),
+            metadata={
+                "source": "feedback_profile",
+                "guidance": scout_guidance.as_dict(),
+                "base_topics": config.topics,
+                "guided_topics": guided_topics,
+                "active_curator_guidance_id": active_guidance["id"] if active_guidance else None,
+                "active_curator_guidance_text": active_guidance.get("guidance_text") if active_guidance else None,
+            },
+            active=False,
+        )
         db.update_workflow_state(connection, workflow_cycle_id, "scouting")
         db.increment_scout_attempts(connection, workflow_cycle_id)
         scout_run_id = db.insert_scout_run(
@@ -60,29 +83,35 @@ class ScoutAgent:
             target_candidates=config.target_candidates,
             max_candidates=config.max_candidates,
             freshness_months=config.freshness_months,
-            topics=config.topics,
-            guidance_id=guidance["id"] if guidance else None,
-            diagnostics={"guidance_text": guidance.get("guidance_text") if guidance else None},
+            topics=guided_topics,
+            guidance_id=guidance_id,
+            diagnostics={
+                "scout_guidance": guidance_summary(scout_guidance),
+                "base_topics": config.topics,
+                "active_curator_guidance_text": active_guidance.get("guidance_text") if active_guidance else None,
+            },
         )
 
         warnings: list[str] = []
         errors: list[str] = []
         candidates = []
+        guided_candidates = []
         source_diagnostics: dict[str, Any] = {}
         try:
             candidates = dedupe_candidates(
                 source.fetch(
-                    config.topics or DEFAULT_SCOUT_TOPICS,
+                    guided_topics,
                     max_results=config.max_candidates,
                     freshness_months=config.freshness_months,
                 )
             )
+            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
             source_diagnostics = dict(getattr(source, "last_diagnostics", {}) or {})
         except Exception as error:  # source adapters normalize most errors, but keep runs recoverable.
             errors.append(str(error))
 
         stored: list[dict[str, Any]] = []
-        for index, candidate in enumerate(candidates, 1):
+        for index, (candidate, guidance_diagnostics) in enumerate(guided_candidates, 1):
             candidate_dict = sanitize_candidate(candidate.as_dict())
             paper_id, is_new = db.upsert_paper(connection, candidate_dict)
             seen_in_current_cycle = db.paper_has_scout_candidate_in_cycle(
@@ -91,8 +120,13 @@ class ScoutAgent:
                 workflow_cycle_id=workflow_cycle_id,
                 before_scout_run_id=scout_run_id,
             )
-            excluded = not is_new and not seen_in_current_cycle
-            exclusion_reason = "previously_discovered" if excluded else None
+            feedback_excluded = bool(guidance_diagnostics.get("feedback_guidance_excluded"))
+            excluded = feedback_excluded or (not is_new and not seen_in_current_cycle)
+            exclusion_reason = None
+            if feedback_excluded:
+                exclusion_reason = "feedback_avoid_terms"
+            elif excluded:
+                exclusion_reason = "previously_discovered"
             scout_candidate_id = db.insert_scout_candidate(
                 connection,
                 scout_run_id=scout_run_id,
@@ -102,7 +136,10 @@ class ScoutAgent:
                 excluded=excluded,
                 exclusion_reason=exclusion_reason,
                 source_query=(candidate.metadata or {}).get("query_topic"),
-                source_diagnostics={"primary_category": candidate.primary_category},
+                source_diagnostics={
+                    "primary_category": candidate.primary_category,
+                    "feedback_guidance": guidance_diagnostics,
+                },
             )
             stored.append(
                 {
@@ -122,6 +159,9 @@ class ScoutAgent:
             diagnostics={
                 "fetched_count": len(candidates),
                 "stored_count": len(stored),
+                "scout_guidance": guidance_summary(scout_guidance),
+                "base_topics": config.topics,
+                "guided_topics": guided_topics,
                 "source_diagnostics": source_diagnostics,
             },
             warnings=warnings,
@@ -132,6 +172,9 @@ class ScoutAgent:
             "scout_run_id": scout_run_id,
             "source": source.name,
             "attempt_number": attempt_number,
+            "guidance": guidance_summary(scout_guidance),
+            "base_topics": config.topics,
+            "guided_topics": guided_topics,
             "fetched_count": len(candidates),
             "stored_count": len(stored),
             "eligible_count": len([candidate for candidate in stored if not candidate["excluded"]]),
