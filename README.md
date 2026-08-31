@@ -43,14 +43,14 @@ Implemented today:
 - SQLite stores canonical papers, alternate source records, Scout runs/candidates, Curator runs/evaluations/recommendations, versioned scouting guidance, immutable raw feedback tables, parse attempts, structured feedback, applied-feedback tracking, and profile versions.
 - `bootstrap known-papers` backfills important seed papers, including the Microsoft/arXiv cloud incident LLM paper.
 - `review-summary` creates a ChatGPT section-by-section Markdown review from a triage summary.
-- The review queue UI reads Curator recommendations from SQLite, lets the user mark lightweight review statuses, and stores pasted feedback blobs in the V2 feedback tables.
-- `feedback apply` uses Gemini to synthesize unapplied structured feedback into a new active profile version after a recommended dry run.
+- The review queue UI reads Curator recommendations from SQLite, opens/copies paper context for external discussion, and stores pasted feedback blobs in the V2 feedback tables.
+- Review Queue feedback save queues Gemini profile synthesis automatically; `feedback apply` remains available for manual dry-run/apply recovery.
 
 Still manual in this MVP:
 
 - The user manually copies a recommended paper/link into a ChatGPT Paper Discussion conversation.
 - The user manually copies ChatGPT's final discussion summary back into Project Paper.
-- Feedback profile evolution now auto-applies Gemini updates after Review Queue feedback submit, while keeping manual CLI controls for testing and operations.
+- Feedback profile evolution auto-applies Gemini updates after Review Queue feedback submit, while keeping manual CLI controls for testing and operations.
 
 Not implemented yet:
 
@@ -148,7 +148,7 @@ Run the default arXiv Scout source check:
 python3 -m paper_agents.cli scout-daily
 ```
 
-Scout uses arXiv by default, including for nightly cron. Semantic Scholar and OpenAlex are opt-in source adapters selected with `--source semantic_scholar` or `--source openalex`. Scout reads the active profile plus recent structured feedback to build deterministic guidance: high-scored keep feedback can add boost terms to source queries, while low-scored reject feedback contributes avoid terms for conservative pre-Curator filtering. Scout stores source candidate metadata in `data/scout/YYYY-MM-DD.jsonl` without preference scores, recommendation ranks, or final selection decisions. Ranking and recommendations belong to Curator inside `pipeline-daily`.
+Scout uses arXiv by default, including for nightly cron. Semantic Scholar and OpenAlex are opt-in source adapters selected with `--source semantic_scholar` or `--source openalex`. Scout V2 reads the active profile plus recent structured feedback to build deterministic guidance: high-scored keep feedback can add a small bounded set of boost terms to source queries, while low-scored reject feedback contributes avoid terms for conservative pre-Curator filtering. Scout records the guidance summary in `scouting_guidance` and `scout_runs.diagnostics_json`, and source candidate diagnostics keep softer boost/avoid matches visible. Scout stores source candidate metadata in `data/scout/YYYY-MM-DD.jsonl` without preference scores, recommendation ranks, or final selection decisions. Ranking and recommendations still belong to Curator inside `pipeline-daily`. Deep paper/PDF reading remains out of scope for Scout and is future Curator V2 evidence-aware reranking work.
 
 Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage. OpenAlex remains outside the daily arXiv cron path; run it with the separate weekly rotating script so stable search results do not exhaust the same tiny topic pool every day.
 
@@ -226,7 +226,7 @@ Run the daily Scout-to-Curator pipeline:
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-This creates a workflow cycle, runs Scout to retrieve and persist candidates, lets Curator evaluate every eligible candidate, stores up to three recommendations, downloads/extracts recommended PDFs, saves summaries under `data/extractions/`, records artifacts in `data/paper_agent.db`, and prints a compact review list. Previously discovered papers are retained as Scout candidate records with exclusion reasons instead of being re-recommended. For an interactive preview, use quick mode:
+This creates a workflow cycle, runs Scout to retrieve and persist candidates, lets Curator evaluate every eligible candidate, stores up to three recommendations, downloads/extracts recommended PDFs, saves summaries under `data/extractions/`, records artifacts in `data/paper_agent.db`, and prints a compact review list. Previously discovered papers and clear feedback-avoid matches are retained as Scout candidate records with exclusion reasons instead of being re-recommended. The command output/logs include a `Scout guidance:` line when feedback/profile guidance is available. For an interactive preview, use quick mode:
 
 ```bash
 python3 -m paper_agents.cli pipeline-daily \
@@ -237,6 +237,25 @@ python3 -m paper_agents.cli pipeline-daily \
   --retries 4 \
   --source-timeout 90
 ```
+
+For a small Mini smoke test of feedback-guided retrieval against OpenAlex:
+
+```bash
+cd ~/workspace/paper-agent
+git pull origin main
+python3 -m paper_agents.cli pipeline-daily \
+  --source openalex \
+  --topic "AIOps root cause analysis cloud incidents" \
+  --quick \
+  --fetch 5 \
+  --keep 1 \
+  --max-scout-attempts 1 \
+  --request-delay 5 \
+  --retries 4 \
+  --source-timeout 90
+```
+
+Expected output includes `Scout guidance:` with boost/avoid terms when enough profile or feedback signals exist.
 
 Quick mode extracts only the first 2 chunks per selected paper unless `--limit-chunks` is set explicitly.
 
@@ -406,10 +425,11 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 The next work should build on the V2 Scout/Curator backend:
 
 1. Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
-2. Consider caching reviewed Gemini dry-run proposals so apply does not spend quota on the same synthesis twice.
-3. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
-4. Add provider adapters beyond Gemini for profile synthesis.
-5. Add general open-access PDF resolution beyond arXiv.
+2. Add Curator V2 evidence-aware reranking for deeper paper/PDF reading after Scout retrieves candidates.
+3. Consider caching reviewed Gemini dry-run proposals so apply does not spend quota on the same synthesis twice.
+4. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
+5. Add provider adapters beyond Gemini for profile synthesis.
+6. Add general open-access PDF resolution beyond arXiv.
 
 See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
 

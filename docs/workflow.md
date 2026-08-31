@@ -13,7 +13,7 @@ Scout
 
 ## Role Boundaries
 
-Scout retrieves configured sources, normalizes candidate records, expands source queries with deterministic feedback/profile guidance, deduplicates source results, marks previously discovered papers and clear feedback-avoid matches as excluded, records source/query telemetry, and writes candidate pools. Scout does not score, rank, recommend, or persist preference scores.
+Scout retrieves configured sources, normalizes candidate records, expands source queries with deterministic feedback/profile guidance, deduplicates source results, marks previously discovered papers and clear feedback-avoid matches as excluded, records source/query telemetry, and writes candidate pools. Scout does not score, rank, recommend, call an LLM Scout agent, or perform deep paper/PDF reading.
 
 Curator reads the Scout candidate pool, the active profile version, historical state, and active guidance. It evaluates every eligible candidate, stores scores and rationales, recommends at most three papers, and writes active guidance for later Scout runs. Re-scout requests are bounded by the workflow cycle's maximum Scout attempt count.
 
@@ -33,8 +33,8 @@ Do not automate these handoffs until the manual loop is clearly useful.
 1. A cron job or future systemd timer starts `pipeline-daily`.
 2. A `workflow_cycles` row is created.
 3. The active profile version is loaded or seeded from `data/profile.json`.
-4. Scout loads active scouting guidance, fetches arXiv candidates, deduplicates them, and records all candidates for the run.
-5. Previously discovered papers are recorded as excluded Scout candidates with an exclusion reason.
+4. Scout builds deterministic feedback/profile guidance, expands configured source queries with a small bounded set of boost terms, fetches candidates, deduplicates them, and records all candidates for the run.
+5. Previously discovered papers and clear feedback-avoid matches are recorded as excluded Scout candidates with an exclusion reason.
 6. Curator evaluates every eligible candidate.
 7. Curator writes up to three recommendations and active guidance for future Scout runs.
 8. Reviewer downloads recommended PDFs when available.
@@ -51,12 +51,12 @@ The V2 registry stores:
 - `papers`: canonical paper identity, DOI/arXiv IDs, metadata, and discovery timestamps.
 - `paper_sources`: alternate source records and URLs for the same canonical paper.
 - `workflow_cycles`: explicit stage/state for a recommendation cycle.
-- `scout_runs`: source attempts, topics, guidance, and telemetry.
-- `scout_candidates`: retrieval order, new/known status, exclusion status, and source diagnostics. No preference scores live here.
+- `scout_runs`: source attempts, topics, guidance IDs, diagnostics JSON, and telemetry.
+- `scout_candidates`: retrieval order, new/known status, exclusion status, and source diagnostics such as feedback boost/avoid hits. No preference scores live here.
 - `curator_runs`: scoring/recommendation runs tied to workflow cycles and profile versions.
 - `curator_evaluations`: scores and rationales for every candidate considered.
 - `recommendations`: up to three ordered recommendations per Curator run.
-- `scouting_guidance`: append-only Curator guidance with one active version.
+- `scouting_guidance`: append-only guidance records, including active Curator guidance and per-run Scout feedback/profile guidance snapshots.
 - `raw_feedback`: immutable manually submitted discussion summaries, deduped by content hash.
 - `feedback_parse_attempts`: repeatable parse attempts over raw feedback.
 - `structured_feedback`: parsed decisions, observations, scores, and preference signals.
@@ -111,7 +111,7 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 
 arXiv remains the default Scout source and the daily cron source. Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. When no explicit `--topic` is supplied, source jobs select an enabled topic from `config/topics.yaml`; explicit `--topic` values still override config for that one run. OpenAlex is available through a separate weekly rotating script rather than the daily arXiv path.
 
-Scout also reads the active profile plus recent structured feedback to build deterministic guidance for every run. High-scored `keep` feedback can add a few boost terms to the source query set; low-scored `reject` feedback contributes avoid terms. Candidate diagnostics record feedback boost/avoid hits, and only clear avoid-heavy matches with no positive hits are excluded before Curator. The sample size is still small, so this path is deliberately conservative.
+Scout also reads the active profile plus recent structured feedback to build deterministic guidance for every run. High-scored `keep` feedback can add a few boost terms to the source query set; low-scored `reject` feedback contributes avoid terms. The exact guidance is stored in `scouting_guidance` and copied into `scout_runs.diagnostics_json`. Candidate diagnostics record feedback boost/avoid hits, and only clear avoid-heavy matches with no positive hits are excluded before Curator. Softer matches remain visible for Curator evaluation. The sample size is still small, around 10 scored papers, so this path is deliberately conservative. Deep paper/PDF reading remains future Curator V2 evidence-aware reranking work, not Scout V2.
 
 Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
 

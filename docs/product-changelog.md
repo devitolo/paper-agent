@@ -6,7 +6,7 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ### Feedback-guided Scout retrieval
 
-Status: Implemented.
+Status: Implemented in commit `f128fcd`.
 
 Decision: Scout should begin using the active profile and recent structured feedback deterministically, without adding an LLM ScoutAgent or deep paper reading yet.
 
@@ -18,6 +18,13 @@ Completed behavior:
 - Record the exact guidance used in `scouting_guidance` and `scout_runs.diagnostics_json`.
 - Exclude only clear avoid-heavy candidate matches with no positive guidance hits; otherwise keep penalties visible in source diagnostics.
 - Print guidance summaries from `scout-daily` and `pipeline-daily` logs.
+- Keep Curator responsible for recommendation scoring; Scout guidance only affects retrieval expansion and conservative prefiltering.
+- Keep penalties conservative while the feedback sample is small, around 10 scored papers.
+
+Out of scope for this iteration:
+
+- No new sources, no LLM Scout agent, no UI changes, and no deep paper/PDF reading.
+- Deep evidence-aware paper/PDF reranking remains planned for Curator V2.
 
 ## 2026-08-29
 

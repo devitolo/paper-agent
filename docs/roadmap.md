@@ -35,6 +35,10 @@ Status: Implemented as V2 backend.
 - Add opt-in Semantic Scholar source adapter. Implemented; approved API key works via `SEMANTIC_SCHOLAR_API_KEY`, and weekly Tuesday cron is scheduled with `--request-delay 2`.
 - Add opt-in OpenAlex source adapter. Implemented; no API key required.
 - Add Review Queue source filter and source badges. Implemented for multi-source review.
+- Add deterministic feedback/profile-guided Scout retrieval. Implemented as Scout V2 backend.
+  - Uses active profile plus recent `structured_feedback` for bounded boost-term expansion and conservative avoid-heavy prefiltering.
+  - Records guidance in `scouting_guidance`, `scout_runs.diagnostics_json`, and candidate diagnostics.
+  - Keeps Curator as the owner of recommendation scoring.
 
 ## Phase 3: Provider-Based Scouting
 
@@ -86,6 +90,7 @@ Next major feature area.
 - Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
 - Consider caching reviewed Gemini dry-run profile proposals to reduce duplicate quota usage during apply.
 - Improve Curator ranking based on user feedback.
+- Add Curator V2 evidence-aware reranking for deeper paper/PDF reading after Scout retrieves candidates.
 
 ## Phase 7: Optimization
 
