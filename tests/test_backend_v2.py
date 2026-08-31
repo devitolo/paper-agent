@@ -2338,14 +2338,43 @@ class BackendV2Tests(unittest.TestCase):
 
         raw = self.connection.execute("SELECT content FROM raw_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
         structured = self.connection.execute("SELECT decision, score FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
-        lightweight_count = self.connection.execute("SELECT COUNT(*) FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0]
+        lightweight = self.connection.execute("SELECT status, notes FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()
         current = db.current_profile_version(self.connection)
         self.assertEqual(raw[0], "Decision: keep\nScore: 4\nGood fit.\n")
         self.assertEqual(structured, ("keep", 4))
-        self.assertEqual(lightweight_count, 0)
+        self.assertEqual(lightweight, ("interested", "Decision: keep\nScore: 4\nGood fit."))
         self.assertEqual(result["profile_apply"]["status"], "applied")
         self.assertEqual(current["profile"]["interests"], ["auto-applied"])
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback_profile_applications").fetchone()[0], 1)
+
+    def test_review_queue_feedback_save_defaults_lightweight_status_to_reviewed(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        self.connection.commit()
+
+        result = web.save_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            status=None,
+            notes="Decision: keep\nScore: 4.5\nGood fit.",
+            feedback_content="Decision: keep\nScore: 4.5\nGood fit.\n",
+            source="review_queue_ui",
+            profile_provider_fn=lambda payload, model: {
+                "profile": {
+                    "interests": ["auto-applied"],
+                    "positive_signals": ["good fit"],
+                    "negative_signals": [],
+                    "notes": "Applied from UI.",
+                },
+                "change_summary": "Auto-applied UI feedback.",
+            },
+        )
+
+        lightweight = self.connection.execute("SELECT status, notes FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()
+        structured = self.connection.execute("SELECT decision, score FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()
+        self.assertTrue(result["feedback_ingested"])
+        self.assertEqual(lightweight, ("reviewed", "Decision: keep\nScore: 4.5\nGood fit."))
+        self.assertEqual(structured, ("keep", 4.5))
 
     def test_review_queue_feedback_save_can_queue_profile_apply(self):
         paper_id, recommendation_id = self._seed_review_recommendation()
@@ -2380,6 +2409,10 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(result["feedback_ingested"])
         self.assertTrue(result["profile_apply_queued"])
         self.assertIsNone(result["profile_apply"])
+        self.assertEqual(
+            self.connection.execute("SELECT status, notes FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone(),
+            ("interested", "Decision: keep\nScore: 4.5\nGood fit."),
+        )
         self.assertTrue(provider_started.wait(timeout=2))
         deadline = time.time() + 2
         while time.time() < deadline:
@@ -2410,7 +2443,10 @@ class BackendV2Tests(unittest.TestCase):
         )
 
         self.assertEqual(result["profile_apply_error"], "provider unavailable")
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 0)
+        self.assertEqual(
+            self.connection.execute("SELECT status, notes FROM feedback WHERE paper_id = ?", (paper_id,)).fetchone(),
+            ("interested", "Decision: keep\nScore: 4\nGood fit."),
+        )
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM raw_feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM structured_feedback WHERE paper_id = ?", (paper_id,)).fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM profile_versions").fetchone()[0], 1)

@@ -1841,6 +1841,10 @@ def save_feedback(
                 (paper_id, status, notes),
             )
         if has_feedback_content:
+            connection.execute(
+                "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
+                (paper_id, status or "reviewed", notes),
+            )
             ingest_output = ingest_feedback_blob(
                 connection,
                 paper_id=paper_id,
