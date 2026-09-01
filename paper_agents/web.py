@@ -379,6 +379,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
           <div class="paper-meta">
             {source_badge}
             <span>{escape(card.get("published") or "date unknown")}</span>
+            {render_pulled_date(card)}
             <span class="source-id">{escape(card["source_id"])}</span>
             {render_pdf_control(card)}
             {render_copy_control(card)}
@@ -1401,6 +1402,14 @@ def render_copy_control(card: dict[str, Any]) -> str:
     )
 
 
+def render_pulled_date(card: dict[str, Any]) -> str:
+    pulled_at = card.get("pulled_at")
+    if not pulled_at:
+        return ""
+    pulled_day = str(pulled_at)[:10]
+    return f'<span class="pulled-date">Pulled {escape(pulled_day)}</span>'
+
+
 def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
     has_extracted_summary = any(summary.get(key) for key in ["research_problem", "why_it_matters", "approach"])
     source_abstract = summary.get("source_abstract")
@@ -1427,6 +1436,9 @@ def summary_field_text(value: Any, *, fallback: str = "Not extracted yet.") -> s
         return fallback
     if isinstance(value, str):
         text = value.strip()
+        decoded = decode_summary_json_string(text)
+        if decoded is not None:
+            return summary_field_text(decoded, fallback=fallback)
         if looks_like_non_prose_summary(text):
             return fallback
         return text or fallback
@@ -1443,6 +1455,15 @@ def summary_field_text(value: Any, *, fallback: str = "Not extracted yet.") -> s
         text = "; ".join(part for part in text_parts if part)
         return text or fallback
     return str(value).strip() or fallback
+
+
+def decode_summary_json_string(text: str) -> Any | None:
+    if not text or text[0] not in "[{":
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
 
 
 def truncate_text(value: str, max_chars: int) -> str:
@@ -1580,6 +1601,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                 primary_source.source_id,
                 papers.title,
                 papers.published,
+                papers.first_discovered_at,
                 papers.abstract,
                 primary_source.url,
                 primary_source.pdf_url,
@@ -1614,12 +1636,12 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
         for row in rows:
             paper_id = row[0]
             artifacts = load_artifacts_for_paper(connection, paper_id)
-            lightweight_score = parse_lightweight_feedback_score(row[13])
-            user_score = row[15] if row[15] is not None else lightweight_score
+            lightweight_score = parse_lightweight_feedback_score(row[14])
+            user_score = row[16] if row[16] is not None else lightweight_score
             has_feedback = bool(
-                row[16] is not None
-                or row[17] is not None
+                row[17] is not None
                 or row[18] is not None
+                or row[19] is not None
                 or lightweight_score is not None
             )
             cards.append(
@@ -1628,22 +1650,23 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     "recommendation_id": row[1],
                     "source": row[2] or "unknown",
                     "source_id": row[3] or "unknown",
-                    "source_label": source_label(row[2] or "unknown", parse_sources(row[14])),
+                    "source_label": source_label(row[2] or "unknown", parse_sources(row[15])),
                     "user_score": user_score,
-                    "feedback_decision": row[16],
-                    "feedback_received_at": row[18] or row[17],
+                    "feedback_decision": row[17],
+                    "feedback_received_at": row[19] or row[18],
                     "has_feedback": has_feedback,
                     "title": row[4],
                     "published": row[5],
-                    "url": row[7],
-                    "pdf_url": row[8],
-                    "score": float(row[9] or 0),
-                    "matched_keywords": decode_json(row[10], []),
-                    "ranking_reason": row[11],
-                    "feedback_status": row[12],
-                    "feedback_notes": row[13],
+                    "pulled_at": row[6],
+                    "url": row[8],
+                    "pdf_url": row[9],
+                    "score": float(row[10] or 0),
+                    "matched_keywords": decode_json(row[11], []),
+                    "ranking_reason": row[12],
+                    "feedback_status": row[13],
+                    "feedback_notes": row[14],
                     "artifacts": artifacts,
-                    "summary": with_source_abstract(load_summary(artifacts.get("triage_summary")), row[6]),
+                    "summary": with_source_abstract(load_summary(artifacts.get("triage_summary")), row[7]),
                 }
             )
     finally:

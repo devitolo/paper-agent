@@ -1589,6 +1589,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn('<option value="not_interested"', html)
         self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
         self.assertIn('<div class="paper-meta">', html)
+        self.assertIn("Pulled ", html)
         self.assertIn('data-copy-value="https://example.test/2607.reviewv1"', html)
         self.assertIn('class="title-link"', html)
         self.assertIn('class="metadata-action pdf-action"', html)
@@ -1875,6 +1876,19 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Health checks: Automated checks gate each rollout phase.", html)
         self.assertNotIn("[{", html)
         self.assertNotIn("&#x27;name&#x27;", html)
+
+        json_string_html = web.render_summary(
+            {
+                "research_problem": "Deployment safety",
+                "approach": (
+                    '[{"name": "Tiered rollouts", '
+                    '"description": "Changes are tested before broad production rollout."}]'
+                ),
+            },
+            compact=False,
+        )
+        self.assertIn("Tiered rollouts: Changes are tested before broad production rollout.", json_string_html)
+        self.assertNotIn("[{", json_string_html)
 
         long_abstract = " ".join(["observability"] * 200)
         abstract_html = web.render_summary({"source_abstract": long_abstract}, compact=False)
