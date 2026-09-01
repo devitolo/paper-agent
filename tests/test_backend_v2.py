@@ -1882,6 +1882,16 @@ class BackendV2Tests(unittest.TestCase):
         self.assertLess(len(abstract_html), len(long_abstract))
         self.assertIn("...", abstract_html)
 
+        formula_html = web.render_summary(
+            {
+                "research_problem": "Deployment safety",
+                "approach": "RLCR (y, q, y * ) = 1y=y* - (q - 1y=y*) 2 | {z } | {z } correction",
+            },
+            compact=False,
+        )
+        self.assertIn("<h3>Approach</h3><p>Not extracted yet.</p>", formula_html)
+        self.assertNotIn("RLCR", formula_html)
+
     def test_topics_page_renders_editable_topic_manager(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
         save_topic_config(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import mimetypes
+import re
 import sqlite3
 import threading
 import urllib.parse
@@ -1426,6 +1427,8 @@ def summary_field_text(value: Any, *, fallback: str = "Not extracted yet.") -> s
         return fallback
     if isinstance(value, str):
         text = value.strip()
+        if looks_like_non_prose_summary(text):
+            return fallback
         return text or fallback
     if isinstance(value, list):
         parts = [summary_field_text(item, fallback="") for item in value]
@@ -1447,6 +1450,26 @@ def truncate_text(value: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 1].rstrip() + "..."
+
+
+def looks_like_non_prose_summary(text: str) -> bool:
+    if not text:
+        return False
+    words = re.findall(r"[A-Za-z][A-Za-z-]{2,}", text)
+    alpha_count = sum(1 for character in text if character.isalpha())
+    symbol_count = sum(
+        1
+        for character in text
+        if not character.isalnum()
+        and not character.isspace()
+        and character not in ".,;:!?'-/()"
+    )
+    has_math_markers = any(marker in text for marker in ["=", "{", "}", "|", "\\", "_"])
+    if has_math_markers and len(words) < 5:
+        return True
+    if has_math_markers and symbol_count > max(8, alpha_count // 3):
+        return True
+    return False
 
 
 def button_class(card: dict[str, Any], status: str) -> str:
