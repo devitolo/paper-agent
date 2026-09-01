@@ -496,7 +496,9 @@ def discussion_summary_lines(summary: dict[str, Any]) -> list[str]:
         ("Approach", "approach"),
         ("Source abstract", "source_abstract"),
     ]:
-        value = (summary.get(key) or "").strip()
+        value = summary_field_text(summary.get(key), fallback="")
+        if key == "source_abstract":
+            value = truncate_text(value, 900)
         if value:
             lines.append(f"{label}: {value}")
     return lines
@@ -1402,21 +1404,49 @@ def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
     has_extracted_summary = any(summary.get(key) for key in ["research_problem", "why_it_matters", "approach"])
     source_abstract = summary.get("source_abstract")
     if not has_extracted_summary and source_abstract:
-        abstract = escape(source_abstract)
+        abstract = escape(truncate_text(summary_field_text(source_abstract), 900))
         if compact:
             return f'<div class="compact-summary"><strong>Source Abstract:</strong> {abstract}</div>'
         return f"""<div class="source-summary">
     <section><h3>Source Abstract</h3><p>{abstract}</p></section>
   </div>"""
 
-    problem = escape(summary.get("research_problem") or "Not extracted yet.")
+    problem = escape(summary_field_text(summary.get("research_problem")))
     if compact:
         return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
     return f"""<div class="summary-grid">
     <section><h3>Problem</h3><p>{problem}</p></section>
-    <section><h3>Why it matters</h3><p>{escape(summary.get("why_it_matters") or "Not extracted yet.")}</p></section>
-    <section><h3>Approach</h3><p>{escape(summary.get("approach") or "Not extracted yet.")}</p></section>
+    <section><h3>Why it matters</h3><p>{escape(summary_field_text(summary.get("why_it_matters")))}</p></section>
+    <section><h3>Approach</h3><p>{escape(summary_field_text(summary.get("approach")))}</p></section>
   </div>"""
+
+
+def summary_field_text(value: Any, *, fallback: str = "Not extracted yet.") -> str:
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        text = value.strip()
+        return text or fallback
+    if isinstance(value, list):
+        parts = [summary_field_text(item, fallback="") for item in value]
+        text = "; ".join(part for part in parts if part)
+        return text or fallback
+    if isinstance(value, dict):
+        name = summary_field_text(value.get("name"), fallback="")
+        description = summary_field_text(value.get("description"), fallback="")
+        if name and description:
+            return f"{name}: {description}"
+        text_parts = [summary_field_text(item, fallback="") for item in value.values()]
+        text = "; ".join(part for part in text_parts if part)
+        return text or fallback
+    return str(value).strip() or fallback
+
+
+def truncate_text(value: str, max_chars: int) -> str:
+    text = " ".join(value.split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "..."
 
 
 def button_class(card: dict[str, Any], status: str) -> str:
@@ -2075,7 +2105,12 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .summary-grid section { min-width: 0; }
 .summary-grid p, .source-summary p, .compact-summary { color: var(--muted-strong); font-size: 12px; }
 .source-summary { margin: 8px 0; }
-.source-summary p { max-height: 88px; overflow: auto; }
+.source-summary p {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .compact-summary { margin: 6px 0; line-height: 1.35; }
 .links { margin-bottom: 7px; }
 .match-rationale { margin-top: 7px; border: 1px solid rgba(56, 189, 248, 0.24); border-left-color: rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 7px 9px; background: linear-gradient(90deg, rgba(56, 189, 248, 0.105), rgba(56, 189, 248, 0.025)); }

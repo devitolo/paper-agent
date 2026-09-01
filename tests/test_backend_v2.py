@@ -1852,6 +1852,36 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Source Abstract", html)
         self.assertIn("Applied incident review automation.", html)
 
+    def test_review_queue_summary_formats_structured_fields_and_truncates_abstract(self):
+        html = web.render_summary(
+            {
+                "research_problem": "Deployment safety",
+                "why_it_matters": None,
+                "approach": [
+                    {
+                        "name": "Tiered rollouts",
+                        "description": "Changes are tested before broad production rollout.",
+                    },
+                    {
+                        "name": "Health checks",
+                        "description": "Automated checks gate each rollout phase.",
+                    },
+                ],
+            },
+            compact=False,
+        )
+
+        self.assertIn("Tiered rollouts: Changes are tested before broad production rollout.", html)
+        self.assertIn("Health checks: Automated checks gate each rollout phase.", html)
+        self.assertNotIn("[{", html)
+        self.assertNotIn("&#x27;name&#x27;", html)
+
+        long_abstract = " ".join(["observability"] * 200)
+        abstract_html = web.render_summary({"source_abstract": long_abstract}, compact=False)
+        self.assertIn("Source Abstract", abstract_html)
+        self.assertLess(len(abstract_html), len(long_abstract))
+        self.assertIn("...", abstract_html)
+
     def test_topics_page_renders_editable_topic_manager(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
         save_topic_config(
