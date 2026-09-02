@@ -87,9 +87,9 @@ python3 -m paper_agents.cli db health --days 21
 python3 -m paper_agents.cli db health --days 21 --source openalex --json
 ```
 
-`db health` computes operational rollups directly from raw SQLite facts, without materialized aggregate tables. It reports DB path/size/integrity, latest workflow cycle age/state, days since the last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, unapplied structured feedback, recent profile apply failures, and warnings for stale cycles or unhealthy sources. Use `--days`, `--source`, and `--json` for range, source, and machine-readable output.
+`db health` computes operational rollups directly from raw SQLite facts, without materialized aggregate tables. It reports DB path/size/integrity, latest workflow cycle age/state, days since the last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, unapplied structured feedback, recent profile apply failures, and warnings for stale cycles or unhealthy sources. Health warnings should represent actionable work rather than historical noise; the web page omits the warning section entirely when there are no warnings. Use `--days`, `--source`, and `--json` for range, source, and machine-readable output.
 
-Health warnings that recur on the Mini have focused runbook wrappers:
+When `/health` shows warnings, run the focused Mini wrapper first:
 
 ```bash
 scripts/health_warnings.sh
@@ -98,7 +98,7 @@ scripts/apply_pending_feedback_profile.sh --dry-run
 scripts/apply_pending_feedback_profile.sh --apply
 ```
 
-`scripts/health_warnings.sh` prints the normal health report plus the specific rows behind common warnings: latest-cycle recommendations with available PDFs but missing triage summaries, recent unresolved Gemini/profile apply failures, and structured feedback waiting for profile apply. A later successful non-dry-run profile apply clears the Gemini/profile failure warning. DOI-only Semantic Scholar/OpenAlex records without a PDF artifact are tracked as artifact gaps but do not raise the repair warning because `review-backfill` cannot extract them. `scripts/fix_missing_triage_summaries.sh` wraps `review-backfill` without rerunning Scout/Curator. `scripts/apply_pending_feedback_profile.sh` previews by default and only writes a profile update when called with `--apply`.
+`scripts/health_warnings.sh` prints the normal health report plus the specific rows behind common warnings: latest-cycle recommendations with available PDFs but missing triage summaries, recent unresolved Gemini/profile apply failures, and structured feedback waiting for profile apply. `scripts/fix_missing_triage_summaries.sh --quick --limit 5` backfills summaries only for recommendations with PDFs, without rerunning Scout or Curator. DOI-only Semantic Scholar/OpenAlex records without a PDF artifact are tracked as artifact gaps but do not raise the repair warning because `review-backfill` cannot extract them. `scripts/apply_pending_feedback_profile.sh --dry-run` previews pending profile apply; `--apply` writes the profile update, and a later successful non-dry-run profile apply clears the Gemini/profile failure warning. DB changes show up on browser refresh. Code, template, and static asset changes from `git pull` require restarting the long-running Python web server; static assets may also need a hard refresh if browser-cached.
 
 ## Repository Path
 

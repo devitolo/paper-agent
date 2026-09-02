@@ -69,7 +69,7 @@ SQLite history and guidance
 
 The scheduler starts runs and captures basic process status. The first scheduler should be a systemd service and timer on Ubuntu.
 
-The Python workflow owns orchestration between deterministic steps and model-backed judgment steps. It should remain explicit and debuggable before any larger agent framework is considered.
+The Python workflow owns orchestration between deterministic steps and model-backed judgment steps. It should remain explicit and debuggable before any larger agent framework is considered. A future Go port is plausible, but should wait until workflow and schema boundaries stabilize; preserve SQLite compatibility first, then phase the port through web UI/server, operational CLI/runbooks, scheduled orchestration, and source adapters/agent logic where useful.
 
 Scout source adapters translate a normalized scouting request into source-specific calls and return normalized paper records. arXiv is the default and nightly source; Semantic Scholar and OpenAlex are opt-in adapters for exploratory runs. Scout persists candidate pools and diagnostics only; preference scoring and recommendations belong to Curator.
 

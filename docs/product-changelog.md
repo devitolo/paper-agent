@@ -12,12 +12,14 @@ Decision: Common `/health` warnings should have focused Mini scripts so routine 
 
 Completed behavior:
 
-- Add `scripts/health_warnings.sh` to print the normal health summary plus detailed rows behind missing triage summaries, recent profile apply failures, and unapplied structured feedback.
-- Add `scripts/fix_missing_triage_summaries.sh` as a safe wrapper around `review-backfill`.
-- Add `scripts/apply_pending_feedback_profile.sh`, which dry-runs by default and applies only with `--apply`.
+- Treat Health warnings as actionable work, not historical noise, and hide the warning section when there are no warnings.
+- Add `scripts/health_warnings.sh` as the first command to run when `/health` shows warnings; it prints the normal health summary plus detailed rows behind missing triage summaries, recent profile apply failures, and unapplied structured feedback.
+- Add `scripts/fix_missing_triage_summaries.sh --quick --limit 5` as a safe wrapper around `review-backfill` for recommendations with PDFs, without rerunning Scout/Curator.
+- Add `scripts/apply_pending_feedback_profile.sh`, where `--dry-run` previews pending profile apply and `--apply` writes the profile update.
 - Clear the Gemini/profile failure warning once a later non-dry-run profile apply succeeds.
 - Warn about missing triage summaries only when a latest-cycle recommendation has an available PDF or direct PDF URL; DOI-only recommendations remain visible as artifact gaps without creating an unrecoverable warning.
 - Keep scripts non-destructive; they do not delete rows, reset the DB, or rerun Scout.
+- Document the operator mental model: DB changes appear on browser refresh, while pulled code/template/static changes require restarting the long-running Python web server; cached static assets may need a hard refresh.
 
 ### Review Queue saved feedback editing
 

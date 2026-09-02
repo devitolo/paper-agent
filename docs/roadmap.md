@@ -94,6 +94,9 @@ Next major feature area.
 
 ## Phase 7: Optimization
 
+- Evaluate a Go port only after workflow and schema stabilize.
+  - Preserve SQLite compatibility first.
+  - Port web UI/server, operational CLI/runbooks, scheduled orchestration, and then source adapters/agent logic where useful.
 - Tune local/cloud workload split.
 - Optimize quotas and costs.
 - Evaluate hardware upgrades.
