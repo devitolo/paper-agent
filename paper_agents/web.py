@@ -1421,14 +1421,18 @@ def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
     <section><h3>Source Abstract</h3><p>{abstract}</p></section>
   </div>"""
 
-    problem = escape(summary_field_text(summary.get("research_problem")))
+    problem = escape(summary_display_text(summary.get("research_problem")))
     if compact:
         return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
     return f"""<div class="summary-grid">
     <section><h3>Problem</h3><p>{problem}</p></section>
-    <section><h3>Why it matters</h3><p>{escape(summary_field_text(summary.get("why_it_matters")))}</p></section>
-    <section><h3>Approach</h3><p>{escape(summary_field_text(summary.get("approach")))}</p></section>
+    <section><h3>Why it matters</h3><p>{escape(summary_display_text(summary.get("why_it_matters")))}</p></section>
+    <section><h3>Approach</h3><p>{escape(summary_display_text(summary.get("approach")))}</p></section>
   </div>"""
+
+
+def summary_display_text(value: Any, *, max_chars: int = 520) -> str:
+    return truncate_text(summary_field_text(value), max_chars)
 
 
 def summary_field_text(value: Any, *, fallback: str = "Not extracted yet.") -> str:
@@ -1451,10 +1455,20 @@ def summary_field_text(value: Any, *, fallback: str = "Not extracted yet.") -> s
         description = summary_field_text(value.get("description"), fallback="")
         if name and description:
             return f"{name}: {description}"
-        text_parts = [summary_field_text(item, fallback="") for item in value.values()]
+        text_parts = []
+        for key, item in value.items():
+            part = summary_field_text(item, fallback="")
+            if not part:
+                continue
+            text_parts.append(f"{summary_label(key)}: {part}")
         text = "; ".join(part for part in text_parts if part)
         return text or fallback
     return str(value).strip() or fallback
+
+
+def summary_label(value: Any) -> str:
+    text = str(value).strip().replace("_", " ").replace("-", " ")
+    return " ".join(word.capitalize() for word in text.split())
 
 
 def decode_summary_json_string(text: str) -> Any | None:

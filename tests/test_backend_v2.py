@@ -1978,6 +1978,22 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Tiered rollouts: Changes are tested before broad production rollout.", json_string_html)
         self.assertNotIn("[{", json_string_html)
 
+        nested_json_html = web.render_summary(
+            {
+                "research_problem": "Agent benchmarks",
+                "approach": (
+                    '{"reasoning-process": {"methodology": ["Two large-scale datasets are released"], '
+                    '"evaluation": ["Localized the fault occurrence", "Identified the root cause"]}}'
+                ),
+            },
+            compact=False,
+        )
+        self.assertIn("Reasoning Process:", nested_json_html)
+        self.assertIn("Methodology: Two large-scale datasets are released", nested_json_html)
+        self.assertIn("Evaluation: Localized the fault occurrence; Identified the root cause", nested_json_html)
+        self.assertNotIn("&quot;reasoning-process&quot;", nested_json_html)
+        self.assertNotIn("{", nested_json_html)
+
         long_abstract = " ".join(["observability"] * 200)
         abstract_html = web.render_summary({"source_abstract": long_abstract}, compact=False)
         self.assertIn("Source Abstract", abstract_html)
