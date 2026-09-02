@@ -98,7 +98,7 @@ scripts/apply_pending_feedback_profile.sh --dry-run
 scripts/apply_pending_feedback_profile.sh --apply
 ```
 
-`scripts/health_warnings.sh` prints the normal health report plus the specific rows behind common warnings: latest-cycle recommendations missing triage summaries, recent failed Gemini/profile apply attempts, and structured feedback waiting for profile apply. `scripts/fix_missing_triage_summaries.sh` wraps `review-backfill` without rerunning Scout/Curator. `scripts/apply_pending_feedback_profile.sh` previews by default and only writes a profile update when called with `--apply`.
+`scripts/health_warnings.sh` prints the normal health report plus the specific rows behind common warnings: latest-cycle recommendations missing triage summaries, recent unresolved Gemini/profile apply failures, and structured feedback waiting for profile apply. A later successful non-dry-run profile apply clears the Gemini/profile failure warning. `scripts/fix_missing_triage_summaries.sh` wraps `review-backfill` without rerunning Scout/Curator. `scripts/apply_pending_feedback_profile.sh` previews by default and only writes a profile update when called with `--apply`.
 
 ## Repository Path
 

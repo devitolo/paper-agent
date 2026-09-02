@@ -2869,6 +2869,55 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(any("Gemini/profile apply failed" in message for message in messages))
         self.assertTrue(any("Structured feedback is waiting" in message for message in messages))
 
+    def test_health_summary_clears_profile_apply_failure_after_success(self):
+        paper_id, recommendation_id = self._seed_review_recommendation()
+        ingest = ingest_feedback_blob(
+            self.connection,
+            paper_id=paper_id,
+            recommendation_id=recommendation_id,
+            content="Decision: keep\nScore: 5\nGreat operational fit.",
+            source="test",
+            status="interested",
+        )
+        db.create_feedback_profile_apply_attempt(
+            self.connection,
+            provider="gemini",
+            model=None,
+            structured_feedback_ids=[ingest["structured_feedback_id"]],
+            dry_run=False,
+            status="failed",
+            error="provider unavailable",
+        )
+        profile_version_id = db.create_profile_version(
+            self.connection,
+            {"interests": ["operations"]},
+            source_structured_feedback_id=ingest["structured_feedback_id"],
+            change_summary="Applied feedback.",
+        )
+        db.create_feedback_profile_applications(
+            self.connection,
+            [ingest["structured_feedback_id"]],
+            profile_version_id,
+        )
+        db.create_feedback_profile_apply_attempt(
+            self.connection,
+            provider="gemini",
+            model="gemini-3.1-flash-lite",
+            structured_feedback_ids=[ingest["structured_feedback_id"]],
+            dry_run=False,
+            status="succeeded",
+            profile_version_id=profile_version_id,
+        )
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21)
+
+        self.assertEqual(summary["feedback_profile"]["unapplied_structured_feedback_count"], 0)
+        self.assertEqual(summary["feedback_profile"]["recent_apply_failures_count"], 0)
+        messages = [warning["message"] for warning in summary["warnings"]]
+        self.assertFalse(any("Gemini/profile apply failed" in message for message in messages))
+        self.assertFalse(any("Structured feedback is waiting" in message for message in messages))
+
     def test_health_page_renders_dashboard_controls(self):
         self._seed_scout_candidate(source="openalex", excluded=True, exclusion_reason="history")
         self.connection.commit()

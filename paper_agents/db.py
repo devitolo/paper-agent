@@ -1127,9 +1127,16 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                 connection,
                 """
                 SELECT COUNT(*)
-                FROM feedback_profile_apply_attempts
-                WHERE status = 'failed'
-                  AND created_at >= datetime('now', '-7 days')
+                FROM feedback_profile_apply_attempts failed_attempts
+                WHERE failed_attempts.status = 'failed'
+                  AND failed_attempts.created_at >= datetime('now', '-7 days')
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM feedback_profile_apply_attempts successful_attempts
+                    WHERE successful_attempts.dry_run = 0
+                      AND successful_attempts.status = 'succeeded'
+                      AND successful_attempts.id > failed_attempts.id
+                  )
                 """,
             ),
             "latest_profile": row_to_dict(

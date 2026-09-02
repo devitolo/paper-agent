@@ -15,6 +15,7 @@ Completed behavior:
 - Add `scripts/health_warnings.sh` to print the normal health summary plus detailed rows behind missing triage summaries, recent profile apply failures, and unapplied structured feedback.
 - Add `scripts/fix_missing_triage_summaries.sh` as a safe wrapper around `review-backfill`.
 - Add `scripts/apply_pending_feedback_profile.sh`, which dry-runs by default and applies only with `--apply`.
+- Clear the Gemini/profile failure warning once a later non-dry-run profile apply succeeds.
 - Keep scripts non-destructive; they do not delete rows, reset the DB, or rerun Scout.
 
 ### Review Queue saved feedback editing

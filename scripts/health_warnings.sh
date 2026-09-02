@@ -48,17 +48,25 @@ ORDER BY recommendations.recommendation_order ASC;
 SQL
 
 echo
-echo "== Recent failed profile apply attempts =="
+echo "== Recent unresolved failed profile apply attempts =="
 sqlite3 -header -column "$DB_PATH" <<'SQL'
 SELECT
-  id,
-  created_at,
-  provider,
-  model,
-  status,
-  substr(error, 1, 160) AS error
-FROM feedback_profile_apply_attempts
-WHERE status = 'failed'
+  failed_attempts.id,
+  failed_attempts.created_at,
+  failed_attempts.provider,
+  failed_attempts.model,
+  failed_attempts.status,
+  substr(failed_attempts.error, 1, 160) AS error
+FROM feedback_profile_apply_attempts failed_attempts
+WHERE failed_attempts.status = 'failed'
+  AND failed_attempts.created_at >= datetime('now', '-7 days')
+  AND NOT EXISTS (
+    SELECT 1
+    FROM feedback_profile_apply_attempts successful_attempts
+    WHERE successful_attempts.dry_run = 0
+      AND successful_attempts.status = 'succeeded'
+      AND successful_attempts.id > failed_attempts.id
+  )
 ORDER BY id DESC
 LIMIT 10;
 SQL
