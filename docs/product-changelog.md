@@ -4,6 +4,19 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ## 2026-09-01
 
+### Mini health warning runbooks
+
+Status: Implemented.
+
+Decision: Common `/health` warnings should have focused Mini scripts so routine recovery does not require ad hoc SQLite spelunking.
+
+Completed behavior:
+
+- Add `scripts/health_warnings.sh` to print the normal health summary plus detailed rows behind missing triage summaries, recent profile apply failures, and unapplied structured feedback.
+- Add `scripts/fix_missing_triage_summaries.sh` as a safe wrapper around `review-backfill`.
+- Add `scripts/apply_pending_feedback_profile.sh`, which dry-runs by default and applies only with `--apply`.
+- Keep scripts non-destructive; they do not delete rows, reset the DB, or rerun Scout.
+
 ### Review Queue saved feedback editing
 
 Status: Implemented in commit `9d931f3`.

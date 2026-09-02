@@ -89,6 +89,17 @@ python3 -m paper_agents.cli db health --days 21 --source openalex --json
 
 `db health` computes operational rollups directly from raw SQLite facts, without materialized aggregate tables. It reports DB path/size/integrity, latest workflow cycle age/state, days since the last recommendation, source-aware Scout/Curator/Reviewer funnel counts, artifact gaps, unapplied structured feedback, recent profile apply failures, and warnings for stale cycles or unhealthy sources. Use `--days`, `--source`, and `--json` for range, source, and machine-readable output.
 
+Health warnings that recur on the Mini have focused runbook wrappers:
+
+```bash
+scripts/health_warnings.sh
+scripts/fix_missing_triage_summaries.sh --quick --limit 5
+scripts/apply_pending_feedback_profile.sh --dry-run
+scripts/apply_pending_feedback_profile.sh --apply
+```
+
+`scripts/health_warnings.sh` prints the normal health report plus the specific rows behind common warnings: latest-cycle recommendations missing triage summaries, recent failed Gemini/profile apply attempts, and structured feedback waiting for profile apply. `scripts/fix_missing_triage_summaries.sh` wraps `review-backfill` without rerunning Scout/Curator. `scripts/apply_pending_feedback_profile.sh` previews by default and only writes a profile update when called with `--apply`.
+
 ## Repository Path
 
 Use `/Users/vhl/workspace/paper-agent` as the canonical local checkout path for Project Paper commands, cron entries, deployment scripts, and Codex follow-up work.
