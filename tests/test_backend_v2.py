@@ -1590,6 +1590,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
         self.assertIn('<div class="paper-meta">', html)
         self.assertIn("Pulled ", html)
+        self.assertLess(html.index('class="action-rail"'), html.index("Pulled "))
+        self.assertLess(html.index("Pulled "), html.index('<span>Match Score</span><strong>72.5</strong>'))
         self.assertIn('data-copy-value="https://example.test/2607.reviewv1"', html)
         self.assertIn('class="title-link"', html)
         self.assertIn('class="metadata-action pdf-action"', html)

@@ -379,7 +379,6 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
           <div class="paper-meta">
             {source_badge}
             <span>{escape(card.get("published") or "date unknown")}</span>
-            {render_pulled_date(card)}
             <span class="source-id">{escape(card["source_id"])}</span>
             {render_pdf_control(card)}
             {render_copy_control(card)}
@@ -400,6 +399,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
       <span class="submit-state" aria-live="polite"></span>
     </div>
     <div class="action-rail">
+      {render_pulled_date(card)}
       <div class="match-score {'score-secondary' if card.get('user_score') is not None else ''}"><span>Match Score</span><strong>{card["score"]:.1f}</strong></div>
       {user_score_html}
     </div>
@@ -1407,7 +1407,7 @@ def render_pulled_date(card: dict[str, Any]) -> str:
     if not pulled_at:
         return ""
     pulled_day = str(pulled_at)[:10]
-    return f'<span class="pulled-date">Pulled {escape(pulled_day)}</span>'
+    return f'<div class="pulled-date">Pulled {escape(pulled_day)}</div>'
 
 
 def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
@@ -2123,6 +2123,8 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .card-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; }
 .paper-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.25; }
 .paper-meta .source-id { color: #75859a; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.action-rail { display: grid; gap: 6px; }
+.pulled-date { color: var(--muted); font-size: 10px; line-height: 1.15; text-align: center; }
 .match-score { text-align: center; border: 1px solid rgba(56, 189, 248, 0.45); border-radius: var(--radius-sm); padding: 6px; background: linear-gradient(180deg, rgba(56, 189, 248, 0.15), rgba(56, 189, 248, 0.055)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); }
 .match-score strong { display: block; font-size: 18px; line-height: 1; color: #e0f7ff; }
 .match-score span, .user-score span { display: block; color: var(--muted); font-size: 9px; line-height: 1.05; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -2164,7 +2166,6 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .match-rationale p { color: #d7e8f5; font-size: 12px; margin-bottom: 5px; }
 .paper-card.compact { padding: 8px 10px; }
 .paper-card.compact .tags, .paper-card.compact .links { margin-top: 5px; }
-.action-rail { display: grid; gap: 6px; }
 .submit-state { color: var(--muted); font-size: 11px; line-height: 1.25; }
 label { display: grid; gap: 3px; color: var(--muted); font-size: 12px; }
 textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertical; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px; font: inherit; color: var(--text); background: #0d1521; }
@@ -2337,7 +2338,8 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .header-controls { justify-content: flex-start; }
   .queue-controls, .primary-nav { justify-content: flex-start; }
   .summary-grid { grid-template-columns: 1fr; }
-  .action-rail { grid-template-columns: 64px 1fr; align-items: start; }
+  .action-rail { grid-template-columns: repeat(auto-fit, minmax(72px, max-content)); align-items: start; }
+  .pulled-date { text-align: left; align-self: center; }
   .feedback-state { text-align: left; grid-column: 1 / -1; }
   .health-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .health-graphs { grid-template-columns: 1fr; }
