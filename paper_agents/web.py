@@ -1501,11 +1501,21 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
     init_db(db_path)
     where_clauses = []
     params: list[Any] = []
+    reviewable_clause = (
+        "("
+        "primary_source.source IS NULL "
+        "OR primary_source.source NOT IN ('semantic_scholar', 'openalex') "
+        "OR COALESCE(primary_source.pdf_url, '') != '' "
+        "OR COALESCE(artifact_status.pdf_count, 0) > 0 "
+        "OR COALESCE(artifact_status.triage_summary_count, 0) > 0"
+        ")"
+    )
     if filter_value == "needs_review":
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status IS NULL")
         where_clauses.append("latest_structured_feedback.paper_id IS NULL")
         where_clauses.append("latest_raw_feedback.paper_id IS NULL")
+        where_clauses.append(reviewable_clause)
     elif filter_value == "has_feedback":
         where_clauses.append(
             "("
@@ -1517,9 +1527,11 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
     elif filter_value != "all":
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status = ?")
+        where_clauses.append(reviewable_clause)
         params.append(filter_value)
     else:
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
+        where_clauses.append(reviewable_clause)
     if source_value != SOURCE_FILTER_ALL:
         where_clauses.append("EXISTS (SELECT 1 FROM paper_sources source_filter WHERE source_filter.paper_id = papers.id AND source_filter.source = ?)")
         params.append(source_value)
@@ -1593,6 +1605,13 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     ORDER BY paper_id, source
                 )
                 GROUP BY paper_id
+            ), artifact_status AS (
+                SELECT
+                    paper_id,
+                    SUM(CASE WHEN artifact_type = 'pdf' THEN 1 ELSE 0 END) AS pdf_count,
+                    SUM(CASE WHEN artifact_type = 'triage_summary' THEN 1 ELSE 0 END) AS triage_summary_count
+                FROM artifacts
+                GROUP BY paper_id
             )
             SELECT
                 papers.id,
@@ -1622,6 +1641,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
              AND latest_recommendation.row_number = 1
             LEFT JOIN primary_source ON primary_source.paper_id = papers.id AND primary_source.row_number = 1
             LEFT JOIN source_rollup ON source_rollup.paper_id = papers.id
+            LEFT JOIN artifact_status ON artifact_status.paper_id = papers.id
             LEFT JOIN latest_feedback ON latest_feedback.paper_id = papers.id AND latest_feedback.row_number = 1
             LEFT JOIN latest_structured_feedback ON latest_structured_feedback.paper_id = papers.id AND latest_structured_feedback.row_number = 1
             LEFT JOIN latest_raw_feedback ON latest_raw_feedback.paper_id = papers.id AND latest_raw_feedback.row_number = 1

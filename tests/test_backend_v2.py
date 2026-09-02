@@ -628,6 +628,44 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, "previously_discovered"))
 
+    def test_non_arxiv_candidate_without_pdf_url_is_excluded_from_curator_pool(self):
+        source = FakeSource(
+            [
+                ScoutCandidate(
+                    source="semantic_scholar",
+                    source_id="no-pdf-semantic",
+                    title="Interesting paper without a PDF",
+                    abstract="Interactive debugging for AI agents.",
+                    authors=[],
+                    published="2026-01-01",
+                    updated=None,
+                    url="https://www.semanticscholar.org/paper/no-pdf-semantic",
+                    pdf_url=None,
+                    categories=["Computer Science"],
+                )
+            ]
+        )
+
+        result = ScoutAgent(source=source).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(topics=["debugging agents"], max_candidates=5),
+        )
+
+        self.assertEqual(result["stored_count"], 1)
+        self.assertEqual(result["eligible_count"], 0)
+        row = self.connection.execute(
+            """
+            SELECT excluded, exclusion_reason
+            FROM scout_candidates
+            WHERE scout_run_id = ?
+            """,
+            (result["scout_run_id"],),
+        ).fetchone()
+        self.assertEqual(row, (1, "missing_pdf_url"))
+        self.assertEqual(db.eligible_candidates_for_cycle(self.connection, self.cycle_id), [])
+
     def test_same_arxiv_identity_dedupes_across_sources(self):
         arxiv_id, is_new = db.upsert_paper(
             self.connection,
@@ -1854,6 +1892,52 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("Source Abstract", html)
         self.assertIn("Applied incident review automation.", html)
+
+    def test_review_queue_hides_unreviewable_non_arxiv_without_pdf_or_triage(self):
+        paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "semantic_scholar",
+                "source_id": "semantic-no-pdf",
+                "title": "Semantic Paper Without PDF",
+                "url": "https://www.semanticscholar.org/paper/semantic-no-pdf",
+                "published": "2026-08-20",
+                "abstract": "Debugging agent workflows.",
+                "pdf_url": None,
+            },
+        )
+        curator_run_id = db.create_curator_run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            profile_version_id=self.profile_id,
+            scout_attempt_count=1,
+            max_scout_attempts=1,
+            min_quality_score=1,
+            max_recommendations=1,
+            model="test",
+        )
+        db.insert_curator_evaluation(
+            self.connection,
+            curator_run_id=curator_run_id,
+            paper_id=paper_id,
+            scout_candidate_id=None,
+            score=80,
+            rationale="Strong match.",
+            matched_signals=["debugging"],
+            quality_threshold_met=True,
+        )
+        db.insert_recommendation(
+            self.connection,
+            curator_run_id=curator_run_id,
+            paper_id=paper_id,
+            recommendation_order=1,
+            rationale="Strong match.",
+        )
+        self.connection.commit()
+
+        default_html = web.render_review_queue(self.db_path)
+
+        self.assertNotIn("Semantic Paper Without PDF", default_html)
 
     def test_review_queue_summary_formats_structured_fields_and_truncates_abstract(self):
         html = web.render_summary(
