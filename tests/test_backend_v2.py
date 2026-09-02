@@ -1822,6 +1822,26 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Feedback:", html)
         self.assertIn("Raw feedback that did not parse.</textarea>", html)
 
+    def test_review_queue_newest_sort_uses_pulled_date(self):
+        older_paper_id, _ = self._seed_review_recommendation(source_id="2607.olderv1")
+        newer_paper_id, _ = self._seed_review_recommendation(source_id="2607.newerv1")
+        self.connection.execute(
+            "UPDATE papers SET first_discovered_at = ? WHERE id = ?",
+            ("2026-07-30 05:00:00", older_paper_id),
+        )
+        self.connection.execute(
+            "UPDATE papers SET first_discovered_at = ? WHERE id = ?",
+            ("2026-09-02 05:00:00", newer_paper_id),
+        )
+        self.connection.commit()
+
+        cards = web.load_review_cards(self.db_path, filter_value="all", source_value="all", sort_value="latest")
+
+        self.assertGreater(len(cards), 1)
+        self.assertEqual(cards[0]["id"], newer_paper_id)
+        self.assertEqual(cards[0]["pulled_at"], "2026-09-02 05:00:00")
+        self.assertEqual(cards[1]["id"], older_paper_id)
+
     def test_review_queue_scored_filter_includes_lightweight_score_note(self):
         paper_id, _ = self._seed_review_recommendation()
         self.connection.execute(

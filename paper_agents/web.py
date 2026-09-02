@@ -1556,7 +1556,10 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
     elif filter_value == "has_feedback":
         order_clause = "ORDER BY latest_feedback_received_at DESC, latest_recommendation.curator_run_id DESC, papers.id DESC"
     else:
-        order_clause = "ORDER BY latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
+        order_clause = (
+            "ORDER BY papers.first_discovered_at DESC NULLS LAST, "
+            "latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
+        )
 
     connection = connect_db(db_path)
     try:
