@@ -1583,6 +1583,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
             ), latest_raw_feedback AS (
                 SELECT
                     paper_id,
+                    content,
                     received_at,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id DESC) AS row_number
                 FROM raw_feedback
@@ -1634,6 +1635,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                 latest_structured_feedback.decision,
                 latest_structured_feedback.created_at,
                 latest_raw_feedback.received_at,
+                latest_raw_feedback.content,
                 COALESCE(latest_structured_feedback.created_at, latest_raw_feedback.received_at) AS latest_feedback_received_at
             FROM papers
             LEFT JOIN latest_recommendation
@@ -1684,7 +1686,7 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
                     "matched_keywords": decode_json(row[11], []),
                     "ranking_reason": row[12],
                     "feedback_status": row[13],
-                    "feedback_notes": row[14],
+                    "feedback_notes": row[20] or row[14],
                     "artifacts": artifacts,
                     "summary": with_source_abstract(load_summary(artifacts.get("triage_summary")), row[7]),
                 }

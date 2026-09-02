@@ -1820,6 +1820,7 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("Raw Feedback Only Paper", html)
         self.assertIn("Feedback:", html)
+        self.assertIn("Raw feedback that did not parse.</textarea>", html)
 
     def test_review_queue_scored_filter_includes_lightweight_score_note(self):
         paper_id, _ = self._seed_review_recommendation()
