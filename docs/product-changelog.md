@@ -2,6 +2,21 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-09-01
+
+### Review Queue saved feedback editing
+
+Status: Implemented in commit `9d931f3`.
+
+Decision: Scored papers should reopen with the original saved feedback blob ready to revise, so the Feedback box remains the durable Paper Discussion handoff surface.
+
+Completed behavior:
+
+- Prefill View/edit feedback from the latest `raw_feedback.content` blob, with legacy `feedback.notes` as fallback for older records.
+- Keep `structured_feedback` as the source for score, decision, timestamp display, and the Scored filter.
+- Keep `Scored` tied to saved raw or structured feedback, not merely a legacy reviewed status.
+- Require no data migration; after `git pull` and web restart, existing saved blobs appear in the editor.
+
 ## 2026-08-31
 
 ### Feedback-guided Scout retrieval
