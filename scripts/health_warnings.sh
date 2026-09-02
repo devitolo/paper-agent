@@ -17,7 +17,7 @@ if ! command -v sqlite3 >/dev/null 2>&1; then
 fi
 
 echo
-echo "== Latest cycle recommendations missing triage summaries =="
+echo "== Latest cycle recommendations with PDFs but missing triage summaries =="
 sqlite3 -header -column "$DB_PATH" <<'SQL'
 WITH latest_cycle AS (
   SELECT id
@@ -44,6 +44,22 @@ LEFT JOIN artifacts triage
   ON triage.paper_id = papers.id
  AND triage.artifact_type = 'triage_summary'
 WHERE triage.id IS NULL
+  AND (
+    EXISTS (
+      SELECT 1
+      FROM artifacts pdf
+      WHERE pdf.paper_id = papers.id
+        AND pdf.artifact_type = 'pdf'
+    )
+    OR (
+      COALESCE(primary_source.pdf_url, '') != ''
+      AND (
+        primary_source.source = 'arxiv'
+        OR lower(primary_source.pdf_url) LIKE '%.pdf%'
+        OR lower(primary_source.pdf_url) LIKE '%.pdf?%'
+      )
+    )
+  )
 ORDER BY recommendations.recommendation_order ASC;
 SQL
 

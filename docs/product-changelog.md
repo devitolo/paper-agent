@@ -16,6 +16,7 @@ Completed behavior:
 - Add `scripts/fix_missing_triage_summaries.sh` as a safe wrapper around `review-backfill`.
 - Add `scripts/apply_pending_feedback_profile.sh`, which dry-runs by default and applies only with `--apply`.
 - Clear the Gemini/profile failure warning once a later non-dry-run profile apply succeeds.
+- Warn about missing triage summaries only when a latest-cycle recommendation has an available PDF or direct PDF URL; DOI-only recommendations remain visible as artifact gaps without creating an unrecoverable warning.
 - Keep scripts non-destructive; they do not delete rows, reset the DB, or rerun Scout.
 
 ### Review Queue saved feedback editing

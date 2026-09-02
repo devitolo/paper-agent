@@ -1465,15 +1465,20 @@ def _artifact_health(connection: sqlite3.Connection, latest_cycle_id: int | None
             "triage_summary_count": 0,
             "missing_pdf_count": 0,
             "missing_triage_summary_count": 0,
+            "backfillable_missing_triage_summary_count": 0,
         }
     row = connection.execute(
         """
         WITH primary_source AS (
-            SELECT paper_id, source
+            SELECT paper_id, source, pdf_url
             FROM paper_sources
             WHERE id IN (SELECT MIN(id) FROM paper_sources GROUP BY paper_id)
         ), latest_recommendations AS (
-            SELECT recommendations.id, recommendations.paper_id
+            SELECT
+                recommendations.id,
+                recommendations.paper_id,
+                primary_source.source,
+                primary_source.pdf_url
             FROM recommendations
             JOIN curator_runs ON curator_runs.id = recommendations.curator_run_id
             LEFT JOIN primary_source ON primary_source.paper_id = recommendations.paper_id
@@ -1483,7 +1488,24 @@ def _artifact_health(connection: sqlite3.Connection, latest_cycle_id: int | None
         SELECT
             COUNT(DISTINCT latest_recommendations.id) AS recommendation_count,
             COUNT(DISTINCT pdf.paper_id) AS pdf_count,
-            COUNT(DISTINCT triage.paper_id) AS triage_summary_count
+            COUNT(DISTINCT triage.paper_id) AS triage_summary_count,
+            COUNT(
+                DISTINCT CASE
+                    WHEN triage.paper_id IS NULL
+                     AND (
+                        pdf.paper_id IS NOT NULL
+                        OR (
+                            COALESCE(latest_recommendations.pdf_url, '') != ''
+                            AND (
+                                latest_recommendations.source = 'arxiv'
+                                OR lower(latest_recommendations.pdf_url) LIKE '%.pdf%'
+                                OR lower(latest_recommendations.pdf_url) LIKE '%.pdf?%'
+                            )
+                        )
+                     )
+                    THEN latest_recommendations.id
+                END
+            ) AS backfillable_missing_triage_summary_count
         FROM latest_recommendations
         LEFT JOIN artifacts pdf
           ON pdf.paper_id = latest_recommendations.paper_id
@@ -1497,6 +1519,7 @@ def _artifact_health(connection: sqlite3.Connection, latest_cycle_id: int | None
     recommendation_count = int(row[0] or 0)
     pdf_count = int(row[1] or 0)
     triage_count = int(row[2] or 0)
+    backfillable_missing_triage_count = int(row[3] or 0)
     return {
         "latest_cycle_id": latest_cycle_id,
         "recommendation_count": recommendation_count,
@@ -1504,6 +1527,7 @@ def _artifact_health(connection: sqlite3.Connection, latest_cycle_id: int | None
         "triage_summary_count": triage_count,
         "missing_pdf_count": max(0, recommendation_count - pdf_count),
         "missing_triage_summary_count": max(0, recommendation_count - triage_count),
+        "backfillable_missing_triage_summary_count": backfillable_missing_triage_count,
     }
 
 
@@ -1558,13 +1582,13 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
         warnings.append({"level": "warning", "message": "No recommendations were produced across two recent workflow cycles."})
 
     artifact_health = summary["artifact_health"]
-    if artifact_health["missing_triage_summary_count"] > 0:
+    if artifact_health["backfillable_missing_triage_summary_count"] > 0:
         warnings.append(
             {
                 "level": "warning",
                 "message": (
-                    f"Latest cycle has {artifact_health['missing_triage_summary_count']} "
-                    "recommended paper(s) without triage summaries."
+                    f"Latest cycle has {artifact_health['backfillable_missing_triage_summary_count']} "
+                    "recommended paper(s) with PDFs but without triage summaries."
                 ),
             }
         )

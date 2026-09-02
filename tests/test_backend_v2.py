@@ -2816,6 +2816,56 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(summary["artifact_health"]["triage_summary_count"], 1)
         self.assertEqual(summary["top"]["papers_waiting_in_queue"], 1)
 
+    def test_health_summary_does_not_warn_for_unbackfillable_missing_triage_summary(self):
+        paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "semantic_scholar",
+                "source_id": "semantic-doi-only",
+                "title": "Semantic DOI Only Paper",
+                "url": "https://www.semanticscholar.org/paper/semantic-doi-only",
+                "pdf_url": "https://doi.org/10.1145/example",
+                "published": "2026-08-20",
+                "abstract": "Interactive debugging for agent systems.",
+            },
+        )
+        curator_run_id = db.create_curator_run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            profile_version_id=self.profile_id,
+            scout_attempt_count=1,
+            max_scout_attempts=3,
+            min_quality_score=25,
+            max_recommendations=3,
+            model="test",
+        )
+        db.insert_curator_evaluation(
+            self.connection,
+            curator_run_id=curator_run_id,
+            paper_id=paper_id,
+            scout_candidate_id=None,
+            score=44.5,
+            rationale="Matched debugging.",
+            matched_signals=["debugging"],
+            quality_threshold_met=True,
+        )
+        db.insert_recommendation(
+            self.connection,
+            curator_run_id=curator_run_id,
+            paper_id=paper_id,
+            recommendation_order=1,
+            rationale="Matched debugging.",
+        )
+        db.update_workflow_state(self.connection, self.cycle_id, "awaiting_manual_discussion")
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21)
+
+        self.assertEqual(summary["artifact_health"]["missing_triage_summary_count"], 1)
+        self.assertEqual(summary["artifact_health"]["backfillable_missing_triage_summary_count"], 0)
+        messages = [warning["message"] for warning in summary["warnings"]]
+        self.assertFalse(any("without triage summaries" in message for message in messages))
+
     def test_health_summary_warns_on_zero_eligible_scout_run(self):
         self._seed_scout_candidate(source="openalex", excluded=True, exclusion_reason="already_seen")
         self.connection.commit()
