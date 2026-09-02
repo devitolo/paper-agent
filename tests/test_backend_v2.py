@@ -2968,6 +2968,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertFalse(any("Gemini/profile apply failed" in message for message in messages))
         self.assertFalse(any("Structured feedback is waiting" in message for message in messages))
 
+    def test_health_page_omits_empty_warning_banner(self):
+        self.assertEqual(web.render_warnings([]), "")
+
     def test_health_page_renders_dashboard_controls(self):
         self._seed_scout_candidate(source="openalex", excluded=True, exclusion_reason="history")
         self.connection.commit()

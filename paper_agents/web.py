@@ -1040,7 +1040,7 @@ def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_
 
 def render_warnings(warnings: list[dict[str, str]]) -> str:
     if not warnings:
-        return '<div class="banner">No health warnings.</div>'
+        return ""
     items = "".join(
         f'<li class="{escape(warning["level"])}"><strong>{escape(warning["level"])}</strong> {escape(warning["message"])}</li>'
         for warning in warnings
