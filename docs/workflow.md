@@ -179,6 +179,7 @@ Full rebuild is a manual compression path that reads all structured feedback and
 ```bash
 python3 -m paper_agents.cli feedback rebuild-profile --provider gemini --dry-run
 python3 -m paper_agents.cli feedback rebuild-profile --provider gemini
+scripts/compare_feedback_profile_rebuild.sh
 ```
 
 Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.

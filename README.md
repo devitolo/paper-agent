@@ -294,6 +294,7 @@ Manual feedback apply and full profile rebuild remain available for testing and 
 python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 python3 -m paper_agents.cli feedback rebuild-profile --provider gemini --dry-run
+scripts/compare_feedback_profile_rebuild.sh
 ```
 
 If Review Queue feedback saves but Gemini profile auto-apply fails, the UI shows a warning banner. The raw and structured feedback remain saved and unapplied for retry. Inspect recent apply attempts:
