@@ -57,8 +57,9 @@ Status: Implemented as V2 backend.
 
 ## Phase 4: Automated Acquisition
 
-- Resolve open-access PDF links beyond arXiv.
-- Download PDFs.
+- Resolve open-access PDF links beyond arXiv. First Semantic Scholar Semantic Reader fallback implemented.
+- Download PDFs. Implemented for arXiv and direct/Semantic Reader PDF links; broader resolver coverage remains future work.
+- Create abstract-only triage summaries from source metadata when PDF download fails but a source abstract exists. Implemented as fallback; not a substitute for full-paper extraction.
 - Deduplicate by identifiers and hash.
 - Add retry and failure queues for source and PDF failures.
 

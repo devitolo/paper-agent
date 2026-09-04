@@ -77,9 +77,9 @@ Curator reads the candidate pool, active profile version, history, and guidance.
 
 The paper registry stores canonical paper identifiers, alternate sources, workflow state, Scout telemetry, Curator evaluations, recommendation records, artifacts, immutable feedback inputs, parse attempts, structured feedback, profile apply attempts, profile versions, and active scouting guidance. SQLite is the initial store because the system is single-host and benefits from easy inspection, online backup, and restore drills.
 
-Reviewer resolves and fetches open-access PDFs when available, registers PDF artifacts, runs local triage extraction, and stores summary artifacts. File transfer should be deterministic code, not an LLM responsibility.
+Reviewer resolves and fetches open-access PDFs when available, including current Semantic Reader fallback links, registers PDF artifacts, runs local triage extraction, and stores summary artifacts. If no PDF can be downloaded but source metadata includes an abstract, Reviewer may store an abstract-only triage summary marked as source-metadata fallback rather than full-paper evidence. File transfer should be deterministic code, not an LLM responsibility.
 
-PDF extraction turns downloaded papers into structured triage fields such as paper date, research problem, why it matters, and approach.
+PDF extraction turns downloaded papers into structured triage fields such as paper date, research problem, why it matters, and approach. Abstract-only triage uses the same display shape but should be treated as weaker source metadata, not full PDF reading.
 
 Local model inference handles high-volume scoring and summarization if benchmarks show that a small quantized model performs acceptably on the Mac mini.
 

@@ -2,6 +2,23 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-09-04
+
+### Abstract-only triage fallback
+
+Status: Implemented in commits `83fe25a`, `1b7396e`, `6209168`, and `6a7d4ac`.
+
+Decision: Recommended papers should stay reviewable when no full PDF can be downloaded, as long as source metadata includes an abstract, while clearly labeling that this is not full-paper evidence.
+
+Completed behavior:
+
+- Try Semantic Reader fallback links before giving up on Semantic Scholar PDF download.
+- Create structured abstract-only `triage_summary` artifacts from source abstracts when no PDF can be downloaded.
+- Mark abstract-only artifacts in JSON and artifact metadata.
+- Show `Abstract-only triage. Full PDF was not downloaded.` inside the `Why this matches you` panel.
+- Let successful abstract-only backfill clear Health's missing-triage warning while preserving artifact gap visibility when no PDF exists.
+- Keep recommended non-downloadable papers visible in the Review Queue instead of silently hiding them.
+
 ## 2026-09-03
 
 ### Semantic Scholar PDF-link handling
