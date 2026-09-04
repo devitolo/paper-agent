@@ -2246,19 +2246,17 @@ class BackendV2Tests(unittest.TestCase):
         self.assertLess(len(abstract_html), len(long_abstract))
         self.assertIn("...", abstract_html)
 
-        abstract_only_html = web.render_summary(
+        abstract_only_html = web.render_match_rationale(
             {
-                "abstract_only": True,
-                "research_problem": "Incident response automation",
-                "why_it_matters": "It can reduce operational toil.",
-                "approach": "Uses source abstract evidence.",
-                "source_abstract": "This paper studies incident response automation.",
+                "ranking_reason": "Matched incident response.",
+                "matched_keywords": ["incident response"],
+                "summary": {"abstract_only": True},
             },
-            compact=False,
+            '<span class="tag">incident response</span>',
         )
         self.assertIn("Abstract-only triage", abstract_only_html)
         self.assertIn("Full PDF was not downloaded.", abstract_only_html)
-        self.assertIn("Incident response automation", abstract_only_html)
+        self.assertIn("Why this matches you", abstract_only_html)
 
         formula_html = web.render_summary(
             {

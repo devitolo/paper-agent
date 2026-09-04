@@ -427,7 +427,11 @@ def render_match_rationale(card: dict[str, Any], signal_tags: str) -> str:
     rationale = display_rationale(card)
     signals_html = f'<div class="tags"><span class="signals-label">Signals</span>{signal_tags}</div>' if signal_tags else ""
     rationale_html = "" if rationale == "Matched your current profile signals." and signal_tags else f"<p>{escape(rationale)}</p>"
+    provenance_note = ""
+    if (card.get("summary") or {}).get("abstract_only"):
+        provenance_note = '<div class="summary-provenance">Abstract-only triage. Full PDF was not downloaded.</div>'
     return f"""<section class="match-rationale">
+        {provenance_note}
         <h3>Why this matches you</h3>
         {rationale_html}
         {signals_html}
@@ -1414,26 +1418,18 @@ def render_pulled_date(card: dict[str, Any]) -> str:
 def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
     has_extracted_summary = any(summary.get(key) for key in ["research_problem", "why_it_matters", "approach"])
     source_abstract = summary.get("source_abstract")
-    provenance_note = ""
-    if summary.get("abstract_only"):
-        provenance_note = (
-            '<div class="summary-provenance">Abstract-only triage. '
-            "Full PDF was not downloaded.</div>"
-        )
     if not has_extracted_summary and source_abstract:
         abstract = escape(truncate_text(summary_field_text(source_abstract), 900))
         if compact:
-            return f'<div class="compact-summary">{provenance_note}<strong>Source Abstract:</strong> {abstract}</div>'
+            return f'<div class="compact-summary"><strong>Source Abstract:</strong> {abstract}</div>'
         return f"""<div class="source-summary">
-    {provenance_note}
     <section><h3>Source Abstract</h3><p>{abstract}</p></section>
   </div>"""
 
     problem = escape(summary_display_text(summary.get("research_problem")))
     if compact:
-        return f'<div class="compact-summary">{provenance_note}<strong>Problem:</strong> {problem}</div>'
+        return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
     return f"""<div class="summary-grid">
-    {provenance_note}
     <section><h3>Problem</h3><p>{problem}</p></section>
     <section><h3>Why it matters</h3><p>{escape(summary_display_text(summary.get("why_it_matters")))}</p></section>
     <section><h3>Approach</h3><p>{escape(summary_display_text(summary.get("approach")))}</p></section>
@@ -2201,10 +2197,10 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.summary-provenance { grid-column: 1 / -1; justify-self: end; width: fit-content; max-width: 100%; margin: 0 0 4px auto; color: var(--muted); font-size: 11px; font-weight: 650; line-height: 1.25; text-align: right; }
+.summary-provenance { position: absolute; top: 9px; right: 10px; max-width: 48%; color: #f6e3a4; font-size: 11px; font-weight: 650; line-height: 1.25; text-align: right; }
 .compact-summary { margin: 6px 0; line-height: 1.35; }
 .links { margin-bottom: 7px; }
-.match-rationale { margin-top: 7px; border: 1px solid rgba(56, 189, 248, 0.24); border-left-color: rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 7px 9px; background: linear-gradient(90deg, rgba(56, 189, 248, 0.105), rgba(56, 189, 248, 0.025)); }
+.match-rationale { position: relative; margin-top: 7px; border: 1px solid rgba(56, 189, 248, 0.24); border-left-color: rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 7px 9px; background: linear-gradient(90deg, rgba(56, 189, 248, 0.105), rgba(56, 189, 248, 0.025)); }
 .match-rationale h3 { color: #b9eaff; }
 .match-rationale p { color: #d7e8f5; font-size: 12px; margin-bottom: 5px; }
 .paper-card.compact { padding: 8px 10px; }
