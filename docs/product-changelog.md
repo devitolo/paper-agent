@@ -16,6 +16,7 @@ Completed behavior:
 - Keep source abstracts as a fallback only for active-reviewable cards whose local triage extraction is missing.
 - Preserve Semantic Scholar/OpenAlex candidate and queue visibility when the source-provided PDF field is DOI-like, while avoiding the misleading `Open PDF` control for DOI-only URLs.
 - Roll back the earlier Sep 1 rule that hid or excluded non-arXiv papers solely because they lacked a PDF URL.
+- Use Semantic Reader as a reviewer/backfill fallback: derive `/reader/{paperId}`, parse its download link, and save the linked PDF only when the response is real PDF content.
 
 ## 2026-09-01
 

@@ -34,6 +34,7 @@ from paper_agents.scout import run_daily_scout
 from paper_agents.scout import scout_candidate_record
 from paper_agents.scout_guidance import build_scout_guidance, topics_with_guidance
 from paper_agents.reviewer_agent import card_from_recommendation
+from paper_agents.reviewer_agent import download_pdf_for_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
 from paper_agents.topic_inventory import OPENALEX_ROTATING_TOPICS, scout_topic_inventory
 from paper_agents.topic_agent import (
@@ -1019,6 +1020,61 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual([row["paper_id"] for row in rows], [missing_paper_id])
         self.assertEqual(rows[0]["recommendation_id"], missing_recommendation_id)
 
+    def test_reviewer_download_uses_semantic_reader_download_link_fallback(self):
+        class FakeResponse:
+            def __init__(self, url: str, data: bytes, content_type: str):
+                self._url = url
+                self._data = data
+                self.headers = {"content-type": content_type}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self):
+                return self._data
+
+            def geturl(self):
+                return self._url
+
+        calls: list[str] = []
+
+        def fake_urlopen(request, timeout):
+            url = request.full_url
+            calls.append(url)
+            if url == "https://www.semanticscholar.org/reader/cddbfa8cb765894db98925730db8a9c22f4ec633":
+                return FakeResponse(
+                    url,
+                    b'<a href="https://export.arxiv.org/pdf/2507.12472v1.pdf" download="">Download PDF</a>',
+                    "text/html; charset=utf-8",
+                )
+            if url == "https://export.arxiv.org/pdf/2507.12472v1.pdf":
+                return FakeResponse(url, b"%PDF-1.7\nexample", "application/pdf")
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with patch("paper_agents.reviewer_agent.urllib.request.urlopen", fake_urlopen):
+            path = download_pdf_for_recommendation(
+                {
+                    "paper_id": 240,
+                    "source": "semantic_scholar",
+                    "source_id": "cddbfa8cb765894db98925730db8a9c22f4ec633",
+                    "title": "A Survey of AIOps in the Era of Large Language Models",
+                    "pdf_url": "https://doi.org/10.1145/3746635",
+                },
+                Path(self.tmp.name) / "papers",
+            )
+
+        self.assertIsNotNone(path)
+        self.assertEqual(path.read_bytes(), b"%PDF-1.7\nexample")
+        self.assertEqual(
+            calls,
+            [
+                "https://www.semanticscholar.org/reader/cddbfa8cb765894db98925730db8a9c22f4ec633",
+                "https://export.arxiv.org/pdf/2507.12472v1.pdf",
+            ],
+        )
 
     def test_legacy_scout_import_recovers_selected_recommendations(self):
         jsonl = Path(self.tmp.name) / "2026-07-29.jsonl"

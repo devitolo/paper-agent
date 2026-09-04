@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from paper_agents.openai_helpers import call_openai_json
-from paper_agents.pdf_links import looks_like_direct_pdf_url
+from paper_agents.pdf_links import candidate_pdf_urls, extract_pdf_links_from_html, looks_like_direct_pdf_url
 
 
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -1132,9 +1132,6 @@ def scout_candidate_record(candidate: ScoutCandidate) -> dict[str, Any]:
 
 
 def download_pdf(candidate: ScoutCandidate, pdf_dir: Path, timeout: int = 60) -> str | None:
-    if not looks_like_direct_pdf_url(candidate.source, candidate.pdf_url):
-        return None
-
     source_dir = pdf_dir / candidate.source
     source_dir.mkdir(parents=True, exist_ok=True)
     filename = safe_filename(candidate.source_id or candidate.title) + ".pdf"
@@ -1142,18 +1139,34 @@ def download_pdf(candidate: ScoutCandidate, pdf_dir: Path, timeout: int = 60) ->
     if destination.exists() and destination.stat().st_size > 0:
         return str(destination)
 
-    request = urllib.request.Request(candidate.pdf_url, headers={"User-Agent": "paper-agent/0.1"})
+    for url in candidate_pdf_urls(candidate.source, candidate.source_id, candidate.pdf_url):
+        data = fetch_pdf_bytes(url, timeout=timeout)
+        if data:
+            destination.write_bytes(data)
+            return str(destination)
+    return None
+
+
+def fetch_pdf_bytes(url: str, *, timeout: int = 60) -> bytes | None:
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; paper-agent/0.1)"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = response.read()
+            final_url = response.geturl()
+            content_type = response.headers.get("content-type", "")
     except OSError:
         return None
 
-    if not data.startswith(b"%PDF"):
+    if data.startswith(b"%PDF") or "application/pdf" in content_type.lower():
+        return data
+    if "text/html" not in content_type.lower():
         return None
-
-    destination.write_bytes(data)
-    return str(destination)
+    text = data.decode("utf-8", "ignore")
+    for pdf_url in extract_pdf_links_from_html(final_url, text):
+        pdf_data = fetch_pdf_bytes(pdf_url, timeout=timeout)
+        if pdf_data:
+            return pdf_data
+    return None
 
 
 def candidate_key(candidate: ScoutCandidate) -> str:

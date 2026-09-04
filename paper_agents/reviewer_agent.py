@@ -8,7 +8,7 @@ from typing import Any
 
 from paper_agents import db
 from paper_agents.local_extract import DEFAULT_MODEL, DEFAULT_OLLAMA_URL, extract_paper, output_path_for
-from paper_agents.pdf_links import looks_like_direct_pdf_url
+from paper_agents.pdf_links import candidate_pdf_urls, extract_pdf_links_from_html
 from paper_agents.scout import DEFAULT_PDF_DIR, safe_filename
 
 
@@ -203,9 +203,6 @@ def recommended_papers_missing_triage(connection, *, limit: int | None = None) -
 
 
 def download_pdf_for_recommendation(recommendation: dict[str, Any], pdf_dir: Path, timeout: int = 60) -> Path | None:
-    pdf_url = recommendation.get("pdf_url")
-    if not looks_like_direct_pdf_url(recommendation.get("source"), pdf_url):
-        return None
     source = recommendation.get("source") or "unknown"
     source_id = recommendation.get("source_id") or recommendation.get("canonical_key") or recommendation.get("title")
     source_dir = pdf_dir / source
@@ -213,16 +210,33 @@ def download_pdf_for_recommendation(recommendation: dict[str, Any], pdf_dir: Pat
     destination = source_dir / (safe_filename(str(source_id)) + ".pdf")
     if destination.exists() and destination.stat().st_size > 0:
         return destination
-    request = urllib.request.Request(pdf_url, headers={"User-Agent": "paper-agent/0.1"})
+    for url in candidate_pdf_urls(source, recommendation.get("source_id"), recommendation.get("pdf_url")):
+        data = fetch_pdf_bytes(url, timeout=timeout)
+        if data:
+            destination.write_bytes(data)
+            return destination
+    return None
+
+
+def fetch_pdf_bytes(url: str, *, timeout: int = 60) -> bytes | None:
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; paper-agent/0.1)"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = response.read()
+            final_url = response.geturl()
+            content_type = response.headers.get("content-type", "")
     except OSError:
         return None
-    if not data.startswith(b"%PDF"):
+    if data.startswith(b"%PDF") or "application/pdf" in content_type.lower():
+        return data
+    if "text/html" not in content_type.lower():
         return None
-    destination.write_bytes(data)
-    return destination
+    text = data.decode("utf-8", "ignore")
+    for pdf_url in extract_pdf_links_from_html(final_url, text):
+        pdf_data = fetch_pdf_bytes(pdf_url, timeout=timeout)
+        if pdf_data:
+            return pdf_data
+    return None
 
 
 def card_from_recommendation(
