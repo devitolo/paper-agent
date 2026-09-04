@@ -295,6 +295,7 @@ python3 -m paper_agents.cli feedback apply --provider gemini --dry-run
 python3 -m paper_agents.cli feedback apply --provider gemini
 python3 -m paper_agents.cli feedback rebuild-profile --provider gemini --dry-run
 scripts/compare_feedback_profile_rebuild.sh
+scripts/biweekly_profile_rebuild_compare.sh
 ```
 
 If Review Queue feedback saves but Gemini profile auto-apply fails, the UI shows a warning banner. The raw and structured feedback remain saved and unapplied for retry. Inspect recent apply attempts:
@@ -325,7 +326,7 @@ python3 -m paper_agents.cli feedback apply --provider gemini
 
 Failed default-model attempts and fallback success attempts are both recorded in `feedback_profile_apply_attempts`, so `/health` can show historic failed attempts even after retry success. Profile apply uses the Gemini CLI/API quota path; the Gemini app usage screen and Gemini API/AI Studio quota screen are different operational views.
 
-Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend.
+Review profile quality after roughly 10 feedback items or if recommendation quality shows an obvious downward trend. The biweekly compare wrapper is safe for cron because it only runs the Gemini rebuild in dry-run comparison mode, writes no active profile update, and skips Mondays outside the two-week cadence anchored at `2026-09-07`. Override the cadence anchor with `PAPER_AGENT_PROFILE_REBUILD_ANCHOR=YYYY-MM-DD` if the schedule needs to move.
 
 Backfill missing triage summaries for already recommended papers without re-scouting. This extracts PDFs when available and may create an abstract-only triage artifact from source metadata when no PDF can be downloaded:
 
@@ -359,10 +360,11 @@ Tail local Project Paper logs:
 scripts/tail_logs.sh
 ```
 
-The current intended Mac mini pipeline crontab has three source jobs: daily arXiv at 5:00 AM, weekly Monday OpenAlex at 6:30 AM via the rotating topic script, and weekly Tuesday Semantic Scholar at 6:00 AM. The Semantic Scholar entry sources `$HOME/.bashrc` so `SEMANTIC_SCHOLAR_API_KEY` is available to cron.
+The current intended Mac mini pipeline crontab has three source jobs: daily arXiv at 5:00 AM, weekly Monday OpenAlex at 6:30 AM via the rotating topic script, and weekly Tuesday Semantic Scholar at 6:00 AM. It also has a biweekly Monday 2:00 AM Gemini profile rebuild comparison that produces a review log but never applies the rebuilt profile. The Semantic Scholar and profile comparison entries source `$HOME/.bashrc` so API/provider environment is available to cron.
 
 ```cron
 0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+0 2 * * 1 . $HOME/.bashrc; cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/biweekly_profile_rebuild_compare.sh >> logs/profile-rebuild-compare.log 2>&1
 30 6 * * 1 cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
 0 6 * * 2 cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --fetch 3 --keep 1 --max-scout-attempts 1 --request-delay 10 --retries 6 --source-timeout 120 >> logs/pipeline-semantic-scholar.log 2>&1
 ```
