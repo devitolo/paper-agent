@@ -2201,7 +2201,7 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.summary-provenance { display: inline-flex; width: fit-content; margin: 0 0 6px; border: 1px solid rgba(251, 191, 36, 0.32); border-radius: 999px; padding: 2px 7px; color: #f6d792; background: rgba(251, 191, 36, 0.08); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
+.summary-provenance { grid-column: 1 / -1; justify-self: end; width: fit-content; max-width: 100%; margin: 0 0 4px auto; color: var(--muted); font-size: 11px; font-weight: 650; line-height: 1.25; text-align: right; }
 .compact-summary { margin: 6px 0; line-height: 1.35; }
 .links { margin-bottom: 7px; }
 .match-rationale { margin-top: 7px; border: 1px solid rgba(56, 189, 248, 0.24); border-left-color: rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 7px 9px; background: linear-gradient(90deg, rgba(56, 189, 248, 0.105), rgba(56, 189, 248, 0.025)); }
