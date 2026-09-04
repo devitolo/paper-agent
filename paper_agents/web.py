@@ -1414,18 +1414,26 @@ def render_pulled_date(card: dict[str, Any]) -> str:
 def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
     has_extracted_summary = any(summary.get(key) for key in ["research_problem", "why_it_matters", "approach"])
     source_abstract = summary.get("source_abstract")
+    provenance_note = ""
+    if summary.get("abstract_only"):
+        provenance_note = (
+            '<div class="summary-provenance">Abstract-only triage. '
+            "Full PDF was not downloaded.</div>"
+        )
     if not has_extracted_summary and source_abstract:
         abstract = escape(truncate_text(summary_field_text(source_abstract), 900))
         if compact:
-            return f'<div class="compact-summary"><strong>Source Abstract:</strong> {abstract}</div>'
+            return f'<div class="compact-summary">{provenance_note}<strong>Source Abstract:</strong> {abstract}</div>'
         return f"""<div class="source-summary">
+    {provenance_note}
     <section><h3>Source Abstract</h3><p>{abstract}</p></section>
   </div>"""
 
     problem = escape(summary_display_text(summary.get("research_problem")))
     if compact:
-        return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
+        return f'<div class="compact-summary">{provenance_note}<strong>Problem:</strong> {problem}</div>'
     return f"""<div class="summary-grid">
+    {provenance_note}
     <section><h3>Problem</h3><p>{problem}</p></section>
     <section><h3>Why it matters</h3><p>{escape(summary_display_text(summary.get("why_it_matters")))}</p></section>
     <section><h3>Approach</h3><p>{escape(summary_display_text(summary.get("approach")))}</p></section>
@@ -1916,7 +1924,13 @@ def load_summary(artifact: dict[str, Any] | None) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return data.get("merged", {}) if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    summary = dict(data.get("merged", {}))
+    if data.get("abstract_only") or artifact.get("metadata", {}).get("abstract_only"):
+        summary["abstract_only"] = True
+        summary["source_type"] = "source_abstract"
+    return summary
 
 
 def save_feedback(
@@ -2187,6 +2201,7 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.summary-provenance { display: inline-flex; width: fit-content; margin: 0 0 6px; border: 1px solid rgba(251, 191, 36, 0.32); border-radius: 999px; padding: 2px 7px; color: #f6d792; background: rgba(251, 191, 36, 0.08); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
 .compact-summary { margin: 6px 0; line-height: 1.35; }
 .links { margin-bottom: 7px; }
 .match-rationale { margin-top: 7px; border: 1px solid rgba(56, 189, 248, 0.24); border-left-color: rgba(56, 189, 248, 0.72); border-radius: var(--radius-sm); padding: 7px 9px; background: linear-gradient(90deg, rgba(56, 189, 248, 0.105), rgba(56, 189, 248, 0.025)); }

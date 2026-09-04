@@ -36,6 +36,8 @@ from paper_agents.scout_guidance import build_scout_guidance, topics_with_guidan
 from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.reviewer_agent import download_pdf_for_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
+from paper_agents.reviewer_agent import ReviewerAgent
+from paper_agents.reviewer_agent import ReviewerConfig
 from paper_agents.topic_inventory import OPENALEX_ROTATING_TOPICS, scout_topic_inventory
 from paper_agents.topic_agent import (
     TopicProposal,
@@ -1075,6 +1077,71 @@ class BackendV2Tests(unittest.TestCase):
                 "https://export.arxiv.org/pdf/2507.12472v1.pdf",
             ],
         )
+
+    def test_reviewer_backfill_uses_abstract_only_triage_when_pdf_is_unavailable(self):
+        paper_id, _ = db.upsert_paper(
+            self.connection,
+            {
+                "source": "semantic_scholar",
+                "source_id": "abstract-only-paper",
+                "title": "Abstract Only Paper",
+                "url": "https://www.semanticscholar.org/paper/abstract-only-paper",
+                "pdf_url": None,
+                "published": "2026-09-04",
+                "abstract": "This paper studies incident response automation for production operations.",
+            },
+        )
+        recommendation = {
+            "paper_id": paper_id,
+            "recommendation_order": 1,
+            "title": "Abstract Only Paper",
+            "published": "2026-09-04",
+            "source": "semantic_scholar",
+            "source_id": "abstract-only-paper",
+            "url": "https://www.semanticscholar.org/paper/abstract-only-paper",
+            "pdf_url": None,
+            "abstract": "This paper studies incident response automation for production operations.",
+            "score": 47.0,
+            "rationale": "Matched incident response.",
+            "matched_signals": ["incident response", "production operations"],
+        }
+        fake_extraction = {
+            "merged": {
+                "paper_date": "2026-09-04",
+                "research_problem": "Incident response automation",
+                "why_it_matters": "It can reduce operational toil.",
+                "approach": "Uses source abstract evidence.",
+            },
+            "merge_strategy": "synthesis",
+            "chunk_count": 1,
+        }
+
+        with (
+            patch("paper_agents.reviewer_agent.download_pdf_for_recommendation", return_value=None),
+            patch("paper_agents.reviewer_agent.extract_paper", return_value=fake_extraction) as extract_mock,
+            patch("paper_agents.reviewer_agent.DEFAULT_EXTRACTION_DIR", Path(self.tmp.name) / "extractions"),
+        ):
+            card = ReviewerAgent().review_recommendation(
+                self.connection,
+                recommendation,
+                index=1,
+                config=ReviewerConfig(pdf_dir=Path(self.tmp.name) / "papers", model="test-model"),
+            )
+
+        self.assertEqual(card["research_problem"], "Incident response automation")
+        self.assertIsNone(card["error"])
+        extract_mock.assert_called_once()
+        artifact = self.connection.execute(
+            "SELECT path, metadata_json FROM artifacts WHERE paper_id = ? AND artifact_type = 'triage_summary'",
+            (paper_id,),
+        ).fetchone()
+        self.assertIsNotNone(artifact)
+        self.assertTrue(Path(artifact[0]).name.endswith(".abstract.summary.json"))
+        metadata = json.loads(artifact[1])
+        self.assertTrue(metadata["abstract_only"])
+        saved = json.loads(Path(artifact[0]).read_text(encoding="utf-8"))
+        self.assertTrue(saved["abstract_only"])
+        self.assertEqual(saved["merged"]["source_abstract"], recommendation["abstract"])
 
     def test_legacy_scout_import_recovers_selected_recommendations(self):
         jsonl = Path(self.tmp.name) / "2026-07-29.jsonl"
@@ -2178,6 +2245,20 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Source Abstract", abstract_html)
         self.assertLess(len(abstract_html), len(long_abstract))
         self.assertIn("...", abstract_html)
+
+        abstract_only_html = web.render_summary(
+            {
+                "abstract_only": True,
+                "research_problem": "Incident response automation",
+                "why_it_matters": "It can reduce operational toil.",
+                "approach": "Uses source abstract evidence.",
+                "source_abstract": "This paper studies incident response automation.",
+            },
+            compact=False,
+        )
+        self.assertIn("Abstract-only triage", abstract_only_html)
+        self.assertIn("Full PDF was not downloaded.", abstract_only_html)
+        self.assertIn("Incident response automation", abstract_only_html)
 
         formula_html = web.render_summary(
             {

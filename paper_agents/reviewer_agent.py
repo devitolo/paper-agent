@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from paper_agents import db
-from paper_agents.local_extract import DEFAULT_MODEL, DEFAULT_OLLAMA_URL, extract_paper, output_path_for
+from paper_agents.local_extract import DEFAULT_EXTRACTION_DIR, DEFAULT_MODEL, DEFAULT_OLLAMA_URL, extract_paper, output_path_for
 from paper_agents.pdf_links import candidate_pdf_urls, extract_pdf_links_from_html
 from paper_agents.scout import DEFAULT_PDF_DIR, safe_filename
 
@@ -68,7 +69,23 @@ class ReviewerAgent:
                 metadata={"pdf_url": recommendation.get("pdf_url")},
             )
         else:
-            return card_from_recommendation(recommendation, index=index, error="PDF was not downloaded")
+            extraction, output_path, error = extract_source_abstract_summary(recommendation, index=index, config=config)
+            if extraction and output_path:
+                db.insert_artifact(
+                    connection,
+                    recommendation["paper_id"],
+                    artifact_type="triage_summary",
+                    path=output_path,
+                    model=config.model,
+                    metadata=triage_summary_metadata(extraction),
+                )
+                return card_from_recommendation(
+                    recommendation,
+                    index=index,
+                    extraction=extraction,
+                    output_path=output_path,
+                )
+            return card_from_recommendation(recommendation, index=index, error=error or "PDF was not downloaded")
 
         output_path = output_path_for(pdf_path, config.model)
         print(f"extracting recommended paper {index}: {pdf_path}")
@@ -94,11 +111,7 @@ class ReviewerAgent:
             artifact_type="triage_summary",
             path=output_path,
             model=config.model,
-            metadata={
-                "merge_strategy": extraction.get("merge_strategy"),
-                "chunk_count": extraction.get("chunk_count"),
-                "source_path": extraction.get("source_path"),
-            },
+            metadata=triage_summary_metadata(extraction),
         )
         return card_from_recommendation(
             recommendation,
@@ -167,6 +180,7 @@ def recommended_papers_missing_triage(connection, *, limit: int | None = None) -
             primary_source.source_id,
             primary_source.url,
             primary_source.pdf_url,
+            papers.abstract,
             latest_recommendation.score,
             latest_recommendation.matched_signals_json
         FROM latest_recommendation
@@ -195,11 +209,113 @@ def recommended_papers_missing_triage(connection, *, limit: int | None = None) -
             "source_id": row[8],
             "url": row[9],
             "pdf_url": row[10],
-            "score": row[11],
-            "matched_signals": db.decode_json(row[12], []),
+            "abstract": row[11],
+            "score": row[12],
+            "matched_signals": db.decode_json(row[13], []),
         }
         for row in rows
     ]
+
+
+def triage_summary_metadata(extraction: dict[str, Any]) -> dict[str, Any]:
+    metadata = {
+        "merge_strategy": extraction.get("merge_strategy"),
+        "chunk_count": extraction.get("chunk_count"),
+        "source_path": extraction.get("source_path"),
+    }
+    if extraction.get("abstract_only"):
+        metadata.update(
+            {
+                "abstract_only": True,
+                "source_type": "source_abstract",
+                "full_text_available": False,
+                "warning": "Generated from source abstract because PDF was not downloaded.",
+            }
+        )
+    return metadata
+
+
+def extract_source_abstract_summary(
+    recommendation: dict[str, Any],
+    *,
+    index: int,
+    config: ReviewerConfig,
+) -> tuple[dict[str, Any] | None, Path | None, str | None]:
+    abstract = (recommendation.get("abstract") or "").strip()
+    if not abstract:
+        return None, None, "PDF was not downloaded and no source abstract is available"
+
+    source_id = recommendation.get("source_id") or recommendation.get("canonical_key") or recommendation.get("title")
+    output_path = (
+        DEFAULT_EXTRACTION_DIR
+        / "manual"
+        / f"{safe_filename(str(source_id))}.{config.model}.abstract.summary.json"
+    )
+    print(f"extracting recommended paper {index} from source abstract: {recommendation.get('title')}")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / f"{safe_filename(str(source_id))}.abstract.txt"
+        source_path.write_text(abstract_source_text(recommendation, abstract), encoding="utf-8")
+        try:
+            extraction = extract_paper(
+                source_path,
+                model=config.model,
+                ollama_url=config.ollama_url,
+                max_chars=config.max_chars,
+                limit_chunks=max(1, config.limit_chunks) if config.limit_chunks > 0 else 1,
+                timeout=config.timeout,
+                workers=1,
+            )
+        except RuntimeError as error:
+            return None, None, f"PDF was not downloaded; abstract triage failed: {error}"
+
+    extraction["abstract_only"] = True
+    extraction["source_type"] = "source_abstract"
+    extraction["source_path"] = str(output_path)
+    extraction.setdefault("source_metadata", {})
+    extraction["source_metadata"].update(
+        {
+            "title": recommendation.get("title"),
+            "paper_date": recommendation.get("published"),
+            "url": recommendation.get("url"),
+            "pdf_url": recommendation.get("pdf_url"),
+            "source": recommendation.get("source"),
+            "source_id": recommendation.get("source_id"),
+            "abstract_only": True,
+        }
+    )
+    merged = extraction.setdefault("merged", {})
+    if recommendation.get("published") and not merged.get("paper_date"):
+        merged["paper_date"] = recommendation["published"]
+    merged["abstract_only"] = True
+    merged["source_type"] = "source_abstract"
+    merged["source_abstract"] = abstract
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(extraction, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"wrote abstract-only extraction: {output_path}")
+    return extraction, output_path, None
+
+
+def abstract_source_text(recommendation: dict[str, Any], abstract: str) -> str:
+    signals = ", ".join(str(signal) for signal in recommendation.get("matched_signals") or [] if signal)
+    return "\n\n".join(
+        part
+        for part in [
+            f"Title: {recommendation.get('title') or 'Untitled paper'}",
+            f"Published: {recommendation.get('published') or 'unknown'}",
+            f"Source: {recommendation.get('source') or 'unknown'}",
+            f"URL: {recommendation.get('url') or 'not available'}",
+            f"PDF URL: {recommendation.get('pdf_url') or 'not available'}",
+            f"Curator rationale: {recommendation.get('rationale') or 'not available'}",
+            f"Matched signals: {signals or 'not available'}",
+            (
+                "Extraction note: The full PDF was not downloaded. "
+                "Summarize only from the source abstract and do not imply full-paper coverage."
+            ),
+            f"Source abstract:\n{abstract}",
+        ]
+        if part
+    )
 
 
 def download_pdf_for_recommendation(recommendation: dict[str, Any], pdf_dir: Path, timeout: int = 60) -> Path | None:
