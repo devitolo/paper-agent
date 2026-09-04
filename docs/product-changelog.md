@@ -4,19 +4,17 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ## 2026-09-03
 
-### Semantic Scholar direct-PDF handling
+### Semantic Scholar PDF-link handling
 
 Status: Implemented.
 
-Decision: Semantic Scholar/OpenAlex records should not treat a DOI or landing-page URL as an `Open PDF` target, and future scouting should prefer directly fetchable PDFs before Curator.
+Decision: Semantic Scholar/OpenAlex records should remain visible when the source provides a DOI or landing-page URL, but those URLs should not be presented as directly openable PDFs.
 
 Completed behavior:
 
-- Normalize Semantic Scholar/OpenAlex candidate `pdf_url` values to keep only plausibly direct PDF links.
-- Exclude newly scouted Semantic Scholar/OpenAlex candidates before Curator when they lack a direct PDF URL.
 - Render `Open PDF` only for real PDF artifacts or plausibly direct PDF links.
 - Keep source abstracts as a fallback only for active-reviewable cards whose local triage extraction is missing.
-- Preserve visibility for older recommendations that already have a stored non-empty PDF URL, while avoiding the misleading `Open PDF` control for DOI-only URLs.
+- Preserve Semantic Scholar/OpenAlex candidate and queue visibility when the source-provided PDF field is DOI-like, while avoiding the misleading `Open PDF` control for DOI-only URLs.
 
 ## 2026-09-01
 

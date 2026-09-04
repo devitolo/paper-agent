@@ -700,8 +700,7 @@ def semantic_scholar_paper_to_candidate(paper: dict[str, Any]) -> ScoutCandidate
     fields = paper.get("fieldsOfStudy") or []
     categories = [str(field).strip() for field in fields if str(field).strip()]
     publication_types = paper.get("publicationTypes") or []
-    raw_pdf_url = str(open_access_pdf.get("url") or "").strip() or None
-    pdf_url = raw_pdf_url if looks_like_direct_pdf_url("semantic_scholar", raw_pdf_url) else None
+    pdf_url = str(open_access_pdf.get("url") or "").strip() or None
     doi = external_ids.get("DOI") or external_ids.get("Doi")
     arxiv_id = external_ids.get("ArXiv") or external_ids.get("ARXIV") or external_ids.get("arXiv")
 
@@ -749,13 +748,12 @@ def openalex_work_to_candidate(work: dict[str, Any]) -> ScoutCandidate:
         or str(work.get("doi") or "").strip()
         or str(work.get("id") or "").strip()
     )
-    raw_pdf_url = (
+    pdf_url = (
         str(primary_location.get("pdf_url") or "").strip()
         or str(best_oa_location.get("pdf_url") or "").strip()
         or str(open_access.get("oa_url") or "").strip()
         or None
     )
-    pdf_url = raw_pdf_url if looks_like_direct_pdf_url("openalex", raw_pdf_url) else None
     primary_topic = work.get("primary_topic") if isinstance(work.get("primary_topic"), dict) else {}
     metadata = {
         "source_metadata": {

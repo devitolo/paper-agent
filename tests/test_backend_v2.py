@@ -257,7 +257,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(candidate.categories, ["Computer Science"])
         self.assertEqual(candidate.metadata["external_ids"]["DOI"], "10.1234/example")
 
-    def test_semantic_scholar_does_not_treat_doi_as_pdf(self):
+    def test_semantic_scholar_preserves_source_pdf_url_even_when_doi_like(self):
         candidate = semantic_scholar_paper_to_candidate(
             {
                 "paperId": "abc123",
@@ -270,7 +270,7 @@ class BackendV2Tests(unittest.TestCase):
             }
         )
 
-        self.assertIsNone(candidate.pdf_url)
+        self.assertEqual(candidate.pdf_url, "https://doi.org/10.1145/3706598.3713581")
 
     def test_semantic_scholar_fetch_uses_mocked_api_response(self):
         payload = {
@@ -681,7 +681,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(row, (1, "missing_pdf_url"))
         self.assertEqual(db.eligible_candidates_for_cycle(self.connection, self.cycle_id), [])
 
-    def test_non_arxiv_candidate_with_doi_pdf_url_is_excluded_from_curator_pool(self):
+    def test_non_arxiv_candidate_with_doi_pdf_url_remains_curator_eligible(self):
         source = FakeSource(
             [
                 ScoutCandidate(
@@ -707,7 +707,7 @@ class BackendV2Tests(unittest.TestCase):
         )
 
         self.assertEqual(result["stored_count"], 1)
-        self.assertEqual(result["eligible_count"], 0)
+        self.assertEqual(result["eligible_count"], 1)
         row = self.connection.execute(
             """
             SELECT excluded, exclusion_reason
@@ -716,8 +716,8 @@ class BackendV2Tests(unittest.TestCase):
             """,
             (result["scout_run_id"],),
         ).fetchone()
-        self.assertEqual(row, (1, "missing_pdf_url"))
-        self.assertEqual(db.eligible_candidates_for_cycle(self.connection, self.cycle_id), [])
+        self.assertEqual(row, (0, None))
+        self.assertEqual(len(db.eligible_candidates_for_cycle(self.connection, self.cycle_id)), 1)
 
     def test_same_arxiv_identity_dedupes_across_sources(self):
         arxiv_id, is_new = db.upsert_paper(
