@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
+from paper_agents.pdf_links import looks_like_direct_pdf_url
 from paper_agents.topic_inventory import scout_topic_inventory
 from paper_agents.topic_agent import (
     TopicProposal,
@@ -1385,7 +1386,7 @@ def render_pdf_control(card: dict[str, Any]) -> str:
     if pdf_artifact:
         return f'<a class="metadata-action pdf-action" href="/artifact/{pdf_artifact["id"]}" target="_blank" rel="noreferrer">Open PDF</a>'
     pdf_url = card.get("pdf_url")
-    if pdf_url:
+    if looks_like_direct_pdf_url(card.get("source"), pdf_url):
         return f'<a class="metadata-action pdf-action" href="{escape(pdf_url)}" target="_blank" rel="noreferrer">Open PDF</a>'
     return ""
 
@@ -1519,9 +1520,21 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
         "("
         "primary_source.source IS NULL "
         "OR primary_source.source NOT IN ('semantic_scholar', 'openalex') "
-        "OR COALESCE(primary_source.pdf_url, '') != '' "
         "OR COALESCE(artifact_status.pdf_count, 0) > 0 "
-        "OR COALESCE(artifact_status.triage_summary_count, 0) > 0"
+        "OR COALESCE(artifact_status.triage_summary_count, 0) > 0 "
+        "OR ("
+        "COALESCE(primary_source.pdf_url, '') != '' "
+        "AND ("
+        "lower(primary_source.pdf_url) LIKE '%.pdf' "
+        "OR lower(primary_source.pdf_url) LIKE '%.pdf?%' "
+        "OR lower(primary_source.pdf_url) LIKE '%.pdf#%' "
+        "OR lower(primary_source.pdf_url) LIKE '%/pdf' "
+        "OR lower(primary_source.pdf_url) LIKE '%/pdf?%' "
+        "OR lower(primary_source.pdf_url) LIKE '%/pdf/%' "
+        "OR lower(primary_source.pdf_url) LIKE '%format=pdf%' "
+        "OR lower(primary_source.pdf_url) LIKE '%download=pdf%'"
+        ")"
+        ")"
         ")"
     )
     if filter_value == "needs_review":

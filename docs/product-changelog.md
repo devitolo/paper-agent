@@ -2,6 +2,22 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-09-03
+
+### Semantic Scholar direct-PDF eligibility
+
+Status: Implemented.
+
+Decision: Semantic Scholar/OpenAlex records should not be treated as reviewable just because a PDF field contains a DOI or landing-page URL.
+
+Completed behavior:
+
+- Normalize Semantic Scholar/OpenAlex candidate `pdf_url` values to keep only plausibly direct PDF links.
+- Exclude newly scouted Semantic Scholar/OpenAlex candidates before Curator when they lack a direct PDF URL.
+- Hide existing DOI-only Semantic Scholar/OpenAlex recommendations from the active Review Queue unless they already have a PDF or triage summary artifact.
+- Render `Open PDF` only for real PDF artifacts or plausibly direct PDF links.
+- Keep source abstracts as a fallback only for active-reviewable cards whose local triage extraction is missing.
+
 ## 2026-09-01
 
 ### Mini health warning runbooks
@@ -17,7 +33,7 @@ Completed behavior:
 - Add `scripts/fix_missing_triage_summaries.sh --quick --limit 5` as a safe wrapper around `review-backfill` for recommendations with PDFs, without rerunning Scout/Curator.
 - Add `scripts/apply_pending_feedback_profile.sh`, where `--dry-run` previews pending profile apply and `--apply` writes the profile update.
 - Clear the Gemini/profile failure warning once a later non-dry-run profile apply succeeds.
-- Warn about missing triage summaries only when a latest-cycle recommendation has an available PDF or direct PDF URL; DOI-only recommendations remain visible as artifact gaps without creating an unrecoverable warning.
+- Warn about missing triage summaries only when a latest-cycle recommendation has an available PDF or direct PDF URL; DOI-only recommendations do not create an unrecoverable warning.
 - Keep scripts non-destructive; they do not delete rows, reset the DB, or rerun Scout.
 - Document the operator mental model: DB changes appear on browser refresh, while pulled code/template/static changes require restarting the long-running Python web server; cached static assets may need a hard refresh.
 

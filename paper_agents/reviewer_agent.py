@@ -8,6 +8,7 @@ from typing import Any
 
 from paper_agents import db
 from paper_agents.local_extract import DEFAULT_MODEL, DEFAULT_OLLAMA_URL, extract_paper, output_path_for
+from paper_agents.pdf_links import looks_like_direct_pdf_url
 from paper_agents.scout import DEFAULT_PDF_DIR, safe_filename
 
 
@@ -203,7 +204,7 @@ def recommended_papers_missing_triage(connection, *, limit: int | None = None) -
 
 def download_pdf_for_recommendation(recommendation: dict[str, Any], pdf_dir: Path, timeout: int = 60) -> Path | None:
     pdf_url = recommendation.get("pdf_url")
-    if not pdf_url:
+    if not looks_like_direct_pdf_url(recommendation.get("source"), pdf_url):
         return None
     source = recommendation.get("source") or "unknown"
     source_id = recommendation.get("source_id") or recommendation.get("canonical_key") or recommendation.get("title")

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from paper_agents import db
+from paper_agents.pdf_links import looks_like_direct_pdf_url
 from paper_agents.scout import (
     DEFAULT_ARXIV_REQUEST_DELAY,
     DEFAULT_ARXIV_RETRIES,
@@ -200,4 +201,4 @@ def should_exclude_missing_pdf(candidate: dict[str, Any]) -> bool:
     source = candidate.get("source")
     if source not in {"semantic_scholar", "openalex"}:
         return False
-    return not bool(candidate.get("pdf_url"))
+    return not looks_like_direct_pdf_url(str(source), candidate.get("pdf_url"))

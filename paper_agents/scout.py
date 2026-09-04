@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from paper_agents.openai_helpers import call_openai_json
+from paper_agents.pdf_links import looks_like_direct_pdf_url
 
 
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -699,7 +700,8 @@ def semantic_scholar_paper_to_candidate(paper: dict[str, Any]) -> ScoutCandidate
     fields = paper.get("fieldsOfStudy") or []
     categories = [str(field).strip() for field in fields if str(field).strip()]
     publication_types = paper.get("publicationTypes") or []
-    pdf_url = str(open_access_pdf.get("url") or "").strip() or None
+    raw_pdf_url = str(open_access_pdf.get("url") or "").strip() or None
+    pdf_url = raw_pdf_url if looks_like_direct_pdf_url("semantic_scholar", raw_pdf_url) else None
     doi = external_ids.get("DOI") or external_ids.get("Doi")
     arxiv_id = external_ids.get("ArXiv") or external_ids.get("ARXIV") or external_ids.get("arXiv")
 
@@ -747,12 +749,13 @@ def openalex_work_to_candidate(work: dict[str, Any]) -> ScoutCandidate:
         or str(work.get("doi") or "").strip()
         or str(work.get("id") or "").strip()
     )
-    pdf_url = (
+    raw_pdf_url = (
         str(primary_location.get("pdf_url") or "").strip()
         or str(best_oa_location.get("pdf_url") or "").strip()
         or str(open_access.get("oa_url") or "").strip()
         or None
     )
+    pdf_url = raw_pdf_url if looks_like_direct_pdf_url("openalex", raw_pdf_url) else None
     primary_topic = work.get("primary_topic") if isinstance(work.get("primary_topic"), dict) else {}
     metadata = {
         "source_metadata": {
@@ -1131,7 +1134,7 @@ def scout_candidate_record(candidate: ScoutCandidate) -> dict[str, Any]:
 
 
 def download_pdf(candidate: ScoutCandidate, pdf_dir: Path, timeout: int = 60) -> str | None:
-    if not candidate.pdf_url:
+    if not looks_like_direct_pdf_url(candidate.source, candidate.pdf_url):
         return None
 
     source_dir = pdf_dir / candidate.source
