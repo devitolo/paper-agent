@@ -104,6 +104,7 @@ def run_daily_pipeline(
         profile_version = db.current_profile_version(connection)
 
         for attempt in range(1, max_scout_attempts + 1):
+            attempt_fetch_limit = fetch_limit * attempt
             scout_result = ScoutAgent(source=source).run(
                 connection,
                 workflow_cycle_id=cycle_id,
@@ -111,7 +112,7 @@ def run_daily_pipeline(
                 config=ScoutConfig(
                     topics=topics_for_run,
                     target_candidates=DEFAULT_TARGET_CANDIDATES,
-                    max_candidates=fetch_limit,
+                    max_candidates=attempt_fetch_limit,
                     freshness_months=freshness_months,
                     request_delay=request_delay,
                     retries=scout_retries,

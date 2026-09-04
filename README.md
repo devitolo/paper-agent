@@ -226,7 +226,7 @@ Run the daily Scout-to-Curator pipeline:
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-This creates a workflow cycle, runs Scout to retrieve and persist candidates, lets Curator evaluate every eligible candidate, stores up to three recommendations, downloads/extracts recommended PDFs, saves summaries under `data/extractions/`, records artifacts in `data/paper_agent.db`, and prints a compact review list. Previously discovered papers and clear feedback-avoid matches are retained as Scout candidate records with exclusion reasons instead of being re-recommended. The command output/logs include a `Scout guidance:` line when feedback/profile guidance is available. For an interactive preview, use quick mode:
+This creates a workflow cycle, runs Scout to retrieve and persist candidates, lets Curator evaluate every eligible candidate, stores up to three recommendations, downloads/extracts recommended PDFs, saves summaries under `data/extractions/`, records artifacts in `data/paper_agent.db`, and prints a compact review list. Previously discovered papers, papers already sitting in the open review queue, and clear feedback-avoid matches are retained as Scout candidate records with exclusion reasons instead of being re-recommended. Bounded rescout attempts fetch a deeper candidate window so stale top results do not repeatedly satisfy the daily quota. The command output/logs include a `Scout guidance:` line when feedback/profile guidance is available. For an interactive preview, use quick mode:
 
 ```bash
 python3 -m paper_agents.cli pipeline-daily \

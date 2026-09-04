@@ -505,6 +505,30 @@ def paper_has_scout_candidate_in_cycle(
     return row is not None
 
 
+def paper_has_open_recommendation(
+    connection: sqlite3.Connection,
+    *,
+    paper_id: int,
+    before_workflow_cycle_id: int | None = None,
+) -> bool:
+    cycle_clause = "" if before_workflow_cycle_id is None else "AND curator_runs.workflow_cycle_id < ?"
+    params: tuple[Any, ...] = (paper_id,) if before_workflow_cycle_id is None else (paper_id, before_workflow_cycle_id)
+    row = connection.execute(
+        f"""
+        SELECT 1
+        FROM recommendations
+        JOIN curator_runs ON curator_runs.id = recommendations.curator_run_id
+        WHERE recommendations.paper_id = ?
+          {cycle_clause}
+          AND NOT EXISTS (SELECT 1 FROM structured_feedback WHERE structured_feedback.paper_id = recommendations.paper_id)
+          AND NOT EXISTS (SELECT 1 FROM raw_feedback WHERE raw_feedback.paper_id = recommendations.paper_id)
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    return row is not None
+
+
 def eligible_candidates_for_cycle(connection: sqlite3.Connection, workflow_cycle_id: int) -> list[dict[str, Any]]:
     rows = connection.execute(
         """

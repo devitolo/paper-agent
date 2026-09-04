@@ -55,6 +55,7 @@ from paper_agents.topics import (
     select_topics_for_source,
 )
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
+from paper_agents.pipeline import run_daily_pipeline
 from paper_agents import web
 
 
@@ -66,6 +67,16 @@ class FakeSource:
 
     def fetch(self, topics, max_results, freshness_months):
         return self.candidates[:max_results]
+
+
+class RecordingSource(FakeSource):
+    def __init__(self, candidates):
+        super().__init__(candidates)
+        self.max_results_calls: list[int] = []
+
+    def fetch(self, topics, max_results, freshness_months):
+        self.max_results_calls.append(max_results)
+        return super().fetch(topics, max_results, freshness_months)
 
 
 class FakeHttpResponse:
@@ -646,6 +657,39 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, "previously_discovered"))
 
+    def test_open_recommendation_is_excluded_on_later_scout_run(self):
+        old_source = FakeSource([candidate("2601.openv1", "Incident RCA")])
+        config = ScoutConfig(topics=["AIOps"], max_candidates=5)
+        ScoutAgent(source=old_source).run(self.connection, workflow_cycle_id=self.cycle_id, attempt_number=1, config=config)
+        old_candidates = db.eligible_candidates_for_cycle(self.connection, self.cycle_id)
+        CuratorAgent().run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            candidates=old_candidates,
+            profile_version=db.current_profile_version(self.connection),
+            scout_attempt_count=1,
+            config=CuratorConfig(max_recommendations=1, min_quality_score=1, max_scout_attempts=1),
+        )
+        next_cycle_id = db.create_workflow_cycle(self.connection, mode="test", max_scout_attempts=1)
+
+        result = ScoutAgent(source=old_source).run(
+            self.connection,
+            workflow_cycle_id=next_cycle_id,
+            attempt_number=1,
+            config=config,
+        )
+
+        self.assertEqual(result["eligible_count"], 0)
+        row = self.connection.execute(
+            """
+            SELECT excluded, exclusion_reason
+            FROM scout_candidates
+            WHERE scout_run_id = ?
+            """,
+            (result["scout_run_id"],),
+        ).fetchone()
+        self.assertEqual(row, (1, "already_recommended"))
+
     def test_non_arxiv_candidate_without_pdf_url_remains_curator_eligible(self):
         source = FakeSource(
             [
@@ -792,6 +836,31 @@ class BackendV2Tests(unittest.TestCase):
         )
         self.assertEqual(result["recommendations"], [])
         self.assertFalse(result["requested_rescout"])
+
+    def test_pipeline_deepens_fetch_limit_on_rescout(self):
+        db_path = Path(self.tmp.name) / "pipeline_deepens.db"
+        db.init_db(db_path)
+        source = RecordingSource([candidate(f"2601.deep{i}v1", f"Unrelated math {i}") for i in range(6)])
+
+        with (
+            patch("paper_agents.pipeline.create_scout_source", return_value=source),
+            patch("paper_agents.pipeline.load_profile", return_value={"interests": ["AIOps"], "positive_signals": [], "negative_signals": []}),
+        ):
+            result = run_daily_pipeline(
+                topics=["AIOps"],
+                fetch_limit=2,
+                keep_limit=3,
+                max_scout_attempts=3,
+                min_quality_score=100,
+                db_path=db_path,
+                mode="test",
+                source_name="arxiv",
+            )
+
+        self.assertEqual(source.max_results_calls, [2, 4, 6])
+        self.assertEqual(len(result["scout_results"]), 3)
+        self.assertTrue(all(scout_result["eligible_count"] > 0 for scout_result in result["scout_results"]))
+        self.assertEqual(result["curator"]["recommendations"], [])
 
     def test_scouting_guidance_is_versioned_and_only_latest_active_loads(self):
         first = db.create_scouting_guidance(self.connection, curator_run_id=None, guidance_text="old")

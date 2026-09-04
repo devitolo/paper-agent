@@ -121,10 +121,17 @@ class ScoutAgent:
                 before_scout_run_id=scout_run_id,
             )
             feedback_excluded = bool(guidance_diagnostics.get("feedback_guidance_excluded"))
-            excluded = feedback_excluded or (not is_new and not seen_in_current_cycle)
+            already_open_recommendation = db.paper_has_open_recommendation(
+                connection,
+                paper_id=paper_id,
+                before_workflow_cycle_id=workflow_cycle_id,
+            )
+            excluded = feedback_excluded or already_open_recommendation or (not is_new and not seen_in_current_cycle)
             exclusion_reason = None
             if feedback_excluded:
                 exclusion_reason = "feedback_avoid_terms"
+            elif already_open_recommendation:
+                exclusion_reason = "already_recommended"
             elif excluded:
                 exclusion_reason = "previously_discovered"
             scout_candidate_id = db.insert_scout_candidate(
