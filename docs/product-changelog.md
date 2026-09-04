@@ -35,6 +35,7 @@ Completed behavior:
 - Roll back the earlier Sep 1 rule that hid or excluded non-arXiv papers solely because they lacked a PDF URL.
 - Use Semantic Reader as a reviewer/backfill fallback: derive `/reader/{paperId}`, parse its download link, and save the linked PDF only when the response is real PDF content.
 - Add a biweekly Monday 2:00 AM cron wrapper for Gemini full feedback-profile rebuild comparisons. The job is review-only: it runs the rebuild in dry-run comparison mode and does not apply the proposed profile.
+- Add a repo-owned `deploy/project-paper.crontab` and `scripts/install_project_paper_cron.sh` so `git pull` carries the canonical Mini schedule and the operator can refresh cron without hand-copying individual lines.
 
 ## 2026-09-01
 
