@@ -657,7 +657,7 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, "previously_discovered"))
 
-    def test_open_recommendation_is_excluded_on_later_scout_run(self):
+    def test_prior_recommendation_is_excluded_on_later_scout_run(self):
         old_source = FakeSource([candidate("2601.openv1", "Incident RCA")])
         config = ScoutConfig(topics=["AIOps"], max_candidates=5)
         ScoutAgent(source=old_source).run(self.connection, workflow_cycle_id=self.cycle_id, attempt_number=1, config=config)
@@ -676,6 +676,38 @@ class BackendV2Tests(unittest.TestCase):
             self.connection,
             workflow_cycle_id=next_cycle_id,
             attempt_number=1,
+            config=config,
+        )
+
+        self.assertEqual(result["eligible_count"], 0)
+        row = self.connection.execute(
+            """
+            SELECT excluded, exclusion_reason
+            FROM scout_candidates
+            WHERE scout_run_id = ?
+            """,
+            (result["scout_run_id"],),
+        ).fetchone()
+        self.assertEqual(row, (1, "already_recommended"))
+
+    def test_same_cycle_recommendation_is_excluded_on_rescout(self):
+        source = FakeSource([candidate("2601.samecyclev1", "Incident RCA")])
+        config = ScoutConfig(topics=["AIOps"], max_candidates=5)
+        ScoutAgent(source=source).run(self.connection, workflow_cycle_id=self.cycle_id, attempt_number=1, config=config)
+        candidates = db.eligible_candidates_for_cycle(self.connection, self.cycle_id)
+        CuratorAgent().run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            candidates=candidates,
+            profile_version=db.current_profile_version(self.connection),
+            scout_attempt_count=1,
+            config=CuratorConfig(max_recommendations=1, min_quality_score=1, max_scout_attempts=3),
+        )
+
+        result = ScoutAgent(source=source).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=2,
             config=config,
         )
 
