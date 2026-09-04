@@ -643,7 +643,7 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, "previously_discovered"))
 
-    def test_non_arxiv_candidate_without_pdf_url_is_excluded_from_curator_pool(self):
+    def test_non_arxiv_candidate_without_pdf_url_remains_curator_eligible(self):
         source = FakeSource(
             [
                 ScoutCandidate(
@@ -669,7 +669,7 @@ class BackendV2Tests(unittest.TestCase):
         )
 
         self.assertEqual(result["stored_count"], 1)
-        self.assertEqual(result["eligible_count"], 0)
+        self.assertEqual(result["eligible_count"], 1)
         row = self.connection.execute(
             """
             SELECT excluded, exclusion_reason
@@ -678,8 +678,8 @@ class BackendV2Tests(unittest.TestCase):
             """,
             (result["scout_run_id"],),
         ).fetchone()
-        self.assertEqual(row, (1, "missing_pdf_url"))
-        self.assertEqual(db.eligible_candidates_for_cycle(self.connection, self.cycle_id), [])
+        self.assertEqual(row, (0, None))
+        self.assertEqual(len(db.eligible_candidates_for_cycle(self.connection, self.cycle_id)), 1)
 
     def test_non_arxiv_candidate_with_doi_pdf_url_remains_curator_eligible(self):
         source = FakeSource(
@@ -1968,7 +1968,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Source Abstract", html)
         self.assertIn("Applied incident review automation.", html)
 
-    def test_review_queue_hides_unreviewable_non_arxiv_without_pdf_or_triage(self):
+    def test_review_queue_shows_recommended_non_arxiv_without_pdf_or_triage(self):
         paper_id, _ = db.upsert_paper(
             self.connection,
             {
@@ -2012,7 +2012,7 @@ class BackendV2Tests(unittest.TestCase):
 
         default_html = web.render_review_queue(self.db_path)
 
-        self.assertNotIn("Semantic Paper Without PDF", default_html)
+        self.assertIn("Semantic Paper Without PDF", default_html)
 
     def test_review_queue_does_not_render_open_pdf_for_non_arxiv_doi_url(self):
         paper_id, _ = db.upsert_paper(

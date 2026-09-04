@@ -121,13 +121,10 @@ class ScoutAgent:
                 before_scout_run_id=scout_run_id,
             )
             feedback_excluded = bool(guidance_diagnostics.get("feedback_guidance_excluded"))
-            missing_pdf_excluded = should_exclude_missing_pdf(candidate_dict)
-            excluded = feedback_excluded or missing_pdf_excluded or (not is_new and not seen_in_current_cycle)
+            excluded = feedback_excluded or (not is_new and not seen_in_current_cycle)
             exclusion_reason = None
             if feedback_excluded:
                 exclusion_reason = "feedback_avoid_terms"
-            elif missing_pdf_excluded:
-                exclusion_reason = "missing_pdf_url"
             elif excluded:
                 exclusion_reason = "previously_discovered"
             scout_candidate_id = db.insert_scout_candidate(
@@ -194,10 +191,3 @@ def sanitize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     clean.pop("ranking_reason", None)
     clean.pop("selected", None)
     return clean
-
-
-def should_exclude_missing_pdf(candidate: dict[str, Any]) -> bool:
-    source = candidate.get("source")
-    if source not in {"semantic_scholar", "openalex"}:
-        return False
-    return not bool(candidate.get("pdf_url"))
