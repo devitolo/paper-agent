@@ -2014,7 +2014,7 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertNotIn("Semantic Paper Without PDF", default_html)
 
-    def test_review_queue_hides_unreviewable_non_arxiv_with_doi_pdf_url(self):
+    def test_review_queue_does_not_render_open_pdf_for_non_arxiv_doi_url(self):
         paper_id, _ = db.upsert_paper(
             self.connection,
             {
@@ -2058,8 +2058,11 @@ class BackendV2Tests(unittest.TestCase):
 
         default_html = web.render_review_queue(self.db_path)
 
-        self.assertNotIn("Semantic Paper With DOI Pretending To Be PDF", default_html)
-        self.assertNotIn("https://doi.org/10.1145/3706598.3713581", default_html)
+        self.assertIn("Semantic Paper With DOI Pretending To Be PDF", default_html)
+        self.assertNotIn(
+            'class="metadata-action pdf-action" href="https://doi.org/10.1145/3706598.3713581"',
+            default_html,
+        )
 
     def test_review_queue_summary_formats_structured_fields_and_truncates_abstract(self):
         html = web.render_summary(
