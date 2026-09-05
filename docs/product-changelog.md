@@ -2,6 +2,21 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-09-05
+
+### Curator V2: Profile Fit, Confidence, and Cycle Deduplication
+
+Status: Independently QA-reviewed: ship with caveats for score calibration and cycle deduplication. Production rescoring remains an explicit operator action.
+
+- Separate bounded topic and profile components; profile prose can match multiple meaningful terms, and repeated keywords cannot inflate scores.
+- Apply negative-profile and off-domain penalties after positive-score bounds so saturation cannot mask them.
+- Distinguish metadata, source abstract, abstract-only triage, PDF presence, and full-text triage using existing stored provenance, without full-text reading or new source calls.
+- Record component explanations in rationale and existing Curator run JSON metadata. No schema migration.
+- Keep recommendations unique within each workflow cycle; accepted papers count toward the total quota and all reach Reviewer across retries.
+- Add read-only `curator-rescore --date YYYY-MM-DD` preview and explicit `--apply` with old-value audit history for existing recommendations by UTC recommendation date.
+- Independent QA ran 159 tests with private replay: 158 passed and the proposed high-rated-versus-rejected average-order gate failed. Preserve that gate for future preference work. Profile influence and score saturation checks pass, but this release does not establish alignment with human judgments.
+- QA verified read-only rescore preview, apply/audit agreement on a disposable database copy, and zero changes on identical repeat apply. No production database was modified. Private snapshots and per-paper reports remain excluded from git.
+
 ## 2026-09-04
 
 ### Abstract-only triage fallback

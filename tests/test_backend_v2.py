@@ -593,7 +593,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertLess(physical["score"], software["score"])
         self.assertIn("off-domain signals", physical["rationale"])
 
-    def test_curator_caps_match_score_at_100(self):
+    def test_curator_keyword_repetition_does_not_saturate_score(self):
         profile = {
             "interests": ["aiops", "root cause analysis", "anomaly detection"],
             "positive_signals": ["observability", "llm", "failure diagnosis", "cloud operations"],
@@ -614,7 +614,8 @@ class BackendV2Tests(unittest.TestCase):
             profile,
         )
 
-        self.assertEqual(paper["score"], 100.0)
+        self.assertGreater(paper["score"], 0.0)
+        self.assertLess(paper["score"], 95.0)
 
     def test_legacy_scout_daily_output_has_no_preference_scores(self):
         output_dir = Path(self.tmp.name) / "scout"

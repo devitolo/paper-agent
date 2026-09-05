@@ -15,7 +15,34 @@ Scout
 
 Scout retrieves configured sources, normalizes candidate records, expands source queries with deterministic feedback/profile guidance, deduplicates source results, marks previously discovered papers and clear feedback-avoid matches as excluded, records source/query telemetry, and writes candidate pools. Scout does not score, rank, recommend, call an LLM Scout agent, or perform deep paper/PDF reading.
 
-Curator reads the Scout candidate pool, the active profile version, historical state, and active guidance. It evaluates every eligible candidate, stores scores and rationales, recommends at most three papers, and writes active guidance for later Scout runs. Re-scout requests are bounded by the workflow cycle's maximum Scout attempt count.
+Curator reads the Scout candidate pool, active profile version, historical recommendations, and stored artifact provenance. It evaluates eligible candidates, stores scores and rationales, recommends at most three distinct papers per workflow cycle, and writes guidance for later Scout runs. Re-scout requests are bounded by the cycle's maximum Scout attempt count. Earlier accepted recommendations consume the cycle quota and are all passed to Reviewer, including when later attempts find additional papers.
+
+### Curator V2 Scoring
+
+The deterministic V2 score measures relevance/fit, not a calibrated probability or a full-paper quality judgment. Topic matching uses each distinct baseline phrase once per field; repeating keywords cannot inflate it. The topic component is `60 * (1 - exp(-raw_topic / 45))`. Active-profile interests and positive signals form a separate component, `25 * (1 - exp(-matched_profile_term_count / 4))`, even when they overlap baseline keywords. Whole phrases or at least two meaningful component terms covering 40% of a prose signal may match. Duplicate signals/terms do not add weight. This is literal component matching, not an LLM or semantic inference.
+
+Metadata-only confidence is 0.80; source abstracts and abstract-only triage use 0.90; a stored PDF without full-text triage uses 0.95; full-text triage uses 1.00. A PDF URL alone earns no evidence credit. Stored PDF provenance permits up to 5 evidence points, and full-text triage up to 15, scaled down for low relevance. Conflicting abstract-only metadata takes precedence over PDF presence. Artifact metadata is trusted as recorded: scoring does not download PDFs, inspect file contents, or certify extraction quality. Most fresh Scout candidates therefore start at abstract confidence; explicit rescoring can use artifacts created later by Reviewer.
+
+The positive score is confidence-scaled and bounded before negative penalties are subtracted. Each distinct negative-profile match subtracts 12 points (maximum 36); adverse prose must also match an adverse qualifier when one is present. Separate fixed off-domain penalties remain. Scores floor at zero. Routine keywords cannot reach 95-100; high scores require strong profile/topic coverage and full-text provenance. The existing default recommendation threshold remains 25 pending calibration on more feedback.
+
+Human-readable rationales expose the components. Machine-readable details are stored per paper under `curator_runs.metadata_json.evaluations`, including profile matches, negative matches, confidence, evidence provenance, and penalties. Initial runs use model `deterministic-v2`. These rules do not guarantee that text-only replay reproduces a human judgment about weak evidence or practical value.
+
+### Rescore Existing Recommendations
+
+After deployment, preview the recommendations made on a specific **UTC recommendation date** (not publication or pulled date):
+
+```bash
+python3 -m paper_agents.cli curator-rescore --date 2026-09-05
+```
+
+The default preview opens SQLite read-only and prints old/new scores and components. Add `--source semantic_scholar` to narrow it. After inspecting the preview and backing up the DB, apply:
+
+```bash
+scripts/backup_db.sh
+python3 -m paper_agents.cli curator-rescore --date 2026-09-05 --apply
+```
+
+Apply updates the selected recommendations' existing evaluations and rationale in one transaction. Original scores/rationales and the scoring version/profile used are retained in `curator_runs.metadata_json.rescore_history`; the latest rescore components are in `rescored_evaluations` by evaluation ID. The original run's model/profile IDs remain historical attribution. User feedback, recommendation membership/order, Scout history, and artifacts are preserved, even when a new score falls below threshold. Identical repeated applies with the same profile add no audit entries. Refresh Review Queue to see persisted scores; no source rerun or extraction is required.
 
 Feedback Agent uses a blob-first product path: the user pastes a final ChatGPT discussion summary into Project Paper, and the shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, stores deterministic v1 structured feedback, and runs Gemini incremental profile apply after Review Queue submit. Manual CLI dry-run/apply remains available for testing and operations.
 

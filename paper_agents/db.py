@@ -532,6 +532,30 @@ def paper_has_prior_recommendation(
     return row is not None
 
 
+def recommended_ids_for_cycle(connection: sqlite3.Connection, workflow_cycle_id: int) -> set[int]:
+    return {row[0] for row in connection.execute(
+        "SELECT r.paper_id FROM recommendations r JOIN curator_runs cr ON cr.id = r.curator_run_id "
+        "WHERE cr.workflow_cycle_id = ?", (workflow_cycle_id,))}
+
+
+def paper_evidence_context(connection: sqlite3.Connection, paper_id: int) -> dict[str, Any]:
+    rows = connection.execute(
+        "SELECT id, artifact_type, metadata_json FROM artifacts WHERE paper_id = ? ORDER BY id DESC",
+        (paper_id,),
+    ).fetchall()
+    pdf = any(row[1] == "pdf" for row in rows)
+    triage = next((row for row in rows if row[1] == "triage_summary"), None)
+    metadata = decode_json(triage[2], {}) if triage else {}
+    abstract_only = bool(metadata.get("abstract_only") or metadata.get("source_type") == "source_abstract"
+                         or metadata.get("full_text_available") is False)
+    # A URL alone is not downloaded evidence. Legacy triage needs a PDF artifact
+    # or explicit full-text provenance before receiving the full-text tier.
+    return {"pdf_artifact": pdf, "triage_artifact_id": triage[0] if triage else None,
+            "abstract_only": abstract_only,
+            "full_text_triage": bool(triage) and not abstract_only
+                                and (pdf or metadata.get("full_text_available") is True)}
+
+
 def eligible_candidates_for_cycle(connection: sqlite3.Connection, workflow_cycle_id: int) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
@@ -555,6 +579,10 @@ def eligible_candidates_for_cycle(connection: sqlite3.Connection, workflow_cycle
         LEFT JOIN paper_sources ON paper_sources.paper_id = papers.id
         WHERE scout_runs.workflow_cycle_id = ?
           AND scout_candidates.excluded = 0
+          AND NOT EXISTS (
+              SELECT 1 FROM recommendations r JOIN curator_runs cr ON cr.id = r.curator_run_id
+              WHERE r.paper_id = papers.id AND cr.workflow_cycle_id = scout_runs.workflow_cycle_id
+          )
           AND (paper_sources.id IS NULL OR paper_sources.id = (
               SELECT MIN(id) FROM paper_sources WHERE paper_id = papers.id
           ))

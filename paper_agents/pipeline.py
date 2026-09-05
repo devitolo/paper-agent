@@ -87,6 +87,7 @@ def run_daily_pipeline(
     scout_results: list[dict[str, Any]] = []
     curator_result: dict[str, Any] | None = None
     cards: list[dict[str, Any]] = []
+    cycle_recommendations: list[dict[str, Any]] = []
 
     with db.connect_db(db_path) as connection:
         cycle_id = db.create_workflow_cycle(
@@ -137,12 +138,14 @@ def run_daily_pipeline(
                     max_scout_attempts=max_scout_attempts,
                 ),
             )
+            cycle_recommendations.extend(curator_result.get("recommendations") or [])
             if not curator_result["requested_rescout"]:
                 break
 
         if curator_result is not None:
             db.update_workflow_state(connection, cycle_id, "awaiting_manual_discussion")
-            recommendations = curator_result.get("recommendations") or []
+            recommendations = cycle_recommendations
+            curator_result = {**curator_result, "recommendations": cycle_recommendations}
             # PDF download and local extraction are slow, non-database work.
             connection.commit()
             reviewer_result = ReviewerAgent().run(

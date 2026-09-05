@@ -8,6 +8,7 @@ from typing import Any
 
 from paper_agents.bootstrap import bootstrap_known_papers, import_legacy_scout_files
 from paper_agents.curator import ResearchCurator
+from paper_agents.curator_rescore import rescore_recommendations
 from paper_agents.db import (
     DEFAULT_DB_PATH,
     DEFAULT_SCHEMA_PATH,
@@ -216,6 +217,12 @@ def main() -> None:
         help="Deprecated in V2; previously discovered papers are recorded as excluded Scout candidates",
     )
 
+    rescore_parser = subparsers.add_parser("curator-rescore", help="Preview or apply Curator V2 to existing recommendations")
+    rescore_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    rescore_parser.add_argument("--date", required=True, help="Recommendation date in UTC: YYYY-MM-DD")
+    rescore_parser.add_argument("--source", choices=SCOUT_SOURCES)
+    rescore_parser.add_argument("--apply", action="store_true", help="Persist new scores with an audit of previous values")
+
     review_parser = subparsers.add_parser("review-summary", help="Create a ChatGPT section-by-section review from a triage summary JSON")
     review_parser.add_argument("summary", type=Path, help="Local extraction summary JSON")
     review_parser.add_argument("--output-dir", type=Path, default=DEFAULT_REVIEW_DIR)
@@ -412,6 +419,14 @@ def main() -> None:
                     f"feedback_count={guidance.get('feedback_count', 0)}"
                 )
         print_section("Pipeline review cards", {"cards": output["cards"]})
+        return
+
+    if args.command == "curator-rescore":
+        try:
+            output = rescore_recommendations(args.db, args.date, apply=args.apply, source=args.source)
+        except (ValueError, RuntimeError) as error:
+            raise SystemExit(str(error)) from error
+        print_section("Curator rescore", output)
         return
 
     if args.command == "review-summary":
