@@ -68,6 +68,7 @@ class ReviewerAgent:
                 path=pdf_path,
                 metadata={"pdf_url": recommendation.get("pdf_url")},
             )
+            connection.commit()
         else:
             extraction, output_path, error = extract_source_abstract_summary(recommendation, index=index, config=config)
             if extraction and output_path:

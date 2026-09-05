@@ -917,6 +917,54 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(all(scout_result["eligible_count"] > 0 for scout_result in result["scout_results"]))
         self.assertEqual(result["curator"]["recommendations"], [])
 
+    def test_pipeline_does_not_hold_write_lock_during_source_fetch(self):
+        db_path = Path(self.tmp.name) / "pipeline_concurrency.db"
+        db.init_db(db_path)
+
+        class ConcurrentWriterSource(FakeSource):
+            def fetch(self, topics, *, max_results, freshness_months):
+                with db.connect_db(db_path) as concurrent_connection:
+                    db.create_workflow_cycle(
+                        concurrent_connection,
+                        mode="concurrent-test",
+                        max_scout_attempts=1,
+                    )
+                return super().fetch(
+                    topics,
+                    max_results=max_results,
+                    freshness_months=freshness_months,
+                )
+
+        source = ConcurrentWriterSource([candidate("2601.concurrentv1", "AIOps observability")])
+        with (
+            patch("paper_agents.pipeline.create_scout_source", return_value=source),
+            patch(
+                "paper_agents.pipeline.load_profile",
+                return_value={"interests": ["AIOps"], "positive_signals": [], "negative_signals": []},
+            ),
+        ):
+            result = run_daily_pipeline(
+                topics=["AIOps"],
+                fetch_limit=1,
+                keep_limit=1,
+                max_scout_attempts=1,
+                min_quality_score=100,
+                db_path=db_path,
+                mode="test",
+                source_name="openalex",
+            )
+
+        self.assertEqual(result["scout_results"][0]["eligible_count"], 1)
+        with db.connect_db(db_path) as connection:
+            modes = {row[0] for row in connection.execute("SELECT mode FROM workflow_cycles")}
+        self.assertIn("concurrent-test", modes)
+
+    def test_connect_db_waits_for_short_lived_write_locks(self):
+        with db.connect_db(self.db_path) as connection:
+            busy_timeout = connection.execute("PRAGMA busy_timeout").fetchone()[0]
+
+        self.assertEqual(busy_timeout, db.DEFAULT_BUSY_TIMEOUT_MS)
+
     def test_scouting_guidance_is_versioned_and_only_latest_active_loads(self):
         first = db.create_scouting_guidance(self.connection, curator_run_id=None, guidance_text="old")
         second = db.create_scouting_guidance(self.connection, curator_run_id=None, guidance_text="new")

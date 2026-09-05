@@ -460,3 +460,13 @@ Responsibilities:
 - Curator scores candidates and creates recommendations.
 - Reviewer downloads PDFs, runs local triage extraction, and stores artifacts.
 - Feedback Agent and V2 feedback ingestion are the next workflow area, but the immediate product focus is the Review Queue UI redesign for the feedback blob path.
+### Concurrent pipeline SQLite locking
+
+Decision: Slow source requests, PDF downloads, and local extraction must not hold SQLite write transactions open while scheduled source pipelines overlap.
+
+Completed behavior:
+
+- Commit Scout run setup before external source fetching and retry waits.
+- Commit recommendations before Reviewer download and extraction work.
+- Commit downloaded-PDF artifact metadata before local extraction.
+- Wait up to 30 seconds for short-lived SQLite write contention instead of failing immediately with `database is locked`.

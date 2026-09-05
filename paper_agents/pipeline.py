@@ -143,6 +143,8 @@ def run_daily_pipeline(
         if curator_result is not None:
             db.update_workflow_state(connection, cycle_id, "awaiting_manual_discussion")
             recommendations = curator_result.get("recommendations") or []
+            # PDF download and local extraction are slow, non-database work.
+            connection.commit()
             reviewer_result = ReviewerAgent().run(
                 connection,
                 recommendations=recommendations,

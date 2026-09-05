@@ -9,6 +9,7 @@ from typing import Any
 
 DEFAULT_DB_PATH = Path("data/paper_agent.db")
 DEFAULT_SCHEMA_PATH = Path("sql/schema.sql")
+DEFAULT_BUSY_TIMEOUT_MS = 30_000
 
 WORKFLOW_STATES = {
     "created",
@@ -94,8 +95,9 @@ def reset_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA
 
 
 def connect_db(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    connection = sqlite3.connect(db_path)
+    connection = sqlite3.connect(db_path, timeout=DEFAULT_BUSY_TIMEOUT_MS / 1000)
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute(f"PRAGMA busy_timeout = {DEFAULT_BUSY_TIMEOUT_MS}")
     return connection
 
 

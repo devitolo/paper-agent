@@ -92,6 +92,10 @@ class ScoutAgent:
             },
         )
 
+        # Source requests may spend minutes retrying rate limits. Persist the run
+        # setup first so another scheduled pipeline is not blocked meanwhile.
+        connection.commit()
+
         warnings: list[str] = []
         errors: list[str] = []
         candidates = []
