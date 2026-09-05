@@ -14,7 +14,8 @@ Status: Independently QA-reviewed: ship with caveats for score calibration and c
 - Record component explanations in rationale and existing Curator run JSON metadata. No schema migration.
 - Keep recommendations unique within each workflow cycle; accepted papers count toward the total quota and all reach Reviewer across retries.
 - Add read-only `curator-rescore --date YYYY-MM-DD` preview and explicit `--apply` with old-value audit history for existing recommendations by UTC recommendation date.
-- Independent QA ran 159 tests with private replay: 158 passed and the proposed high-rated-versus-rejected average-order gate failed. Preserve that gate for future preference work. Profile influence and score saturation checks pass, but this release does not establish alignment with human judgments.
+- Independent QA ran 161 tests with private replay: 160 passed and the proposed high-rated-versus-rejected average-order gate failed. Preserve that gate for future preference work. Profile influence and score saturation checks pass, but this release does not establish alignment with human judgments.
+- Literal component matching does not understand negation: `avoids weak evidence` can receive the same negative penalty as `weak evidence`. Negative-pattern detection and false positives remain follow-up work. Artifact confidence reflects provenance, not evaluation rigor; this release does not approve all SQLite, source retry, or cron behavior.
 - QA verified read-only rescore preview, apply/audit agreement on a disposable database copy, and zero changes on identical repeat apply. No production database was modified. Private snapshots and per-paper reports remain excluded from git.
 
 ## 2026-09-04

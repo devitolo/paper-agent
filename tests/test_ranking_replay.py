@@ -6,14 +6,20 @@ The snapshot is opened read-only. No paper text or feedback is committed here.
 Relative-order gates are QA proposals for architect review, not numeric targets.
 """
 from contextlib import closing
+import hashlib
 import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from paper_agents.curator_agent import evaluate_candidate
 from paper_agents import db
+from paper_agents.curator_rescore import rescore_recommendations
 
 
 @unittest.skipUnless(os.environ.get("PAPER_AGENT_QA_DB"), "Set PAPER_AGENT_QA_DB to a private QA snapshot")
@@ -21,6 +27,7 @@ class ProductionRankingReplayTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         path = Path(os.environ["PAPER_AGENT_QA_DB"]).resolve()
+        cls.snapshot_path = path
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             profile = connection.execute(
@@ -60,3 +67,49 @@ class ProductionRankingReplayTests(unittest.TestCase):
         self.assertTrue(high and rejected, "Need both high-rated and rejected feedback")
         self.assertGreater(sum(high) / len(high), sum(rejected) / len(rejected),
                            "QA proposed gate: highly rated papers should rank above rejects as a group")
+
+    def test_cli_preview_filters_source_and_does_not_change_snapshot(self):
+        before = hashlib.sha256(self.snapshot_path.read_bytes()).digest()
+        result = subprocess.run(
+            [sys.executable, "-m", "paper_agents.cli", "curator-rescore",
+             "--db", str(self.snapshot_path), "--date", "2026-09-05",
+             "--source", "semantic_scholar"],
+            cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout[result.stdout.index("{"):])
+        self.assertFalse(payload["applied"])
+        self.assertEqual(payload["date_utc"], "2026-09-05")
+        self.assertGreater(payload["recommendation_count"], 0)
+        with closing(sqlite3.connect(self.snapshot_path.as_uri() + "?mode=ro", uri=True)) as c:
+            expected = {row[0] for row in c.execute("""
+                SELECT r.id FROM recommendations r
+                WHERE date(r.created_at)='2026-09-05' AND EXISTS (
+                    SELECT 1 FROM paper_sources ps
+                    WHERE ps.paper_id=r.paper_id AND ps.source='semantic_scholar')
+            """)}
+        self.assertEqual({row["recommendation_id"] for row in payload["results"]}, expected)
+        self.assertEqual(hashlib.sha256(self.snapshot_path.read_bytes()).digest(), before)
+
+    def test_second_rescore_failure_rolls_back_first_update_and_audit_on_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "disposable.db"
+            with closing(sqlite3.connect(self.snapshot_path.as_uri() + "?mode=ro", uri=True)) as source:
+                with closing(sqlite3.connect(path)) as copy:
+                    source.backup(copy)
+                    before = list(copy.iterdump())
+            calls = []
+
+            def fail_second(candidate, profile):
+                calls.append(candidate["paper_id"])
+                if len(calls) == 2:
+                    raise RuntimeError("QA injected second-row failure")
+                return evaluate_candidate(candidate, profile)
+
+            with patch("paper_agents.curator_rescore.evaluate_candidate", side_effect=fail_second):
+                with self.assertRaisesRegex(RuntimeError, "second-row failure"):
+                    rescore_recommendations(path, "2026-09-05", apply=True)
+            self.assertEqual(len(calls), 2)
+            with closing(sqlite3.connect(path)) as copy:
+                self.assertEqual(list(copy.iterdump()), before,
+                                 "Rollback must preserve all rows, including feedback and audit history")
