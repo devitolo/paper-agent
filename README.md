@@ -372,10 +372,15 @@ scripts/install_project_paper_cron.sh --apply
 The installer preserves unrelated cron entries, removes older Project Paper cron lines, and installs the managed block from `deploy/project-paper.crontab`.
 
 ```cron
+# Daily arXiv Scout/Curator/Reviewer pipeline.
 0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+# Biweekly Monday Gemini full feedback-profile rebuild comparison; dry-run only, never applies.
 0 2 * * 1 . $HOME/.bashrc; cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/biweekly_profile_rebuild_compare.sh >> logs/profile-rebuild-compare.log 2>&1
+# Daily OpenAlex Scout/Curator/Reviewer pipeline with rotating configured topics.
 30 6 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+# Daily Semantic Scholar Scout/Curator/Reviewer pipeline; sources API key from bashrc.
 0 6 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --fetch 3 --keep 1 --max-scout-attempts 1 --request-delay 10 --retries 6 --source-timeout 120 >> logs/pipeline-semantic-scholar.log 2>&1
+# Weekly SQLite backup with integrity check.
 0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
 ```
 
