@@ -38,6 +38,7 @@ Completed behavior:
 - Add a repo-owned `deploy/project-paper.crontab` and `scripts/install_project_paper_cron.sh` so `git pull` carries the canonical Mini schedule and the operator can refresh cron without hand-copying individual lines.
 - Change the managed Mini source schedule so OpenAlex and Semantic Scholar run daily again, matching the user's desired source coverage.
 - Add descriptive comments before each managed cron job so `crontab -l` explains the schedule in place.
+- Clamp deterministic curator match scores to the visible 0-100 range so repeated keyword matches cannot produce impossible Review Queue scores.
 
 ## 2026-09-01
 

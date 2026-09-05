@@ -131,7 +131,7 @@ def evaluate_candidate(candidate: dict[str, Any], profile: dict[str, Any]) -> di
     if off_domain_hits:
         score -= min(len(off_domain_hits), 5) * 12.0
 
-    score = round(max(score, 0.0), 2)
+    score = round(min(max(score, 0.0), 100.0), 2)
     if matches:
         rationale = "Matched " + ", ".join(matches[:8]) + "."
     else:

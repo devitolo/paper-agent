@@ -593,6 +593,29 @@ class BackendV2Tests(unittest.TestCase):
         self.assertLess(physical["score"], software["score"])
         self.assertIn("off-domain signals", physical["rationale"])
 
+    def test_curator_caps_match_score_at_100(self):
+        profile = {
+            "interests": ["aiops", "root cause analysis", "anomaly detection"],
+            "positive_signals": ["observability", "llm", "failure diagnosis", "cloud operations"],
+            "negative_signals": [],
+        }
+        paper = evaluate_candidate(
+            {
+                "paper_id": 1,
+                "title": (
+                    "AIOps AIOps Root Cause Analysis Root Cause Analysis "
+                    "Anomaly Detection Observability LLM Failure Diagnosis"
+                ),
+                "abstract": (
+                    "AIOps root cause analysis anomaly detection observability llm "
+                    "failure diagnosis cloud operations. " * 8
+                ),
+            },
+            profile,
+        )
+
+        self.assertEqual(paper["score"], 100.0)
+
     def test_legacy_scout_daily_output_has_no_preference_scores(self):
         output_dir = Path(self.tmp.name) / "scout"
         output = run_daily_scout(
