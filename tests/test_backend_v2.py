@@ -3321,7 +3321,48 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertEqual(summary["top"]["latest_zero_eligible_source"], "openalex")
         self.assertTrue(any("0 eligible" in warning["message"] for warning in summary["warnings"]))
+        self.assertTrue(
+            any(
+                "scripts/diagnose_scout_run.sh openalex" in warning["message"]
+                for warning in summary["warnings"]
+            )
+        )
         self.assertEqual(summary["source_breakdown"]["exclusion_reasons"][0]["reason"], "already_seen")
+
+    def test_health_summary_warns_on_low_candidate_scout_run(self):
+        scout_run_id, _, _ = self._seed_scout_candidate(source="arxiv", excluded=False, source_id="2607.lowv1")
+        paper_id, is_new = db.upsert_paper(
+            self.connection,
+            {
+                "source": "arxiv",
+                "source_id": "2607.lowv2",
+                "title": "Second low-volume arxiv health paper",
+                "url": "https://example.test/2607.lowv2",
+                "published": "2026-08-01",
+                "abstract": "Microservice diagnosis for production engineering.",
+            },
+        )
+        db.insert_scout_candidate(
+            self.connection,
+            scout_run_id=scout_run_id,
+            paper_id=paper_id,
+            retrieval_order=2,
+            is_new=is_new,
+            excluded=False,
+            exclusion_reason=None,
+            source_query="microservice diagnosis",
+        )
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21, source="arxiv")
+
+        self.assertTrue(
+            any(
+                "returned only 2 candidates" in warning["message"]
+                and "scripts/diagnose_scout_run.sh arxiv" in warning["message"]
+                for warning in summary["warnings"]
+            )
+        )
 
     def test_health_summary_source_split_and_filter(self):
         self._seed_scout_candidate(source="arxiv", excluded=False, source_id="2607.sourcev1")

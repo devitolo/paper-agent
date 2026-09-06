@@ -1617,10 +1617,38 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
 
     latest_scout = summary["latest_scout_run"]
     if latest_scout:
-        if int(latest_scout["candidate_count"] or 0) == 0:
-            warnings.append({"level": "warning", "message": f"Latest {latest_scout['source']} Scout run returned 0 candidates."})
+        diagnostic_command = f"scripts/diagnose_scout_run.sh {latest_scout['source']}"
+        candidate_count = int(latest_scout["candidate_count"] or 0)
+        if candidate_count == 0:
+            warnings.append(
+                {
+                    "level": "warning",
+                    "message": (
+                        f"Latest {latest_scout['source']} Scout run returned 0 candidates. "
+                        f"On Mini, run {diagnostic_command}."
+                    ),
+                }
+            )
+        elif candidate_count <= 2:
+            warnings.append(
+                {
+                    "level": "warning",
+                    "message": (
+                        f"Latest {latest_scout['source']} Scout run returned only {candidate_count} candidates. "
+                        f"On Mini, run {diagnostic_command}."
+                    ),
+                }
+            )
         if int(latest_scout["eligible_count"] or 0) == 0:
-            warnings.append({"level": "warning", "message": f"Latest {latest_scout['source']} Scout run had 0 eligible candidates."})
+            warnings.append(
+                {
+                    "level": "warning",
+                    "message": (
+                        f"Latest {latest_scout['source']} Scout run had 0 eligible candidates. "
+                        f"On Mini, run {diagnostic_command}."
+                    ),
+                }
+            )
 
     low_ratio_runs = 0
     for row in summary["recent_scout_runs"]:
