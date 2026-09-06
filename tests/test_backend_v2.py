@@ -3380,6 +3380,20 @@ class BackendV2Tests(unittest.TestCase):
             )
         )
 
+    def test_health_summary_warns_when_eligible_source_produces_no_recommendations(self):
+        self._seed_scout_candidate(source="openalex", excluded=False, source_id="W-eligible")
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21, source="openalex")
+
+        self.assertTrue(
+            any(
+                "1 eligible candidates but produced 0 recommendations" in warning["message"]
+                and "scripts/diagnose_scout_run.sh openalex" in warning["message"]
+                for warning in summary["warnings"]
+            )
+        )
+
     def test_health_summary_source_split_and_filter(self):
         self._seed_scout_candidate(source="arxiv", excluded=False, source_id="2607.sourcev1")
         self._seed_scout_candidate(source="openalex", excluded=True, source_id="W-source", exclusion_reason="history")

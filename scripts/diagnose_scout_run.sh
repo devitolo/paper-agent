@@ -6,17 +6,14 @@ DB_PATH="${PAPER_AGENT_DB:-data/paper_agent.db}"
 SOURCE="${1:-}"
 
 if [[ -z "$SOURCE" ]]; then
-  echo "Usage: scripts/diagnose_scout_run.sh <arxiv|openalex|semantic_scholar>" >&2
+  echo "Usage: scripts/diagnose_scout_run.sh <source>" >&2
   exit 2
 fi
 
-case "$SOURCE" in
-  arxiv|openalex|semantic_scholar) ;;
-  *)
-    echo "Unknown Scout source: $SOURCE" >&2
-    exit 2
-    ;;
-esac
+if [[ ! "$SOURCE" =~ ^[A-Za-z0-9_-]+$ ]]; then
+  echo "Source may contain only letters, numbers, underscores, and hyphens." >&2
+  exit 2
+fi
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "sqlite3 is required to diagnose Scout runs." >&2

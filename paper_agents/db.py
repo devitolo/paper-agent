@@ -1437,15 +1437,30 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                 scout_runs.completed_at,
                 COUNT(scout_candidates.id) AS candidate_count,
                 SUM(CASE WHEN scout_candidates.excluded = 0 THEN 1 ELSE 0 END) AS eligible_count,
-                SUM(CASE WHEN scout_candidates.excluded = 1 THEN 1 ELSE 0 END) AS excluded_count
+                SUM(CASE WHEN scout_candidates.excluded = 1 THEN 1 ELSE 0 END) AS excluded_count,
+                COUNT(DISTINCT recommendations.id) AS recommendation_count
             FROM latest_runs
             JOIN scout_runs ON scout_runs.id = latest_runs.id
             LEFT JOIN scout_candidates ON scout_candidates.scout_run_id = scout_runs.id
+            LEFT JOIN curator_evaluations
+              ON curator_evaluations.scout_candidate_id = scout_candidates.id
+            LEFT JOIN recommendations
+              ON recommendations.curator_run_id = curator_evaluations.curator_run_id
+             AND recommendations.paper_id = curator_evaluations.paper_id
             GROUP BY scout_runs.id
             ORDER BY scout_runs.id DESC
             """,
             (source_filter, source_filter),
-            ["id", "source", "started_at", "completed_at", "candidate_count", "eligible_count", "excluded_count"],
+            [
+                "id",
+                "source",
+                "started_at",
+                "completed_at",
+                "candidate_count",
+                "eligible_count",
+                "excluded_count",
+                "recommendation_count",
+            ],
         )
         recent_scout_runs = _rows(
             connection,
@@ -1671,6 +1686,20 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                     "level": "warning",
                     "message": (
                         f"Latest {latest_scout['source']} Scout run had 0 eligible candidates. "
+                        f"On Mini, run {diagnostic_command}."
+                    ),
+                }
+            )
+        elif (
+            int(latest_scout["eligible_count"] or 0) > 0
+            and int(latest_scout["recommendation_count"] or 0) == 0
+        ):
+            warnings.append(
+                {
+                    "level": "warning",
+                    "message": (
+                        f"Latest {latest_scout['source']} Scout run had "
+                        f"{latest_scout['eligible_count']} eligible candidates but produced 0 recommendations. "
                         f"On Mini, run {diagnostic_command}."
                     ),
                 }
