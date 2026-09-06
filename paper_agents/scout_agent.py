@@ -26,7 +26,7 @@ from paper_agents.scout_guidance import (
 DEFAULT_TARGET_CANDIDATES = 20
 DEFAULT_MIN_ELIGIBLE_CANDIDATES = 10
 DEFAULT_MAX_REFILL_FETCH_ROUNDS = 3
-SEMANTIC_SCHOLAR_MAX_REFILL_FETCH_ROUNDS = 2
+SEMANTIC_SCHOLAR_MAX_REFILL_FETCH_ROUNDS = 1
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ class ScoutAgent:
         candidates, guided_candidates, refill_diagnostics, source_diagnostics = self._fetch_candidate_pool(
             connection,
             source=source,
-            guided_topics=guided_topics,
+            source_topics=(config.topics or DEFAULT_SCOUT_TOPICS) if source.name == "semantic_scholar" else guided_topics,
             guidance=scout_guidance,
             config=config,
             errors=errors,
@@ -171,6 +171,9 @@ class ScoutAgent:
                 "scout_guidance": guidance_summary(scout_guidance),
                 "base_topics": config.topics,
                 "guided_topics": guided_topics,
+                "source_topics": (config.topics or DEFAULT_SCOUT_TOPICS)
+                if source.name == "semantic_scholar"
+                else guided_topics,
                 "source_diagnostics": source_diagnostics,
                 "refill": refill_diagnostics,
             },
@@ -185,6 +188,9 @@ class ScoutAgent:
             "guidance": guidance_summary(scout_guidance),
             "base_topics": config.topics,
             "guided_topics": guided_topics,
+            "source_topics": (config.topics or DEFAULT_SCOUT_TOPICS)
+            if source.name == "semantic_scholar"
+            else guided_topics,
             "fetched_count": len(candidates),
             "stored_count": len(stored),
             "eligible_count": len([candidate for candidate in stored if not candidate["excluded"]]),
@@ -198,7 +204,7 @@ class ScoutAgent:
         connection,
         *,
         source: PaperSource,
-        guided_topics: list[str],
+        source_topics: list[str],
         guidance,
         config: ScoutConfig,
         errors: list[str],
@@ -226,7 +232,7 @@ class ScoutAgent:
             previous_count = len(candidates)
             try:
                 fetched = source.fetch(
-                    guided_topics,
+                    source_topics,
                     max_results=requested_limit,
                     freshness_months=config.freshness_months,
                 )

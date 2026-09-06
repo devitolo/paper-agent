@@ -73,9 +73,11 @@ class RecordingSource(FakeSource):
     def __init__(self, candidates):
         super().__init__(candidates)
         self.max_results_calls: list[int] = []
+        self.topics_calls: list[list[str]] = []
 
     def fetch(self, topics, max_results, freshness_months):
         self.max_results_calls.append(max_results)
+        self.topics_calls.append(list(topics))
         return super().fetch(topics, max_results, freshness_months)
 
 
@@ -707,13 +709,9 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()[0])
         self.assertEqual(refill["refill"]["stop_reason"], "minimum_eligible_reached")
 
-    def test_semantic_scholar_refill_is_capped_at_two_rounds(self):
+    def test_semantic_scholar_uses_one_conservative_fetch_round(self):
         source = RecordingSource([candidate(f"semantic-{index}", f"Semantic candidate {index}", source="semantic_scholar") for index in range(30)])
         source.name = "semantic_scholar"
-        for item in source.candidates[:10]:
-            db.upsert_paper(self.connection, item.as_dict())
-        self.connection.commit()
-
         result = ScoutAgent(source=source).run(
             self.connection,
             workflow_cycle_id=self.cycle_id,
@@ -726,11 +724,12 @@ class BackendV2Tests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(source.max_results_calls, [10, 20])
+        self.assertEqual(source.max_results_calls, [10])
+        self.assertEqual(source.topics_calls, [["AIOps"]])
         diagnostics = json.loads(self.connection.execute(
             "SELECT diagnostics_json FROM scout_runs WHERE id = ?", (result["scout_run_id"],)
         ).fetchone()[0])
-        self.assertEqual(len(diagnostics["refill"]["rounds"]), 2)
+        self.assertEqual(len(diagnostics["refill"]["rounds"]), 1)
 
     def test_prior_recommendation_is_excluded_on_later_scout_run(self):
         old_source = FakeSource([candidate("2601.openv1", "Incident RCA")])
