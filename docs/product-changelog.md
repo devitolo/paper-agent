@@ -4,6 +4,17 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ## 2026-09-05
 
+### Review Queue Pagination and Fallback Hardening
+
+Status: Independently QA-approved for the five scoped fixes; user approved commit/push. Production deployment remains an operator action.
+
+- Replace the unreachable 50-card cutoff with 50-card pages, an accurate matching total, and previous/next navigation above and below the cards. Links preserve filter, source, sort, and density. Invalid/out-of-range pages clamp to a valid page; filter/sort changes reset to page 1.
+- Persist density in the GET form so select changes retain Condensed view; an explicitly clicked density button takes precedence. Density toggles and feedback returns retain page position, subject to clamping when queue membership changes.
+- Validate summary JSON object shapes per card. Missing, unreadable, invalid UTF-8, or malformed summaries fall back to source abstracts while keeping known abstract-only provenance from artifact metadata.
+- Calculate Health ages using UTC for naive SQLite timestamps and honor explicit offsets. Date-only and invalid/missing inputs remain supported.
+- Preserve the HTTP feedback round-trip regression for exact raw text, fractional score, escaped rendering, queue membership, return density, and worker enqueue.
+- Final QA verification: 172 tests, 167 passed and 5 private ranking replay tests skipped; all 11 UI regressions pass. Independent handler/HTML/query checks confirmed complete pagination on a disposable snapshot. Developer desktop/mobile browser checks were performed separately; no production database was modified.
+
 ### Curator V2: Profile Fit, Confidence, and Cycle Deduplication
 
 Status: Independently QA-reviewed: ship with caveats for score calibration and cycle deduplication. Production rescoring remains an explicit operator action.

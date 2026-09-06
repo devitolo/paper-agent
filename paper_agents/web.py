@@ -90,7 +90,8 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         filter_value=params.get("filter", ["needs_review"])[0],
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
                         sort_value=params.get("sort", ["score"])[0],
-                        view_value=params.get("view", ["full"])[0],
+                        view_value=params.get("view", ["full"])[-1],
+                        page_value=params.get("page", ["1"])[0],
                     )
                 )
                 return
@@ -280,13 +281,16 @@ def render_review_queue(
     source_value: str = SOURCE_FILTER_ALL,
     sort_value: str = "score",
     view_value: str = "full",
+    page_value: str | int = 1,
 ) -> str:
     filter_value = normalize_filter_value(filter_value)
     source_choices = load_source_filter_choices(db_path)
     source_value = normalize_choice(source_value, source_choices, SOURCE_FILTER_ALL)
     sort_value = normalize_choice(sort_value, SORTS, "score")
     view_value = normalize_choice(view_value, VIEWS, "full")
-    cards = load_review_cards(db_path, filter_value=filter_value, source_value=source_value, sort_value=sort_value)
+    result = load_review_page(db_path, filter_value=filter_value, source_value=source_value,
+                              sort_value=sort_value, page=page_value)
+    cards = result["cards"]
     banners = []
     if saved:
         banners.append('<div class="banner">Feedback saved.</div>')
@@ -295,12 +299,15 @@ def render_review_queue(
     if profile_apply_failed:
         banners.append('<div class="banner warning">Profile auto-apply failed. Feedback was saved; run feedback apply manually when ready.</div>')
     saved_banner = "".join(banners)
-    request_path = build_queue_href(filter_value, source_value, sort_value, view_value)
+    request_path = build_queue_href(filter_value, source_value, sort_value, view_value, result["page"])
+    pagination = render_queue_pagination(result, filter_value, source_value, sort_value, view_value)
     card_html = "\n".join(render_card(card, view_value=view_value, return_to=request_path) for card in cards)
     if not card_html:
         card_html = '<section class="empty">No selected papers are waiting in the registry yet.</section>'
     controls = f"""
       <form method="get" action="/" class="queue-controls">
+        <input type="hidden" name="view" value="{view_value}">
+        <input type="hidden" name="page" value="{result['page']}">
         {render_select(FILTERS, "filter", filter_value, "Queue")}
         {render_select(source_choices, "source", source_value, "Source")}
         {render_select(SORTS, "sort", sort_value, "Sort")}
@@ -318,9 +325,11 @@ def render_review_queue(
 </head>
 <body>
   <main>
-    {render_app_header("Review Queue", f"{len(cards)} papers | {escape(filter_label(filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}", controls, "review")}
+    {render_app_header("Review Queue", f"{result['total']} papers | {escape(filter_label(filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}", controls, "review")}
     {saved_banner}
+    {pagination}
     <div class="cards">{card_html}</div>
+    {pagination}
     <script>
       document.querySelectorAll("[data-copy-value]").forEach((button) => {{
         const originalText = button.textContent;
@@ -1516,7 +1525,17 @@ def button_class(card: dict[str, Any], status: str) -> str:
     return "primary" if card.get("feedback_status") == status else "secondary"
 
 
-def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, sort_value: str) -> list[dict[str, Any]]:
+REVIEW_PAGE_SIZE = 50
+
+
+def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, sort_value: str,
+                      page: int = 1) -> list[dict[str, Any]]:
+    return load_review_page(db_path, filter_value=filter_value, source_value=source_value,
+                            sort_value=sort_value, page=page)["cards"]
+
+
+def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sort_value: str,
+                     page: str | int = 1) -> dict[str, Any]:
     init_db(db_path)
     where_clauses = []
     params: list[Any] = []
@@ -1551,13 +1570,14 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
     else:
         order_clause = (
             "ORDER BY papers.first_discovered_at DESC NULLS LAST, "
-            "latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC"
+            "latest_recommendation.curator_run_id DESC, latest_recommendation.recommendation_order ASC, papers.id DESC"
         )
 
     connection = connect_db(db_path)
     try:
-        rows = connection.execute(
-            f"""
+        # Count and page rows share a read snapshot, including during feedback writes.
+        connection.execute("BEGIN")
+        query = f"""
             WITH latest_recommendation AS (
                 SELECT
                     recommendations.id AS recommendation_id,
@@ -1658,10 +1678,16 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
             LEFT JOIN latest_structured_feedback ON latest_structured_feedback.paper_id = papers.id AND latest_structured_feedback.row_number = 1
             LEFT JOIN latest_raw_feedback ON latest_raw_feedback.paper_id = papers.id AND latest_raw_feedback.row_number = 1
             {where_clause}
-            {order_clause}
-            LIMIT 50
-            """,
-            tuple(params),
+            """
+        total = connection.execute(f"SELECT COUNT(*) FROM ({query})", tuple(params)).fetchone()[0]
+        pages = max(1, (total + REVIEW_PAGE_SIZE - 1) // REVIEW_PAGE_SIZE)
+        try:
+            page = max(1, min(int(page), pages))
+        except (ValueError, TypeError, OverflowError):
+            page = 1
+        rows = connection.execute(
+            query + f" {order_clause} LIMIT ? OFFSET ?",
+            (*params, REVIEW_PAGE_SIZE, (page - 1) * REVIEW_PAGE_SIZE),
         ).fetchall()
 
         cards = []
@@ -1703,7 +1729,9 @@ def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, so
             )
     finally:
         connection.close()
-    return cards
+    return {"cards": cards, "total": total, "page": page, "pages": pages,
+            "start": (page - 1) * REVIEW_PAGE_SIZE + 1 if total else 0,
+            "end": min(page * REVIEW_PAGE_SIZE, total)}
 
 
 def parse_lightweight_feedback_score(notes: str | None) -> float | None:
@@ -1732,7 +1760,7 @@ def render_select(
         options.append(f'<option value="{escape(value)}"{selected}>{escape(option_label)}</option>')
     return (
         f'<label class="control-label"><span class="visually-hidden">{escape(label)}</span>'
-        f'<select name="{escape(name)}" onchange="this.form.submit()">{"".join(options)}</select>'
+        f'<select name="{escape(name)}" onchange="if(this.form.elements.page){{this.form.elements.page.value=1;}}this.form.submit()">{"".join(options)}</select>'
         "</label>"
     )
 
@@ -1784,8 +1812,25 @@ def render_primary_nav(current_page: str) -> str:
     )
 
 
-def build_queue_href(filter_value: str, source_value: str, sort_value: str, view_value: str) -> str:
-    return "/?" + urllib.parse.urlencode({"filter": filter_value, "source": source_value, "sort": sort_value, "view": view_value})
+def build_queue_href(filter_value: str, source_value: str, sort_value: str, view_value: str, page: int = 1) -> str:
+    return "/?" + urllib.parse.urlencode({"filter": filter_value, "source": source_value, "sort": sort_value, "view": view_value, "page": page})
+
+
+def render_queue_pagination(result: dict[str, Any], filter_value: str, source_value: str,
+                            sort_value: str, view_value: str) -> str:
+    if result["pages"] <= 1:
+        return ""
+    links = []
+    for target, label, symbol in [(result["page"] - 1, "Previous page", "&#8592;"),
+                                  (result["page"] + 1, "Next page", "&#8594;")]:
+        if 1 <= target <= result["pages"]:
+            href = build_queue_href(filter_value, source_value, sort_value, view_value, target)
+            links.append(f'<a class="secondary-link" href="{escape(href)}" aria-label="{label}" title="{label}">{symbol}</a>')
+        else:
+            links.append(f'<span class="page-disabled" aria-disabled="true" aria-label="{label}">{symbol}</span>')
+    return (f'<nav class="queue-pagination" aria-label="Review Queue pages">'
+            f'<span>{result["start"]}–{result["end"]} of {result["total"]} papers | '
+            f'Page {result["page"]} of {result["pages"]}</span>{"".join(links)}</nav>')
 
 
 def add_query_param(path: str, key: str, value: str) -> str:
@@ -1913,17 +1958,24 @@ def load_artifact(db_path: Path, artifact_id: int) -> dict[str, Any] | None:
 def load_summary(artifact: dict[str, Any] | None) -> dict[str, Any]:
     if not artifact:
         return {}
-    path = Path(artifact["path"])
-    if not path.exists():
-        return {}
+    metadata = artifact.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    summary = {}
+    if (metadata.get("abstract_only") or metadata.get("full_text_available") is False
+            or metadata.get("source_type") == "source_abstract"):
+        summary.update(abstract_only=True, source_type="source_abstract")
+    # Keep database provenance even when the JSON artifact is absent or malformed.
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+        data = json.loads(Path(artifact["path"]).read_text(encoding="utf-8"))
+    except (KeyError, TypeError, ValueError, OSError, UnicodeError):
+        return summary
     if not isinstance(data, dict):
-        return {}
-    summary = dict(data.get("merged", {}))
-    if data.get("abstract_only") or artifact.get("metadata", {}).get("abstract_only"):
+        return summary
+    merged = data.get("merged")
+    if isinstance(merged, dict):
+        summary = {**merged, **summary}
+    if (data.get("abstract_only") or data.get("full_text_available") is False
+            or data.get("source_type") == "source_abstract"):
         summary["abstract_only"] = True
         summary["source_type"] = "source_abstract"
     return summary
@@ -2120,6 +2172,9 @@ h3 { margin: 0 0 3px; font-size: 11px; font-weight: 760; color: var(--muted); le
 p { margin: 0; }
 .topbar p, .card-head p { color: var(--muted); font-size: 12px; }
 .queue-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: end; }
+.queue-pagination { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin: 12px 0; color: var(--muted-strong); }
+.queue-pagination a, .page-disabled { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; }
+.page-disabled { opacity: 0.4; }
 .primary-nav { display: flex; gap: 16px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .control-label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; }
 select, button, input { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; background: var(--surface); color: var(--text); font: inherit; min-height: 28px; box-sizing: border-box; }

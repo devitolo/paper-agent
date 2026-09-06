@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1677,7 +1677,9 @@ def _days_since(value: str | None) -> float | None:
     parsed = _parse_sqlite_datetime(value)
     if parsed is None:
         return None
-    return round((datetime.now() - parsed).total_seconds() / 86400, 2)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return round((datetime.now(timezone.utc) - parsed).total_seconds() / 86400, 2)
 
 
 def _parse_sqlite_datetime(value: str | None) -> datetime | None:

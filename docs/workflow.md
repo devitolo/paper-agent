@@ -44,6 +44,12 @@ python3 -m paper_agents.cli curator-rescore --date 2026-09-05 --apply
 
 Apply updates the selected recommendations' existing evaluations and rationale in one transaction. Original scores/rationales and the scoring version/profile used are retained in `curator_runs.metadata_json.rescore_history`; the latest rescore components are in `rescored_evaluations` by evaluation ID. The original run's model/profile IDs remain historical attribution. User feedback, recommendation membership/order, Scout history, and artifacts are preserved, even when a new score falls below threshold. Identical repeated applies with the same profile add no audit entries. Refresh Review Queue to see persisted scores; no source rerun or extraction is required.
 
+### Queue Page Navigation
+
+Review Queue displays 50 papers per page and reports the total matching the current filters. Previous/next links retain the source, queue, sort, and Full/Condensed density. Filter or sort changes return to page 1; density toggles and feedback submissions retain the current page where possible. Invalid or out-of-range page values resolve to a valid page. Ordering is deterministic for a stable database; new recommendations, rescoring, or feedback between requests may change page membership.
+
+A corrupt or missing summary artifact does not prevent other cards from rendering. Source abstract fallback preserves known abstract-only provenance even when the artifact file cannot be read. Health ages treat unzoned SQLite timestamps as UTC rather than the webserver's local timezone.
+
 Feedback Agent uses a blob-first product path: the user pastes a final ChatGPT discussion summary into Project Paper, and the shared CLI/UI ingestion backend stores the exact raw blob immutably, creates parse attempts, stores deterministic v1 structured feedback, and runs Gemini incremental profile apply after Review Queue submit. Manual CLI dry-run/apply remains available for testing and operations.
 
 ## Manual MVP Boundaries
