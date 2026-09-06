@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from paper_agents import db
+from paper_agents.curator_evidence import assess_evidence
 from paper_agents.curator_scoring import SCORING_VERSION, evaluate_candidate
 
 DEFAULT_MAX_RECOMMENDATIONS = 3
@@ -16,6 +17,11 @@ class CuratorConfig:
     min_quality_score: float = DEFAULT_MIN_QUALITY_SCORE
     max_scout_attempts: int = 3
     model: str = SCORING_VERSION
+    evidence_enabled: bool = False
+    evidence_model: str = "qwen2.5:1.5b-instruct"
+    evidence_ollama_url: str = "http://127.0.0.1:11434/api/generate"
+    evidence_timeout: int = 45
+    evidence_max_chars: int = 7000
 
 
 class CuratorAgent:
@@ -31,10 +37,26 @@ class CuratorAgent:
         scout_attempt_count: int,
         config: CuratorConfig,
     ) -> dict[str, Any]:
-        db.update_workflow_state(connection, workflow_cycle_id, "curating")
         max_recommendations = min(config.max_recommendations, DEFAULT_MAX_RECOMMENDATIONS)
         prior_ids = db.recommended_ids_for_cycle(connection, workflow_cycle_id)
         remaining = max(0, max_recommendations - len(prior_ids))
+        unique_candidates = {candidate["paper_id"]: candidate for candidate in candidates
+                             if candidate["paper_id"] not in prior_ids}
+        # Scout writes may still be pending. Never hold that SQLite write lock
+        # while the local model processes candidate text.
+        connection.commit()
+        evaluations = []
+        for candidate in unique_candidates.values():
+            enriched = {**candidate, "evidence": db.paper_evidence_context(connection, candidate["paper_id"])}
+            if config.evidence_enabled:
+                enriched["evidence_assessment"] = assess_evidence(
+                    enriched, model=config.evidence_model, ollama_url=config.evidence_ollama_url,
+                    timeout=config.evidence_timeout, max_chars=config.evidence_max_chars,
+                )
+            evaluations.append(evaluate_candidate(enriched, profile_version["profile"] if profile_version else {}))
+        evaluations.sort(key=lambda item: (item["score"], item.get("published") or ""), reverse=True)
+
+        db.update_workflow_state(connection, workflow_cycle_id, "curating")
         curator_run_id = db.create_curator_run(
             connection,
             workflow_cycle_id=workflow_cycle_id,
@@ -45,14 +67,6 @@ class CuratorAgent:
             max_recommendations=max_recommendations,
             model=config.model,
         )
-
-        unique_candidates = {candidate["paper_id"]: candidate for candidate in candidates
-                             if candidate["paper_id"] not in prior_ids}
-        evaluations = [evaluate_candidate(
-            {**candidate, "evidence": db.paper_evidence_context(connection, candidate["paper_id"])},
-            profile_version["profile"] if profile_version else {},
-        ) for candidate in unique_candidates.values()]
-        evaluations.sort(key=lambda item: (item["score"], item.get("published") or ""), reverse=True)
 
         for evaluation in evaluations:
             db.insert_curator_evaluation(
@@ -91,7 +105,9 @@ class CuratorAgent:
             "UPDATE curator_runs SET metadata_json = ? WHERE id = ?",
             (db.json_dumps({"scoring_version": SCORING_VERSION,
                             "evaluations": {str(e["paper_id"]): e["score_components"] for e in evaluations},
-                            "prior_cycle_recommendations": len(prior_ids)}), curator_run_id),
+                            "prior_cycle_recommendations": len(prior_ids),
+                            "evidence_enabled": config.evidence_enabled,
+                            "evidence_model": config.evidence_model if config.evidence_enabled else None}), curator_run_id),
         )
 
         guidance_text = build_guidance(evaluations, recommendations)

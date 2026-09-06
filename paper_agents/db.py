@@ -540,17 +540,18 @@ def recommended_ids_for_cycle(connection: sqlite3.Connection, workflow_cycle_id:
 
 def paper_evidence_context(connection: sqlite3.Connection, paper_id: int) -> dict[str, Any]:
     rows = connection.execute(
-        "SELECT id, artifact_type, metadata_json FROM artifacts WHERE paper_id = ? ORDER BY id DESC",
+        "SELECT id, artifact_type, path, metadata_json FROM artifacts WHERE paper_id = ? ORDER BY id DESC",
         (paper_id,),
     ).fetchall()
     pdf = any(row[1] == "pdf" for row in rows)
     triage = next((row for row in rows if row[1] == "triage_summary"), None)
-    metadata = decode_json(triage[2], {}) if triage else {}
+    metadata = decode_json(triage[3], {}) if triage else {}
     abstract_only = bool(metadata.get("abstract_only") or metadata.get("source_type") == "source_abstract"
                          or metadata.get("full_text_available") is False)
     # A URL alone is not downloaded evidence. Legacy triage needs a PDF artifact
     # or explicit full-text provenance before receiving the full-text tier.
     return {"pdf_artifact": pdf, "triage_artifact_id": triage[0] if triage else None,
+            "triage_path": triage[2] if triage else None,
             "abstract_only": abstract_only,
             "full_text_triage": bool(triage) and not abstract_only
                                 and (pdf or metadata.get("full_text_available") is True)}

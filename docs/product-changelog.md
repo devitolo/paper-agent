@@ -2,6 +2,33 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-09-06
+
+### Curator V3 evidence-aware scoring
+
+Status: QA-cleared with runtime caveats; no automatic production rescore.
+
+Decision: Curator should keep deterministic relevance/profile scoring, then add a bounded local Qwen evidence assessment per candidate so weak evidence and overclaim risk can influence recommendations without moving scoring into Scout, Gemini, or the UI.
+
+Completed behavior:
+
+- Normal pipeline Curator computes deterministic relevance/profile fit, then runs local Qwen evidence assessment sequentially per candidate.
+- Evidence assessment defaults to 45 seconds per candidate and 7000 input characters.
+- Full-text extraction is used only when a readable triage artifact is available; otherwise Curator uses source abstract or metadata.
+- Required assessment fields cover research type, evaluation, real data/deployment, implementation detail, novelty, evidence quality, overclaim risk, confidence, and rationale.
+- Strong empirical/systems evidence can boost scores; theoretical/framework/position/survey work is capped or penalized without exceptional evidence.
+- Synthetic-only, qualitative-only, missing experiment/dataset/measurement evidence, and broad unsupported claims are penalized.
+- Abstract-only inputs cap at 85; unavailable, malformed, or unknown assessments cap at 70.
+- Generic profile terms such as engineering, operations, incident, reliability, and automated do not independently earn profile points.
+- Judge calls happen outside SQLite write transactions.
+- Assessment, provenance, model, timing, and score components are persisted in `curator_runs.metadata_json`.
+- `curator-rescore` preserves the original persisted V3 assessment rather than discarding it.
+
+Caveats:
+
+- QA validated mocked/offline behavior; real Mini Qwen quality and latency still need observation.
+- Do not claim measured preference/accuracy improvement, calibrated probability, proven Mini throughput, a UI change, Gemini change, Scout change, or automatic production rescore.
+
 ## 2026-09-05
 
 ### Review Queue Pagination and Fallback Hardening

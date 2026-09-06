@@ -7,10 +7,11 @@ from typing import Any
 
 from paper_agents.scout import OFF_DOMAIN_TERMS, count_phrase, normalize_text, scout_keywords
 
-SCORING_VERSION = "deterministic-v2"
+SCORING_VERSION = "evidence-aware-v3"
 # Remove grammatical and evaluative filler, not domain-specific vocabulary.
 STOP_WORDS = set("a an the and or for to of in on with without by from as at is are be that this those these it its their our my me i want more less papers paper work works research studies study approach approaches use uses using based practical connection surrounding particular overly only relevant relevance focus focused interested interests prefer preference signals signal".split())
 ADVERSE_WORDS = set("weak unrealistic theoretical synthetic toy superficial illustrative repackaging overhead ignoring lacks removing isolated isolation".split())
+GENERIC_PROFILE_TERMS = {"engineering", "operations", "incident", "reliability", "automated"}
 
 
 def words(text: str) -> set[str]:
@@ -73,7 +74,7 @@ def evaluate_candidate(candidate: dict[str, Any], profile: dict[str, Any]) -> di
     topic_score = 60.0 * -math.expm1(-raw_topic / 45.0)
     positive = profile_matches(list(profile.get("interests") or []) + list(profile.get("positive_signals") or []), text)
     negative = profile_matches(list(profile.get("negative_signals") or []), text, negative=True)
-    positive_terms = {term for match in positive for term in match["terms"]}
+    positive_terms = {term for match in positive for term in match["terms"] if term not in GENERIC_PROFILE_TERMS}
     profile_score = 25.0 * -math.expm1(-len(positive_terms) / 4.0)
     # Overlapping/repeated prose with identical matched terms is one penalty.
     negative_patterns = {tuple(match["terms"]) for match in negative}
@@ -85,7 +86,54 @@ def evaluate_candidate(candidate: dict[str, Any], profile: dict[str, Any]) -> di
     # Artifact presence cannot make an unrelated paper relevant.
     evidence_bonus = evidence["bonus"] * min(1.0, relevance / 50.0)
     before_penalties = min(evidence["ceiling"], relevance * evidence["confidence"] + evidence_bonus)
-    score = round(max(0.0, before_penalties - negative_penalty - off_domain_penalty), 2)
+    assessment = candidate.get("evidence_assessment") or {}
+    evidence_status = assessment.get("status", "unavailable")
+    quality = assessment.get("evidence_quality", "unknown")
+    research_type = assessment.get("research_type", "unknown")
+    overclaim = assessment.get("overclaim_risk", "unknown")
+    evidence_adjustment = 0.0
+    evidence_ceiling = evidence["ceiling"]
+    # The local judge's actual input is authoritative. A stale full-text
+    # artifact must not elevate an assessment that only saw a source abstract.
+    assessed_provenance = assessment.get("provenance")
+    if assessed_provenance == "source_abstract":
+        evidence_ceiling = min(evidence_ceiling, 85.0)
+    elif assessed_provenance == "metadata_only":
+        evidence_ceiling = min(evidence_ceiling, 70.0)
+    if quality == "unknown" or research_type == "unknown":
+        evidence_ceiling = min(evidence_ceiling, 70.0)
+    if evidence_status == "ok":
+        if quality == "strong":
+            evidence_adjustment += 18.0
+        elif quality == "moderate":
+            evidence_adjustment += 7.0
+        elif quality in {"weak", "none"}:
+            evidence_adjustment -= 16.0
+        if research_type in {"empirical", "systems"}:
+            evidence_adjustment += 5.0
+        elif research_type in {"theoretical", "position", "framework"}:
+            evidence_adjustment -= 10.0
+            if quality != "strong":
+                evidence_ceiling = min(evidence_ceiling, 55.0)
+        elif research_type == "survey":
+            evidence_ceiling = min(evidence_ceiling, 65.0)
+        if overclaim == "high":
+            evidence_adjustment -= 15.0
+        elif overclaim == "medium":
+            evidence_adjustment -= 6.0
+        assessment_text = " ".join(str(assessment.get(key) or "") for key in (
+            "experiment_or_evaluation", "real_data_or_deployment", "implementation_detail", "rationale",
+        )).lower()
+        if any(marker in assessment_text for marker in (
+            "synthetic-only", "synthetic only", "qualitative-only", "qualitative only", "no experiment",
+            "no evaluation", "no measurements", "no dataset", "not stated",
+        )):
+            evidence_adjustment -= 8.0
+    else:
+        # A failed local judge cannot promote an abstract into the top tier.
+        evidence_ceiling = min(evidence_ceiling, 70.0)
+    score = round(max(0.0, min(evidence_ceiling, before_penalties + evidence_adjustment)
+                      - negative_penalty - off_domain_penalty), 2)
     components = {
         "version": SCORING_VERSION, "raw_topic": round(raw_topic, 3),
         "topic": round(topic_score, 3), "profile": round(profile_score, 3),
@@ -93,10 +141,12 @@ def evaluate_candidate(candidate: dict[str, Any], profile: dict[str, Any]) -> di
         "negative_penalty": negative_penalty, "off_domain_penalty": off_domain_penalty,
         "off_domain_matches": off_domain, "evidence": evidence,
         "evidence_bonus": round(evidence_bonus, 3), "before_penalties": round(before_penalties, 3),
+        "evidence_assessment": assessment, "evidence_adjustment": evidence_adjustment,
+        "evidence_ceiling": evidence_ceiling,
     }
-    rationale = (f"Curator V2: topic {topic_score:.1f}, profile {profile_score:.1f}; "
+    rationale = (f"Curator V3: topic {topic_score:.1f}, profile {profile_score:.1f}; "
                  f"evidence {evidence['level']} (confidence {evidence['confidence']:.2f}); "
-                 f"evidence bonus {evidence_bonus:.1f}.")
+                 f"evidence judge {evidence_status}/{quality} ({evidence_adjustment:+.1f}).")
     if matches:
         rationale += " Matched " + ", ".join(matches[:8]) + "."
     if positive:

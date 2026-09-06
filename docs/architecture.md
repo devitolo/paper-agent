@@ -73,7 +73,7 @@ The Python workflow owns orchestration between deterministic steps and model-bac
 
 Scout source adapters translate a normalized scouting request into source-specific calls and return normalized paper records. arXiv is the default and nightly source; Semantic Scholar and OpenAlex are opt-in adapters for exploratory runs. Scout persists candidate pools and diagnostics only; preference scoring and recommendations belong to Curator.
 
-Curator reads the candidate pool, active profile version, history, and guidance. It stores evaluations for every candidate considered and writes at most three ordered recommendations.
+Curator reads the candidate pool, active profile version, history, guidance, and stored artifact provenance. Normal pipeline scoring first computes deterministic relevance/profile fit, then runs bounded local Qwen evidence assessment per candidate outside SQLite write transactions. It stores evaluations for every candidate considered, persists evidence assessment/provenance/model/timing/score components in run metadata, and writes at most three ordered recommendations.
 
 The paper registry stores canonical paper identifiers, alternate sources, workflow state, Scout telemetry, Curator evaluations, recommendation records, artifacts, immutable feedback inputs, parse attempts, structured feedback, profile apply attempts, profile versions, and active scouting guidance. SQLite is the initial store because the system is single-host and benefits from easy inspection, online backup, and restore drills.
 

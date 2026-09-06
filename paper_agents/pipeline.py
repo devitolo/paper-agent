@@ -136,6 +136,9 @@ def run_daily_pipeline(
                     max_recommendations=max_recommendations,
                     min_quality_score=min_quality_score,
                     max_scout_attempts=max_scout_attempts,
+                    evidence_enabled=True,
+                    evidence_model=model,
+                    evidence_ollama_url=ollama_url,
                 ),
             )
             cycle_recommendations.extend(curator_result.get("recommendations") or [])

@@ -38,7 +38,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/ai-stack.md](docs/ai-
 Implemented today:
 
 - `ScoutAgent` retrieves candidate pools, expands source queries with deterministic feedback/profile guidance, deduplicates source results, marks previously discovered or clear feedback-avoid matches as excluded, and persists Scout run telemetry without preference scores.
-- `CuratorAgent` reads Scout candidates, current profile version, and history; scores every considered candidate; recommends up to three papers; and writes active scouting guidance for later Scout runs.
+- `CuratorAgent` reads Scout candidates, current profile version, history, and stored artifact provenance; computes deterministic relevance/profile fit; runs a bounded local Qwen evidence assessment per candidate; recommends up to three papers; and writes active scouting guidance for later Scout runs.
 - `pipeline-daily` orchestrates the V2 Scout -> Curator -> Reviewer workflow, records workflow cycles, downloads/extracts recommended PDFs with Ollama, and stores artifacts in SQLite.
 - SQLite stores canonical papers, alternate source records, Scout runs/candidates, Curator runs/evaluations/recommendations, versioned scouting guidance, immutable raw feedback tables, parse attempts, structured feedback, applied-feedback tracking, and profile versions.
 - `bootstrap known-papers` backfills important seed papers, including the Microsoft/arXiv cloud incident LLM paper.
@@ -226,7 +226,7 @@ Run the daily Scout-to-Curator pipeline:
 python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 ```
 
-This creates a workflow cycle, runs Scout to retrieve and persist candidates, lets Curator evaluate every eligible candidate, stores up to three recommendations, downloads/extracts recommended PDFs, saves summaries under `data/extractions/`, records artifacts in `data/paper_agent.db`, and prints a compact review list. Previously discovered papers, papers already recommended before the current Scout run, and clear feedback-avoid matches are retained as Scout candidate records with exclusion reasons instead of being re-recommended. Bounded rescout attempts fetch a deeper candidate window so stale top results do not repeatedly satisfy the daily quota. The command output/logs include a `Scout guidance:` line when feedback/profile guidance is available. For an interactive preview, use quick mode:
+This creates a workflow cycle, runs Scout to retrieve and persist candidates, lets Curator evaluate every eligible candidate with deterministic relevance/profile scoring plus bounded local Qwen evidence assessment, stores up to three recommendations, downloads/extracts recommended PDFs, saves summaries under `data/extractions/`, records artifacts in `data/paper_agent.db`, and prints a compact review list. Curator V3 evidence assessment uses local Qwen sequentially, defaulting to 45 seconds and 7000 input characters per candidate. It uses full-text triage only when a readable triage artifact is available; otherwise it uses the source abstract or metadata. Assessment, provenance, model, timing, and score components are persisted in `curator_runs.metadata_json`. Previously discovered papers, papers already recommended before the current Scout run, and clear feedback-avoid matches are retained as Scout candidate records with exclusion reasons instead of being re-recommended. Bounded rescout attempts fetch a deeper candidate window so stale top results do not repeatedly satisfy the daily quota. The command output/logs include a `Scout guidance:` line when feedback/profile guidance is available. For an interactive preview, use quick mode:
 
 ```bash
 python3 -m paper_agents.cli pipeline-daily \
@@ -454,7 +454,7 @@ python3 -m paper_agents.cli extract paper.pdf --model qwen2.5:1.5b-instruct
 The next work should build on the V2 Scout/Curator backend:
 
 1. Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
-2. Add Curator V2 evidence-aware reranking for deeper paper/PDF reading after Scout retrieves candidates.
+2. Observe Curator V3 local Qwen quality and latency on the Mini before claiming measured preference or throughput gains.
 3. Consider caching reviewed Gemini dry-run proposals so apply does not spend quota on the same synthesis twice.
 4. Improve deterministic feedback parsing or replace it with a model-backed parser once enough real blobs exist.
 5. Add provider adapters beyond Gemini for profile synthesis.

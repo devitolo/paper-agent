@@ -45,14 +45,16 @@ def rescore_recommendations(db_path: Path, recommendation_date: str, *, apply: b
         changed_count = 0
         timestamp = datetime.now(timezone.utc).isoformat()
         for row in rows:
-            evaluation = evaluate_candidate(
-                {"paper_id": row["paper_id"], "title": row["title"], "abstract": row["abstract"],
-                 "evidence": db.paper_evidence_context(connection, row["paper_id"])}, profile_version["profile"],
-            )
-            quality_met = evaluation["score"] >= row["min_quality_score"]
             metadata = db.decode_json(connection.execute(
                 "SELECT metadata_json FROM curator_runs WHERE id = ?", (row["curator_run_id"],),
             ).fetchone()[0], {})
+            persisted = metadata.get("evaluations", {}).get(str(row["paper_id"]), {})
+            evaluation = evaluate_candidate(
+                {"paper_id": row["paper_id"], "title": row["title"], "abstract": row["abstract"],
+                 "evidence": db.paper_evidence_context(connection, row["paper_id"]),
+                 "evidence_assessment": persisted.get("evidence_assessment")}, profile_version["profile"],
+            )
+            quality_met = evaluation["score"] >= row["min_quality_score"]
             last_rescore = metadata.get("rescored_evaluations", {}).get(str(row["evaluation_id"]), {})
             changed = (row["old_score"] != evaluation["score"] or row["old_rationale"] != evaluation["rationale"]
                        or last_rescore.get("profile_version_id") != profile_version["id"])

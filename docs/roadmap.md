@@ -90,8 +90,10 @@ Next major feature area.
 - Add a manual `feedback rebuild-profile` path that regenerates the compact profile from all structured feedback.
 - Review profile quality after 10 feedback items, or earlier if recommendation quality clearly declines.
 - Consider caching reviewed Gemini dry-run profile proposals to reduce duplicate quota usage during apply.
-- Improve Curator ranking based on user feedback.
-- Add Curator V2 evidence-aware reranking for deeper paper/PDF reading after Scout retrieves candidates.
+- Improve Curator ranking based on user feedback. First Curator V3 evidence-aware scoring is QA-cleared with runtime caveats.
+  - Normal pipeline uses deterministic relevance/profile fit plus bounded local Qwen evidence assessment.
+  - Continue observing real Mini Qwen quality/latency before claiming measured preference, accuracy, or throughput gains.
+  - Follow up on negation/rejected-paper judgment handling and broader preference acceptance criteria.
 
 ## Phase 7: Optimization
 
