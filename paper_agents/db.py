@@ -1421,6 +1421,32 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
             ).fetchone(),
             ["id", "source", "started_at", "completed_at", "candidate_count", "eligible_count", "excluded_count"],
         )
+        latest_scout_runs_by_source = _rows(
+            connection,
+            """
+            WITH latest_runs AS (
+                SELECT source, MAX(id) AS id
+                FROM scout_runs
+                WHERE (? IS NULL OR source = ?)
+                GROUP BY source
+            )
+            SELECT
+                scout_runs.id,
+                scout_runs.source,
+                scout_runs.started_at,
+                scout_runs.completed_at,
+                COUNT(scout_candidates.id) AS candidate_count,
+                SUM(CASE WHEN scout_candidates.excluded = 0 THEN 1 ELSE 0 END) AS eligible_count,
+                SUM(CASE WHEN scout_candidates.excluded = 1 THEN 1 ELSE 0 END) AS excluded_count
+            FROM latest_runs
+            JOIN scout_runs ON scout_runs.id = latest_runs.id
+            LEFT JOIN scout_candidates ON scout_candidates.scout_run_id = scout_runs.id
+            GROUP BY scout_runs.id
+            ORDER BY scout_runs.id DESC
+            """,
+            (source_filter, source_filter),
+            ["id", "source", "started_at", "completed_at", "candidate_count", "eligible_count", "excluded_count"],
+        )
         recent_scout_runs = _rows(
             connection,
             """
@@ -1497,6 +1523,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
         "available_sources": available_sources,
         "latest_cycle": latest_cycle,
         "latest_scout_run": latest_scout,
+        "latest_scout_runs_by_source": latest_scout_runs_by_source,
         "recent_scout_runs": recent_scout_runs,
         "recent_cycle_recommendations": recent_cycle_recommendations,
         "latest_recommendation_day": latest_recommendation_day,
@@ -1615,8 +1642,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                 }
             )
 
-    latest_scout = summary["latest_scout_run"]
-    if latest_scout:
+    for latest_scout in summary["latest_scout_runs_by_source"]:
         diagnostic_command = f"scripts/diagnose_scout_run.sh {latest_scout['source']}"
         candidate_count = int(latest_scout["candidate_count"] or 0)
         if candidate_count == 0:
@@ -1639,7 +1665,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                     ),
                 }
             )
-        if int(latest_scout["eligible_count"] or 0) == 0:
+        if candidate_count > 0 and int(latest_scout["eligible_count"] or 0) == 0:
             warnings.append(
                 {
                     "level": "warning",
