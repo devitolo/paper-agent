@@ -24,13 +24,18 @@ from paper_agents.scout_guidance import (
 )
 
 DEFAULT_TARGET_CANDIDATES = 20
+DEFAULT_MIN_ELIGIBLE_CANDIDATES = 10
+DEFAULT_MAX_REFILL_FETCH_ROUNDS = 3
+SEMANTIC_SCHOLAR_MAX_REFILL_FETCH_ROUNDS = 2
 
 
 @dataclass(frozen=True)
 class ScoutConfig:
     topics: list[str]
     target_candidates: int = DEFAULT_TARGET_CANDIDATES
+    min_eligible_candidates: int = DEFAULT_MIN_ELIGIBLE_CANDIDATES
     max_candidates: int = DEFAULT_FETCH_LIMIT
+    max_refill_fetch_rounds: int = DEFAULT_MAX_REFILL_FETCH_ROUNDS
     freshness_months: int = DEFAULT_FRESHNESS_MONTHS
     request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY
     retries: int = DEFAULT_ARXIV_RETRIES
@@ -98,21 +103,14 @@ class ScoutAgent:
 
         warnings: list[str] = []
         errors: list[str] = []
-        candidates = []
-        guided_candidates = []
-        source_diagnostics: dict[str, Any] = {}
-        try:
-            candidates = dedupe_candidates(
-                source.fetch(
-                    guided_topics,
-                    max_results=config.max_candidates,
-                    freshness_months=config.freshness_months,
-                )
-            )
-            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
-            source_diagnostics = dict(getattr(source, "last_diagnostics", {}) or {})
-        except Exception as error:  # source adapters normalize most errors, but keep runs recoverable.
-            errors.append(str(error))
+        candidates, guided_candidates, refill_diagnostics, source_diagnostics = self._fetch_candidate_pool(
+            connection,
+            source=source,
+            guided_topics=guided_topics,
+            guidance=scout_guidance,
+            config=config,
+            errors=errors,
+        )
 
         stored: list[dict[str, Any]] = []
         for index, (candidate, guidance_diagnostics) in enumerate(guided_candidates, 1):
@@ -174,6 +172,7 @@ class ScoutAgent:
                 "base_topics": config.topics,
                 "guided_topics": guided_topics,
                 "source_diagnostics": source_diagnostics,
+                "refill": refill_diagnostics,
             },
             warnings=warnings,
             errors=errors,
@@ -193,6 +192,81 @@ class ScoutAgent:
             "errors": errors,
             "candidates": stored,
         }
+
+    def _fetch_candidate_pool(
+        self,
+        connection,
+        *,
+        source: PaperSource,
+        guided_topics: list[str],
+        guidance,
+        config: ScoutConfig,
+        errors: list[str],
+    ) -> tuple[list[Any], list[tuple[Any, dict[str, Any]]], dict[str, Any], dict[str, Any]]:
+        """Refill past previously discovered search results before Curator sees the pool."""
+        known_keys = {
+            row[0]
+            for row in connection.execute("SELECT canonical_key FROM papers").fetchall()
+            if row[0]
+        }
+        candidates: list[Any] = []
+        guided_candidates: list[tuple[Any, dict[str, Any]]] = []
+        source_diagnostics: dict[str, Any] = {}
+        rounds: list[dict[str, Any]] = []
+        requested_limit = max(1, config.max_candidates)
+        # Small/manual runs retain their requested pool size; scheduled source
+        # jobs fetch 20-30 initially and therefore refill toward ten candidates.
+        target = min(max(1, config.min_eligible_candidates), max(1, config.max_candidates))
+        max_rounds = max(1, config.max_refill_fetch_rounds)
+        if source.name == "semantic_scholar":
+            max_rounds = min(max_rounds, SEMANTIC_SCHOLAR_MAX_REFILL_FETCH_ROUNDS)
+        stop_reason = "max_fetch_rounds_reached"
+
+        for round_number in range(1, max_rounds + 1):
+            previous_count = len(candidates)
+            try:
+                fetched = source.fetch(
+                    guided_topics,
+                    max_results=requested_limit,
+                    freshness_months=config.freshness_months,
+                )
+            except Exception as error:  # Source adapters normalize most errors, but keep runs recoverable.
+                errors.append(str(error))
+                stop_reason = "source_error"
+                break
+
+            candidates = dedupe_candidates([*candidates, *fetched])
+            guided_candidates = apply_guidance_to_candidates(candidates, guidance)
+            estimated_eligible = sum(
+                1
+                for candidate, diagnostics in guided_candidates
+                if db.canonical_key_for_candidate(sanitize_candidate(candidate.as_dict())) not in known_keys
+                and not diagnostics.get("feedback_guidance_excluded")
+            )
+            source_diagnostics = dict(getattr(source, "last_diagnostics", {}) or {})
+            rounds.append(
+                {
+                    "round": round_number,
+                    "fetch_limit": requested_limit,
+                    "returned_count": len(fetched),
+                    "unique_count": len(candidates),
+                    "estimated_eligible_count": estimated_eligible,
+                }
+            )
+
+            if estimated_eligible >= target:
+                stop_reason = "minimum_eligible_reached"
+                break
+            if round_number > 1 and len(candidates) == previous_count:
+                stop_reason = "source_exhausted"
+                break
+            requested_limit += max(1, config.max_candidates)
+
+        return candidates, guided_candidates, {
+            "minimum_eligible_candidates": target,
+            "rounds": rounds,
+            "stop_reason": stop_reason,
+        }, source_diagnostics
 
 
 def sanitize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:

@@ -1691,6 +1691,32 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                 }
             )
         elif (
+            0 < int(latest_scout["eligible_count"] or 0) < 10
+            and int(latest_scout["recommendation_count"] or 0) == 0
+        ):
+            warnings.append(
+                {
+                    "level": "warning",
+                    "message": (
+                        f"Latest {latest_scout['source']} Scout run had only "
+                        f"{latest_scout['eligible_count']} eligible candidates and produced 0 recommendations; "
+                        "Curator needs 10. "
+                        f"On Mini, run {diagnostic_command}."
+                    ),
+                }
+            )
+        elif 0 < int(latest_scout["eligible_count"] or 0) < 10:
+            warnings.append(
+                {
+                    "level": "warning",
+                    "message": (
+                        f"Latest {latest_scout['source']} Scout run had only "
+                        f"{latest_scout['eligible_count']} eligible candidates; Curator needs 10. "
+                        f"On Mini, run {diagnostic_command}."
+                    ),
+                }
+            )
+        elif (
             int(latest_scout["eligible_count"] or 0) > 0
             and int(latest_scout["recommendation_count"] or 0) == 0
         ):

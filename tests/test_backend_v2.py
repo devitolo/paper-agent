@@ -681,6 +681,57 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, "previously_discovered"))
 
+    def test_scout_refills_past_known_candidates_before_curation(self):
+        source = RecordingSource([candidate(f"2601.refill{i}v1", f"Incident RCA {i}") for i in range(8)])
+        for item in source.candidates[:5]:
+            db.upsert_paper(self.connection, item.as_dict())
+        self.connection.commit()
+
+        result = ScoutAgent(source=source).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(
+                topics=["AIOps"],
+                max_candidates=5,
+                min_eligible_candidates=3,
+                max_refill_fetch_rounds=3,
+            ),
+        )
+
+        self.assertEqual(source.max_results_calls, [5, 10])
+        self.assertEqual(result["eligible_count"], 3)
+        self.assertEqual(result["stored_count"], 8)
+        refill = json.loads(self.connection.execute(
+            "SELECT diagnostics_json FROM scout_runs WHERE id = ?", (result["scout_run_id"],)
+        ).fetchone()[0])
+        self.assertEqual(refill["refill"]["stop_reason"], "minimum_eligible_reached")
+
+    def test_semantic_scholar_refill_is_capped_at_two_rounds(self):
+        source = RecordingSource([candidate(f"semantic-{index}", f"Semantic candidate {index}", source="semantic_scholar") for index in range(30)])
+        source.name = "semantic_scholar"
+        for item in source.candidates[:10]:
+            db.upsert_paper(self.connection, item.as_dict())
+        self.connection.commit()
+
+        result = ScoutAgent(source=source).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(
+                topics=["AIOps"],
+                max_candidates=10,
+                min_eligible_candidates=10,
+                max_refill_fetch_rounds=3,
+            ),
+        )
+
+        self.assertEqual(source.max_results_calls, [10, 20])
+        diagnostics = json.loads(self.connection.execute(
+            "SELECT diagnostics_json FROM scout_runs WHERE id = ?", (result["scout_run_id"],)
+        ).fetchone()[0])
+        self.assertEqual(len(diagnostics["refill"]["rounds"]), 2)
+
     def test_prior_recommendation_is_excluded_on_later_scout_run(self):
         old_source = FakeSource([candidate("2601.openv1", "Incident RCA")])
         config = ScoutConfig(topics=["AIOps"], max_candidates=5)
@@ -913,7 +964,9 @@ class BackendV2Tests(unittest.TestCase):
                 source_name="arxiv",
             )
 
-        self.assertEqual(source.max_results_calls, [2, 4, 6])
+        # Refill fetches deeper within each Scout attempt when earlier results
+        # are already known, then pipeline-level rescout still deepens its base.
+        self.assertEqual(source.max_results_calls, [2, 4, 8, 6, 12])
         self.assertEqual(len(result["scout_results"]), 3)
         self.assertTrue(all(scout_result["eligible_count"] > 0 for scout_result in result["scout_results"]))
         self.assertEqual(result["curator"]["recommendations"], [])
@@ -3388,8 +3441,22 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "1 eligible candidates but produced 0 recommendations" in warning["message"]
+                "1 eligible candidates and produced 0 recommendations" in warning["message"]
                 and "scripts/diagnose_scout_run.sh openalex" in warning["message"]
+                for warning in summary["warnings"]
+            )
+        )
+
+    def test_health_summary_warns_when_source_has_underfilled_eligible_pool(self):
+        self._seed_scout_candidate(source="arxiv", excluded=False, source_id="2607.underfilled")
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21, source="arxiv")
+
+        self.assertTrue(
+            any(
+                "had only 1 eligible candidates and produced 0 recommendations; Curator needs 10" in warning["message"]
+                and "scripts/diagnose_scout_run.sh arxiv" in warning["message"]
                 for warning in summary["warnings"]
             )
         )

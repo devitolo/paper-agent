@@ -39,7 +39,7 @@ class RescoutRankingTests(unittest.TestCase):
                 run_daily_pipeline(topics=["incident"], fetch_limit=1, keep_limit=2,
                                    max_scout_attempts=2, min_quality_score=25,
                                    db_path=path, mode="test", source_name="arxiv")
-            self.assertEqual(source.calls, [1, 2], "Must exercise a real rescout")
+            self.assertEqual(source.calls, [1, 2, 4], "Must exercise a real rescout and bounded refill")
             with closing(db.connect_db(path)) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM curator_runs").fetchone()[0], 2)
                 self.assertEqual(connection.execute("SELECT COUNT(DISTINCT paper_id) FROM recommendations").fetchone()[0], 2)
