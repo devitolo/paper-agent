@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REPO_DIR="${PAPER_AGENT_REPO:-$HOME/workspace/paper-agent}"
+LOCK_DIR="${PAPER_AGENT_LOCK_DIR:-/tmp}"
+LOCK_PATH="$LOCK_DIR/project-paper-profile-rebuild.lock"
 ANCHOR_DATE="${PAPER_AGENT_PROFILE_REBUILD_ANCHOR:-2026-09-07}"
 TODAY="${PAPER_AGENT_TODAY:-$(date +%F)}"
 
@@ -26,7 +28,12 @@ fi
 
 cd "$REPO_DIR"
 mkdir -p logs
+mkdir -p "$LOCK_DIR"
+exec 9>"$LOCK_PATH"
+if ! flock -n 9; then
+  echo "Skipping Gemini profile rebuild comparison: another run holds $LOCK_PATH."
+  exit 0
+fi
 
 echo "Running Gemini profile rebuild comparison for $TODAY."
-git pull --ff-only
 scripts/compare_feedback_profile_rebuild.sh

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+LOCK_DIR="${PAPER_AGENT_LOCK_DIR:-/tmp}"
+LOCK_PATH="$LOCK_DIR/project-paper-backup.lock"
+mkdir -p "$LOCK_DIR"
+exec 9>"$LOCK_PATH"
+if ! flock -n 9; then
+  echo "Skipping database backup: another run holds $LOCK_PATH."
+  exit 0
+fi
+
 SOURCE_DB="${1:-data/paper_agent.db}"
 BACKUP_DIR="${2:-backups}"
 

@@ -343,7 +343,7 @@ scripts/backup_db.sh
 Recommended weekly backup cron entry on the Mac mini:
 
 ```bash
-0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
+0 1 * * 0 cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
 ```
 
 Restore expectation: restore from a copied backup only after checking it with `PRAGMA integrity_check`; keep restore drills manual until the operating model matures.
@@ -360,7 +360,14 @@ Tail local Project Paper logs:
 scripts/tail_logs.sh
 ```
 
-The current intended Mac mini pipeline crontab has three daily source jobs: arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, and OpenAlex at 6:30 AM via the rotating topic script. It also has a biweekly Monday 2:00 AM Gemini profile rebuild comparison that produces a review log but never applies the rebuilt profile. The Semantic Scholar and profile comparison entries source `$HOME/.bashrc` so API/provider environment is available to cron.
+The current intended Mac mini pipeline crontab has OpenAlex at 4:00 AM, arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, a biweekly Monday 2:00 AM Gemini profile rebuild comparison, and a Sunday 1:00 AM SQLite backup. The Semantic Scholar and profile comparison entries source `$HOME/.bashrc` so API/provider environment is available to cron. Each job uses a distinct non-blocking `flock` file under `/tmp` (override with `PAPER_AGENT_LOCK_DIR`) and exits successfully with a clear log message when a prior run is still active.
+
+Cron jobs run the currently deployed checkout; they do not pull code while running. Deploy updates explicitly, then refresh the managed crontab if its template changed:
+
+```bash
+git pull --ff-only
+scripts/install_project_paper_cron.sh --apply
+```
 
 Install or refresh the repo-owned Mac mini crontab after `git pull`:
 
@@ -372,16 +379,16 @@ scripts/install_project_paper_cron.sh --apply
 The installer preserves unrelated cron entries, removes older Project Paper cron lines, and installs the managed block from `deploy/project-paper.crontab`.
 
 ```cron
-# Daily arXiv Scout/Curator/Reviewer pipeline.
-0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
-# Biweekly Monday Gemini full feedback-profile rebuild comparison; dry-run only, never applies.
-0 2 * * 1 . $HOME/.bashrc; cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/biweekly_profile_rebuild_compare.sh >> logs/profile-rebuild-compare.log 2>&1
 # Daily OpenAlex Scout/Curator/Reviewer pipeline with rotating configured topics.
-30 6 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+0 4 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+# Daily arXiv Scout/Curator/Reviewer pipeline.
+0 5 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+# Biweekly Monday Gemini full feedback-profile rebuild comparison; dry-run only, never applies.
+0 2 * * 1 . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/biweekly_profile_rebuild_compare.sh >> logs/profile-rebuild-compare.log 2>&1
 # Daily Semantic Scholar Scout/Curator/Reviewer pipeline; sources API key from bashrc.
-0 6 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --fetch 3 --keep 1 --max-scout-attempts 1 --request-delay 10 --retries 6 --source-timeout 120 >> logs/pipeline-semantic-scholar.log 2>&1
+0 6 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
 # Weekly SQLite backup with integrity check.
-0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
+0 1 * * 0 cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
 ```
 
 Do not install the old one-off direct `pipeline-daily --source openalex ...` cron line; it is superseded by `scripts/openalex_pipeline.sh`, which rotates enabled `config/topics.yaml` OpenAlex topics, fetches 30, keeps 2, and caps Scout attempts at one because OpenAlex search is stable for repeated queries. The Semantic Scholar cron omits `--topic` so it also reads the editable topic config.
@@ -391,6 +398,21 @@ Override the OpenAlex topic for a one-off run:
 ```bash
 PAPER_AGENT_OPENALEX_TOPIC="AIOps root cause analysis cloud incidents" scripts/openalex_pipeline.sh
 ```
+
+Run the Review Queue web UI under systemd user supervision on the Mini:
+
+```bash
+mkdir -p ~/.config/systemd/user ~/.config/project-paper
+cp deploy/systemd/project-paper-web.service ~/.config/systemd/user/
+# Optional: put API/provider variables in ~/.config/project-paper/project-paper.env
+systemctl --user daemon-reload
+systemctl --user enable --now project-paper-web.service
+loginctl enable-linger "$USER"  # optional: keep it running after logout/reboot
+systemctl --user status project-paper-web.service
+journalctl --user -u project-paper-web.service -f
+```
+
+After a code update, restart only the web UI with `systemctl --user restart project-paper-web.service`.
 
 
 Stable local output folders:

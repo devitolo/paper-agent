@@ -1,0 +1,16 @@
+[Unit]
+Description=Project Paper Review Queue web UI
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/workspace/paper-agent
+EnvironmentFile=-%h/.config/project-paper/project-paper.env
+ExecStart=/usr/bin/env python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

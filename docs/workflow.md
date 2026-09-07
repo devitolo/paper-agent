@@ -227,7 +227,9 @@ python3 -m paper_agents.cli review-backfill --quick
 
 ## Nightly Cron
 
-The current intended Mac mini pipeline crontab has three daily source jobs: arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, and OpenAlex at 6:30 AM via the rotating topic script. It also has a biweekly Monday 2:00 AM Gemini profile rebuild comparison that writes a review log but never applies the rebuilt profile. The Semantic Scholar and profile comparison jobs source `$HOME/.bashrc` so API/provider environment is available to cron.
+The current intended Mac mini pipeline crontab runs OpenAlex at 4:00 AM, arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, the dry-run Gemini profile comparison at 2:00 AM every Monday, and SQLite backup at 1:00 AM Sunday. The Semantic Scholar and profile comparison jobs source `$HOME/.bashrc` so API/provider environment is available to cron. Runtime wrappers take distinct non-blocking `flock` locks under `/tmp` (override with `PAPER_AGENT_LOCK_DIR`) and log a successful skip when another run is already active.
+
+Cron jobs never self-update. Deploy deliberately with `git pull --ff-only`, then run `scripts/install_project_paper_cron.sh --apply` when the managed template changes.
 
 Install or refresh the repo-owned Mac mini crontab after `git pull`:
 
@@ -239,16 +241,16 @@ scripts/install_project_paper_cron.sh --apply
 The installer preserves unrelated cron entries, removes older Project Paper cron lines, and installs the managed block from `deploy/project-paper.crontab`.
 
 ```cron
-# Daily arXiv Scout/Curator/Reviewer pipeline.
-0 5 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
-# Biweekly Monday Gemini full feedback-profile rebuild comparison; dry-run only, never applies.
-0 2 * * 1 . $HOME/.bashrc; cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/biweekly_profile_rebuild_compare.sh >> logs/profile-rebuild-compare.log 2>&1
 # Daily OpenAlex Scout/Curator/Reviewer pipeline with rotating configured topics.
-30 6 * * * cd /home/devitolo/workspace/paper-agent && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+0 4 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+# Daily arXiv Scout/Curator/Reviewer pipeline.
+0 5 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+# Biweekly Monday Gemini full feedback-profile rebuild comparison; dry-run only, never applies.
+0 2 * * 1 . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/biweekly_profile_rebuild_compare.sh >> logs/profile-rebuild-compare.log 2>&1
 # Daily Semantic Scholar Scout/Curator/Reviewer pipeline; sources API key from bashrc.
-0 6 * * * cd $HOME/workspace/paper-agent && mkdir -p logs && . $HOME/.bashrc && python3 -m paper_agents.cli pipeline-daily --source semantic_scholar --quick --fetch 3 --keep 1 --max-scout-attempts 1 --request-delay 10 --retries 6 --source-timeout 120 >> logs/pipeline-semantic-scholar.log 2>&1
+0 6 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
 # Weekly SQLite backup with integrity check.
-0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
+0 1 * * 0 cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
 ```
 
 The old one-off Sunday OpenAlex cron that called `pipeline-daily --source openalex` directly has been removed. Do not document or reinstall it; `scripts/openalex_pipeline.sh` is the supported OpenAlex cron entry.
@@ -259,14 +261,25 @@ The source jobs rotate across enabled topics in `config/topics.yaml`. Override o
 PAPER_AGENT_OPENALEX_TOPIC="AIOps root cause analysis cloud incidents" scripts/openalex_pipeline.sh
 ```
 
-systemd timers remain the preferred later option once logging and failure recovery are more mature.
+Use `deploy/systemd/project-paper-web.service` to supervise the long-running web UI without moving batch cron jobs. Install it with:
+
+```bash
+mkdir -p ~/.config/systemd/user ~/.config/project-paper
+cp deploy/systemd/project-paper-web.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now project-paper-web.service
+loginctl enable-linger "$USER"  # optional after reboot/logout
+journalctl --user -u project-paper-web.service -f
+```
+
+The unit reads an optional `~/.config/project-paper/project-paper.env`, binds only to `127.0.0.1:8000`, logs to journald, and restarts on failure. After a deliberate `git pull --ff-only`, run `systemctl --user restart project-paper-web.service` to load code changes.
 
 ## Backups And Logs
 
 Back up SQLite weekly with the online backup API and verify the backup with `PRAGMA integrity_check`:
 
 ```bash
-0 4 * * 0 cd $HOME/workspace/paper-agent && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
+0 1 * * 0 cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
 ```
 
 Backups are written under `backups/` by default, named `paper_agent-YYYYmmdd-HHMMSS.db`, verified after creation, and intentionally ignored by git. For restore, copy a selected backup into place only after checking `PRAGMA integrity_check`; keep restore drills manual until operations mature.
