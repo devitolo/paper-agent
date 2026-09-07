@@ -71,12 +71,26 @@ def run_daily_pipeline(
         raise RuntimeError("pipeline-daily V2 requires SQLite; use scout-daily for throwaway source checks")
 
     db.init_db(db_path)
-    topics_for_run = topics or select_topics_for_source(
+    topics_for_run = topics if topics is not None else select_topics_for_source(
         source_name,
         cadences=("daily", "weekly") if source_name == "openalex" else ("daily",),
         count=SCHEDULED_TOPICS_PER_RUN,
         slot=topic_slot,
     )
+    if not topics_for_run:
+        return {
+            "workflow_cycle_id": None,
+            "cycle": None,
+            "profile_version_id": None,
+            "scout_results": [],
+            "curator": None,
+            "model": model,
+            "max_chars": max_chars,
+            "limit_chunks": limit_chunks,
+            "workers": workers,
+            "cards": [],
+            "skipped_reason": "no_eligible_configured_topics",
+        }
     max_recommendations = min(max(1, keep_limit), DEFAULT_MAX_RECOMMENDATIONS)
     max_scout_attempts = max(1, max_scout_attempts)
     profile = load_profile(profile_path)

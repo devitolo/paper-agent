@@ -579,9 +579,26 @@ def run_daily_scout(
     guidance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the deterministic daily scout MVP and return a run report."""
-    source = source or ArxivSource(request_delay=request_delay, retries=retries, timeout=timeout)
-    topics = topics or DEFAULT_SCOUT_TOPICS
+    topics = list(DEFAULT_SCOUT_TOPICS if topics is None else (topic for topic in topics if topic.strip()))
     run_date = run_date or date.today()
+    source_name = source.name if source is not None else "arxiv"
+
+    if not topics:
+        return {
+            "source": source_name,
+            "run_date": run_date.isoformat(),
+            "freshness_months": freshness_months,
+            "fetched_count": 0,
+            "candidate_count": 0,
+            "stored_count": 0,
+            "seen_filtered_count": 0,
+            "guidance": guidance or {},
+            "output_path": None,
+            "candidates": [],
+            "skipped_reason": "no_eligible_configured_topics",
+        }
+
+    source = source or ArxivSource(request_delay=request_delay, retries=retries, timeout=timeout)
 
     print(
         f"scout run: source={source.name} topics={len(topics)} "

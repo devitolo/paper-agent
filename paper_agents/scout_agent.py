@@ -10,7 +10,6 @@ from paper_agents.scout import (
     DEFAULT_ARXIV_TIMEOUT,
     DEFAULT_FETCH_LIMIT,
     DEFAULT_FRESHNESS_MONTHS,
-    DEFAULT_SCOUT_TOPICS,
     ArxivSource,
     PaperSource,
     dedupe_candidates,
@@ -63,7 +62,7 @@ class ScoutAgent:
         )
         active_guidance = db.active_scouting_guidance(connection)
         scout_guidance = load_scout_guidance(connection)
-        guided_topics = topics_with_guidance(config.topics or DEFAULT_SCOUT_TOPICS, scout_guidance)
+        guided_topics = topics_with_guidance(config.topics, scout_guidance)
         guidance_id = db.create_scouting_guidance(
             connection,
             curator_run_id=None,
@@ -106,7 +105,7 @@ class ScoutAgent:
         candidates, guided_candidates, refill_diagnostics, source_diagnostics = self._fetch_candidate_pool(
             connection,
             source=source,
-            source_topics=(config.topics or DEFAULT_SCOUT_TOPICS) if source.name == "semantic_scholar" else guided_topics,
+            source_topics=config.topics if source.name == "semantic_scholar" else guided_topics,
             guidance=scout_guidance,
             config=config,
             errors=errors,
@@ -171,7 +170,7 @@ class ScoutAgent:
                 "scout_guidance": guidance_summary(scout_guidance),
                 "base_topics": config.topics,
                 "guided_topics": guided_topics,
-                "source_topics": (config.topics or DEFAULT_SCOUT_TOPICS)
+                "source_topics": config.topics
                 if source.name == "semantic_scholar"
                 else guided_topics,
                 "source_diagnostics": source_diagnostics,
@@ -188,7 +187,7 @@ class ScoutAgent:
             "guidance": guidance_summary(scout_guidance),
             "base_topics": config.topics,
             "guided_topics": guided_topics,
-            "source_topics": (config.topics or DEFAULT_SCOUT_TOPICS)
+            "source_topics": config.topics
             if source.name == "semantic_scholar"
             else guided_topics,
             "fetched_count": len(candidates),

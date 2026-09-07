@@ -341,7 +341,16 @@ def main() -> None:
         return
 
     if args.command == "scout-daily":
-        base_topics = args.topics or select_topics_for_source(args.source, count=2, slot=args.topic_slot)
+        base_topics = args.topics if args.topics is not None else select_topics_for_source(
+            args.source,
+            cadences=("daily", "weekly") if args.source == "openalex" else ("daily",),
+            count=2,
+            slot=args.topic_slot,
+        )
+        if not base_topics:
+            print("skipped_reason: no_eligible_configured_topics")
+            print_section("Daily scout", {"source": args.source, "candidates": [], "skipped_reason": "no_eligible_configured_topics"})
+            return
         scout_guidance = None
         scout_guidance_summary = {}
         init_db(args.db)
@@ -383,7 +392,7 @@ def main() -> None:
         print(f"pipeline mode: {mode} (limit_chunks={limit_chunks})")
         try:
             output = run_daily_pipeline(
-                topics=args.topics or select_topics_for_source(
+                topics=args.topics if args.topics is not None else select_topics_for_source(
                     args.source,
                     cadences=("daily", "weekly") if args.source == "openalex" else ("daily",),
                     count=2,
@@ -414,6 +423,8 @@ def main() -> None:
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
+        if output.get("skipped_reason"):
+            print("skipped_reason: no_eligible_configured_topics")
         for scout_result in output.get("scout_results", []):
             guidance = scout_result.get("guidance") or {}
             if guidance:

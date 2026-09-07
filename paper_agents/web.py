@@ -693,6 +693,11 @@ def render_topics_page(
 
 def render_topic_source_section(item: dict[str, Any]) -> str:
     next_scheduled_topics = "".join(f"<li>{escape(topic)}</li>" for topic in item["active_topics"])
+    if not next_scheduled_topics:
+        next_scheduled_topics = "<li>No enabled topics are scheduled for this run.</li>"
+    next_window = "AM" if item.get("next_slot", 0) == 0 else "PM"
+    next_run = item.get("next_run_date")
+    schedule = item["schedule"] if not next_run else f'{item["schedule"]} | next {next_run} {next_window}'
     topics = "".join(
         f"<li>{escape(topic.label)} <span>{escape(topic.cadence)} / {escape(topic.priority)} / {'enabled' if topic.enabled else 'disabled'}</span></li>"
         for topic in item["topics"]
@@ -703,7 +708,7 @@ def render_topic_source_section(item: dict[str, Any]) -> str:
     return f"""<section class="topic-source" id="{escape(item["source"])}">
       <div class="topic-source-head">
         <h2><span class="source-badge {source_badge_class(item["source"])}">{escape(item["label"])}</span></h2>
-        <span>{escape(item["schedule"])}</span>
+        <span>{escape(schedule)}</span>
       </div>
       <p>{escape(item["description"])}</p>
       <div class="topic-columns">

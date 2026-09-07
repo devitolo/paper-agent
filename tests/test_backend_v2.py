@@ -10,7 +10,7 @@ import time
 import unittest
 import urllib.error
 import urllib.parse
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,7 +32,7 @@ from paper_agents.scout import semantic_scholar_paper_to_candidate
 from paper_agents.scout import rank_candidates
 from paper_agents.scout import run_daily_scout
 from paper_agents.scout import scout_candidate_record
-from paper_agents.scout_guidance import build_scout_guidance, topics_with_guidance
+from paper_agents.scout_guidance import ScoutGuidance, build_scout_guidance, topics_with_guidance
 from paper_agents.reviewer_agent import card_from_recommendation
 from paper_agents.reviewer_agent import download_pdf_for_recommendation
 from paper_agents.reviewer_agent import recommended_papers_missing_triage
@@ -53,6 +53,7 @@ from paper_agents.topics import (
     load_topic_config,
     save_topic_config,
     select_topics_for_source,
+    topic_inventory_from_config,
 )
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
 from paper_agents.pipeline import run_daily_pipeline
@@ -239,6 +240,116 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(len(pm_topics), 2)
         self.assertFalse(set(am_topics) & set(pm_topics))
         self.assertEqual(set(am_topics) | set(pm_topics), {"query 0", "query 1", "query 2", "query 3"})
+
+    def test_source_topic_selection_does_not_repeat_scarce_am_topics_in_pm(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        for pool_size in range(1, 6):
+            with self.subTest(pool_size=pool_size):
+                save_topic_config(
+                    [
+                        TopicEntry(f"topic-{index}", f"Topic {index}", f"query {index}", ["openalex"], "daily", "normal", True)
+                        for index in range(pool_size)
+                    ],
+                    config_path,
+                )
+                am_topics = select_topics_for_source(
+                    "openalex", today=date(2026, 1, 2), path=config_path, count=2, slot=0,
+                )
+                pm_topics = select_topics_for_source(
+                    "openalex", today=date(2026, 1, 2), path=config_path, count=2, slot=1,
+                )
+
+                self.assertEqual(len(am_topics), min(2, pool_size))
+                self.assertEqual(len(pm_topics), min(2, max(0, pool_size - 2)))
+                self.assertFalse(set(am_topics) & set(pm_topics))
+
+    def test_source_topic_selection_returns_empty_for_intentionally_ineligible_pool(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [TopicEntry("disabled", "Disabled", "disabled query", ["arxiv"], "daily", "normal", False)],
+            config_path,
+        )
+
+        self.assertEqual(select_topics_for_source("arxiv", path=config_path, count=2), [])
+
+    def test_source_topic_selection_bounds_missing_config_fallback_to_batch_size(self):
+        config_path = Path(self.tmp.name) / "missing.yaml"
+
+        selected = select_topics_for_source(
+            "arxiv", path=config_path, fallback_topics=["one", "two", "three"], count=2, slot=0,
+        )
+
+        self.assertEqual(len(selected), 2)
+
+    def test_missing_config_inventory_matches_execution_selection_for_every_source_and_slot(self):
+        config_path = Path(self.tmp.name) / "missing.yaml"
+        for now, slot in ((datetime(2026, 1, 2, 3, 0), 0), (datetime(2026, 1, 2, 10, 0), 1)):
+            with self.subTest(now=now, slot=slot):
+                inventory = topic_inventory_from_config(config_path, now=now)
+                for source in ("arxiv", "openalex", "semantic_scholar"):
+                    item = next(row for row in inventory if row["source"] == source)
+                    self.assertEqual(item["next_slot"], slot)
+                    self.assertEqual(
+                        item["active_topics"],
+                        select_topics_for_source(
+                            source,
+                            today=now.date(),
+                            cadences=("daily", "weekly") if source == "openalex" else ("daily",),
+                            path=config_path,
+                            count=2,
+                            slot=slot,
+                        ),
+                    )
+
+    def test_topic_inventory_uses_the_actual_next_source_run_slot(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [
+                TopicEntry(f"topic-{index}", f"Topic {index}", f"query {index}", ["openalex"], "daily", "normal", True)
+                for index in range(4)
+            ],
+            config_path,
+        )
+
+        inventory = topic_inventory_from_config(config_path, now=datetime(2026, 1, 2, 10, 0))
+        openalex = next(item for item in inventory if item["source"] == "openalex")
+
+        self.assertEqual(openalex["next_slot"], 1)
+        self.assertEqual(
+            openalex["active_topics"],
+            select_topics_for_source("openalex", today=date(2026, 1, 2), path=config_path, count=2, slot=1),
+        )
+
+    def test_pipeline_skips_intentionally_empty_topic_selection_without_source_call(self):
+        with patch("paper_agents.pipeline.create_scout_source") as create_source:
+            result = run_daily_pipeline(topics=[], db_path=Path(self.tmp.name) / "pipeline.db")
+
+        self.assertEqual(result["scout_results"], [])
+        self.assertEqual(result["skipped_reason"], "no_eligible_configured_topics")
+        create_source.assert_not_called()
+
+    def test_daily_scout_empty_topics_does_not_construct_a_default_source(self):
+        with patch("paper_agents.scout.ArxivSource") as arxiv_source:
+            result = run_daily_scout(topics=[])
+
+        self.assertEqual(result["skipped_reason"], "no_eligible_configured_topics")
+        arxiv_source.assert_not_called()
+
+    def test_scout_daily_cli_empty_selection_does_not_apply_guidance_or_construct_source(self):
+        with (
+            patch("paper_agents.cli.select_topics_for_source", return_value=[]),
+            patch("paper_agents.cli.load_scout_guidance", return_value=ScoutGuidance(boost_terms=["incident response"])) as guidance,
+            patch("paper_agents.cli.create_scout_source") as create_source,
+            patch("paper_agents.cli.run_daily_scout") as run_scout,
+            patch("paper_agents.cli.print_section") as print_section,
+            patch("sys.argv", ["paper_agents.cli", "scout-daily", "--db", str(self.db_path)]),
+        ):
+            cli.main()
+
+        guidance.assert_not_called()
+        create_source.assert_not_called()
+        run_scout.assert_not_called()
+        self.assertEqual(print_section.call_args.args[1]["skipped_reason"], "no_eligible_configured_topics")
 
     def test_scout_daily_cli_topic_override_still_wins(self):
         captured = {}

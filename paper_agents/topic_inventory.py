@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +31,14 @@ def openalex_rotating_topic(today: date | None = None, *, config_path: Path = DE
     )[0]
 
 
-def scout_topic_inventory(today: date | None = None, *, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> list[dict[str, Any]]:
+def scout_topic_inventory(
+    today: date | None = None,
+    *,
+    now: datetime | None = None,
+    config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
+) -> list[dict[str, Any]]:
     try:
-        return topic_inventory_from_config(config_path, today=today)
+        return topic_inventory_from_config(config_path, today=today, now=now)
     except ValueError:
         active_openalex_topic = OPENALEX_ROTATING_TOPICS[int((today or date.today()).strftime("%j")) % len(OPENALEX_ROTATING_TOPICS)]
         return [

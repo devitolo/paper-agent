@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import tempfile
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ PRIORITIES = ("high", "normal", "low")
 PRIORITY_RANK = {"high": 0, "normal": 1, "low": 2}
 SCHEDULED_TOPICS_PER_RUN = 2
 SCHEDULED_RUNS_PER_DAY = 2
+SOURCE_SCHEDULE_HOURS = {"openalex": 4, "arxiv": 5, "semantic_scholar": 6}
 BASELINE_QUERY_TERMS = ["operations", "reliability", "observability", "production engineering"]
 
 
@@ -88,11 +89,12 @@ def select_topics_for_source(
     count: int = 1,
     slot: int = 0,
 ) -> list[str]:
-    fallback = list(DEFAULT_SCOUT_TOPICS if fallback_topics is None else fallback_topics)
+    current = today or date.today()
     try:
         topics = load_topic_config(path)
     except (FileNotFoundError, ValueError):
-        return fallback
+        fallback = list(fallback_topics if fallback_topics is not None else _default_topics_for_source(source, cadences))
+        return _select_rotating_batch(fallback, current, count=count, slot=slot)
 
     candidates = [
         topic
@@ -100,30 +102,68 @@ def select_topics_for_source(
         if topic.enabled and source in topic.sources and topic.cadence in cadences
     ]
     if not candidates:
-        return fallback
+        return []
 
-    current = today or date.today()
     high_water = min(PRIORITY_RANK.get(topic.priority, 9) for topic in candidates)
     priority_pool = [topic for topic in candidates if PRIORITY_RANK.get(topic.priority, 9) == high_water]
+    selected = _select_rotating_batch(priority_pool, current, count=count, slot=slot)
+    return [topic.query for topic in selected]
+
+
+def _default_topics_for_source(source: str, cadences: tuple[str, ...]) -> list[str]:
+    return [
+        topic.query
+        for topic in seed_topic_entries()
+        if source in topic.sources and topic.enabled and topic.cadence in cadences
+    ]
+
+
+def _select_rotating_batch(items: list[Any], current: date, *, count: int, slot: int) -> list[Any]:
+    if not items:
+        return []
     batch_size = max(1, count)
-    run_slot = max(0, slot)
-    batch_start = ((current.toordinal() * SCHEDULED_RUNS_PER_DAY + run_slot) * batch_size) % len(priority_pool)
-    return [priority_pool[(batch_start + offset) % len(priority_pool)].query for offset in range(min(batch_size, len(priority_pool)))]
+    run_slot = min(max(0, slot), SCHEDULED_RUNS_PER_DAY - 1)
+    day_start = (current.toordinal() * SCHEDULED_RUNS_PER_DAY * batch_size) % len(items)
+    rotated = [*items[day_start:], *items[:day_start]]
+    start = run_slot * batch_size
+    return rotated[start : start + batch_size]
 
 
-def topic_inventory_from_config(path: Path = DEFAULT_TOPIC_CONFIG_PATH, today: date | None = None) -> list[dict[str, Any]]:
+def next_scheduled_topic_window(source: str, now: datetime | None = None) -> tuple[date, int]:
+    current = now or datetime.now()
+    hour = SOURCE_SCHEDULE_HOURS[source]
+    am_run = datetime.combine(current.date(), time(hour=hour))
+    pm_run = am_run + timedelta(hours=12)
+    if current < am_run:
+        return current.date(), 0
+    if current < pm_run:
+        return current.date(), 1
+    return current.date() + timedelta(days=1), 0
+
+
+def topic_inventory_from_config(
+    path: Path = DEFAULT_TOPIC_CONFIG_PATH,
+    today: date | None = None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
     topics = load_topic_config_or_seed(path)
-    current = today or date.today()
     inventory = []
     for source in TOPIC_SOURCE_ORDER:
+        current, slot = (today, 0) if today is not None else next_scheduled_topic_window(source, now)
         source_topics = [topic for topic in topics if source in topic.sources]
+        fallback_topics = [
+            topic.query
+            for topic in source_topics
+            if topic.enabled and topic.cadence in (("daily", "weekly") if source == "openalex" else ("daily",))
+        ]
         active_query = select_topics_for_source(
             source,
             today=current,
             cadences=("daily", "weekly") if source == "openalex" else ("daily",),
             path=path,
-            fallback_topics=[],
+            fallback_topics=fallback_topics,
             count=SCHEDULED_TOPICS_PER_RUN,
+            slot=slot,
         )
         inventory.append(
             {
@@ -133,6 +173,8 @@ def topic_inventory_from_config(path: Path = DEFAULT_TOPIC_CONFIG_PATH, today: d
                 "description": schedule_description(source),
                 "topics": source_topics,
                 "active_topics": active_query,
+                "next_slot": slot,
+                "next_run_date": current.isoformat(),
                 "notes": source_notes(source),
             }
         )
