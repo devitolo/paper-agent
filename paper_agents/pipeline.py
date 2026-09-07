@@ -31,7 +31,7 @@ from paper_agents.scout import (
 )
 from paper_agents.scout_agent import DEFAULT_TARGET_CANDIDATES, ScoutAgent, ScoutConfig
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile
-from paper_agents.topics import select_topics_for_source
+from paper_agents.topics import SCHEDULED_TOPICS_PER_RUN, select_topics_for_source
 
 DEFAULT_PIPELINE_MAX_CHARS = DEFAULT_REVIEWER_MAX_CHARS
 DEFAULT_PIPELINE_LIMIT_CHUNKS = DEFAULT_REVIEWER_LIMIT_CHUNKS
@@ -57,6 +57,7 @@ def run_daily_pipeline(
     db_path: Path | None = db.DEFAULT_DB_PATH,
     mode: str = "full",
     source_name: str = "arxiv",
+    topic_slot: int = 0,
     request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
     scout_retries: int = DEFAULT_ARXIV_RETRIES,
     scout_timeout: int = DEFAULT_ARXIV_TIMEOUT,
@@ -73,6 +74,8 @@ def run_daily_pipeline(
     topics_for_run = topics or select_topics_for_source(
         source_name,
         cadences=("daily", "weekly") if source_name == "openalex" else ("daily",),
+        count=SCHEDULED_TOPICS_PER_RUN,
+        slot=topic_slot,
     )
     max_recommendations = min(max(1, keep_limit), DEFAULT_MAX_RECOMMENDATIONS)
     max_scout_attempts = max(1, max_scout_attempts)

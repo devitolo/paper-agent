@@ -18,17 +18,15 @@ if [[ "${PAPER_AGENT_SELF_UPDATE:-0}" == "1" ]]; then
   git pull --ff-only
 fi
 
+topic_args=()
 if [[ -n "${PAPER_AGENT_OPENALEX_TOPIC:-}" ]]; then
-  topic="$PAPER_AGENT_OPENALEX_TOPIC"
-else
-  topic="$(python3 -c 'from paper_agents.topic_inventory import openalex_rotating_topic; print(openalex_rotating_topic())')"
+  topic_args=(--topic "$PAPER_AGENT_OPENALEX_TOPIC")
 fi
-
-echo "OpenAlex topic: $topic"
 
 python3 -m paper_agents.cli pipeline-daily \
   --source openalex \
-  --topic "$topic" \
+  --topic-slot "${PAPER_AGENT_TOPIC_SLOT:-0}" \
+  "${topic_args[@]}" \
   --quick \
   --fetch "${PAPER_AGENT_OPENALEX_FETCH:-30}" \
   --keep "${PAPER_AGENT_OPENALEX_KEEP:-2}" \

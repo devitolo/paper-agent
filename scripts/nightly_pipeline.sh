@@ -19,6 +19,7 @@ if [[ "${PAPER_AGENT_SELF_UPDATE:-0}" == "1" ]]; then
 fi
 
 python3 -m paper_agents.cli pipeline-daily \
+  --topic-slot "${PAPER_AGENT_TOPIC_SLOT:-0}" \
   --quick \
   --fetch "${PAPER_AGENT_FETCH:-20}" \
   --keep "${PAPER_AGENT_KEEP:-3}" \

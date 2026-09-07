@@ -15,6 +15,7 @@ fi
 
 python3 -m paper_agents.cli pipeline-daily \
   --source semantic_scholar \
+  --topic-slot "${PAPER_AGENT_TOPIC_SLOT:-0}" \
   --quick \
   --fetch "${PAPER_AGENT_SEMANTIC_FETCH:-10}" \
   --keep "${PAPER_AGENT_SEMANTIC_KEEP:-1}" \

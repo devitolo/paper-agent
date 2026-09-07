@@ -15,6 +15,8 @@ TOPIC_SOURCE_ORDER = ("arxiv", "openalex", "semantic_scholar")
 CADENCES = ("daily", "weekly", "manual")
 PRIORITIES = ("high", "normal", "low")
 PRIORITY_RANK = {"high": 0, "normal": 1, "low": 2}
+SCHEDULED_TOPICS_PER_RUN = 2
+SCHEDULED_RUNS_PER_DAY = 2
 BASELINE_QUERY_TERMS = ["operations", "reliability", "observability", "production engineering"]
 
 
@@ -83,6 +85,8 @@ def select_topics_for_source(
     cadences: tuple[str, ...] = ("daily",),
     path: Path = DEFAULT_TOPIC_CONFIG_PATH,
     fallback_topics: list[str] | None = None,
+    count: int = 1,
+    slot: int = 0,
 ) -> list[str]:
     fallback = list(DEFAULT_SCOUT_TOPICS if fallback_topics is None else fallback_topics)
     try:
@@ -101,8 +105,10 @@ def select_topics_for_source(
     current = today or date.today()
     high_water = min(PRIORITY_RANK.get(topic.priority, 9) for topic in candidates)
     priority_pool = [topic for topic in candidates if PRIORITY_RANK.get(topic.priority, 9) == high_water]
-    selected = priority_pool[int(current.strftime("%j")) % len(priority_pool)]
-    return [selected.query]
+    batch_size = max(1, count)
+    run_slot = max(0, slot)
+    batch_start = ((current.toordinal() * SCHEDULED_RUNS_PER_DAY + run_slot) * batch_size) % len(priority_pool)
+    return [priority_pool[(batch_start + offset) % len(priority_pool)].query for offset in range(min(batch_size, len(priority_pool)))]
 
 
 def topic_inventory_from_config(path: Path = DEFAULT_TOPIC_CONFIG_PATH, today: date | None = None) -> list[dict[str, Any]]:
@@ -117,6 +123,7 @@ def topic_inventory_from_config(path: Path = DEFAULT_TOPIC_CONFIG_PATH, today: d
             cadences=("daily", "weekly") if source == "openalex" else ("daily",),
             path=path,
             fallback_topics=[],
+            count=SCHEDULED_TOPICS_PER_RUN,
         )
         inventory.append(
             {

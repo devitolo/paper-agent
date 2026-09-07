@@ -144,6 +144,7 @@ def main() -> None:
     daily_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
     daily_parser.add_argument("--source", choices=SCOUT_SOURCES, default="arxiv", help="Scout source adapter")
     daily_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
+    daily_parser.add_argument("--topic-slot", type=int, choices=(0, 1), default=0, help="Scheduled topic slot: 0 for AM, 1 for PM")
     daily_parser.add_argument(
         "--request-delay",
         type=float,
@@ -183,6 +184,7 @@ def main() -> None:
     pipeline_parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
     pipeline_parser.add_argument("--source", choices=SCOUT_SOURCES, default="arxiv", help="Scout source adapter")
     pipeline_parser.add_argument("--topic", action="append", dest="topics", help="Topic to search; repeatable")
+    pipeline_parser.add_argument("--topic-slot", type=int, choices=(0, 1), default=0, help="Scheduled topic slot: 0 for AM, 1 for PM")
     pipeline_parser.add_argument("--model", default=DEFAULT_MODEL)
     pipeline_parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
     pipeline_parser.add_argument("--max-chars", type=int, default=DEFAULT_PIPELINE_MAX_CHARS)
@@ -339,7 +341,7 @@ def main() -> None:
         return
 
     if args.command == "scout-daily":
-        base_topics = args.topics or select_topics_for_source(args.source)
+        base_topics = args.topics or select_topics_for_source(args.source, count=2, slot=args.topic_slot)
         scout_guidance = None
         scout_guidance_summary = {}
         init_db(args.db)
@@ -384,6 +386,8 @@ def main() -> None:
                 topics=args.topics or select_topics_for_source(
                     args.source,
                     cadences=("daily", "weekly") if args.source == "openalex" else ("daily",),
+                    count=2,
+                    slot=args.topic_slot,
                 ),
                 freshness_months=args.freshness_months,
                 fetch_limit=args.fetch,
@@ -399,6 +403,7 @@ def main() -> None:
                 db_path=args.db,
                 mode=mode,
                 source_name=args.source,
+                topic_slot=args.topic_slot,
                 request_delay=args.request_delay,
                 scout_retries=args.retries,
                 scout_timeout=args.source_timeout,

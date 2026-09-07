@@ -218,6 +218,28 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertEqual(selected, ["query a"])
 
+    def test_source_topic_selection_uses_distinct_am_pm_two_topic_batches(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [
+                TopicEntry(f"topic-{index}", f"Topic {index}", f"query {index}", ["openalex"], "daily", "normal", True)
+                for index in range(4)
+            ],
+            config_path,
+        )
+
+        am_topics = select_topics_for_source(
+            "openalex", today=date(2026, 1, 2), path=config_path, count=2, slot=0,
+        )
+        pm_topics = select_topics_for_source(
+            "openalex", today=date(2026, 1, 2), path=config_path, count=2, slot=1,
+        )
+
+        self.assertEqual(len(am_topics), 2)
+        self.assertEqual(len(pm_topics), 2)
+        self.assertFalse(set(am_topics) & set(pm_topics))
+        self.assertEqual(set(am_topics) | set(pm_topics), {"query 0", "query 1", "query 2", "query 3"})
+
     def test_scout_daily_cli_topic_override_still_wins(self):
         captured = {}
 
