@@ -24,6 +24,7 @@ from paper_agents.topic_agent import (
     topic_proposal_from_json,
     topic_proposal_to_json,
 )
+from paper_agents.scout import SCOUT_SOURCES
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,
@@ -33,6 +34,7 @@ from paper_agents.topics import (
     create_topic_from_fast_path,
     ensure_unique_topic,
     load_topic_config_or_seed,
+    normalize_sources,
     save_topic_config,
     update_topic_from_form,
 )
@@ -737,6 +739,7 @@ def render_topic_agent_panel(
         <label>{escape(prompt)}
           <textarea name="request_text" required placeholder="datalake reliability and operations">{escape(request_text)}</textarea>
         </label>
+        {render_source_checkboxes(list(SCOUT_SOURCES))}
         <button type="submit" class="primary">Ask TopicAgent</button>
         <p class="topic-agent-status" aria-live="polite"></p>
       </form>
@@ -939,11 +942,22 @@ def propose_topic_form(
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
 ) -> TopicProposal:
     topics = load_topic_config_or_seed(config_path)
-    return suggest_topic_proposal(
+    requested_sources = form.get("sources", [])
+    if not requested_sources:
+        raise ValueError("Select at least one source for the TopicAgent proposal")
+    selected_sources = normalize_sources(requested_sources)
+    proposal = suggest_topic_proposal(
         form.get("request_text", [""])[0],
         topics,
         conversation=conversation,
     )
+    if proposal.action in {"create_new", "update_existing"}:
+        proposal.sources = selected_sources
+        selection_note = "Sources selected in the Topic Agent form."
+        proposal.source_rationale = " ".join(
+            part for part in (proposal.source_rationale, selection_note) if part
+        )
+    return proposal
 
 
 def apply_topic_proposal_form(

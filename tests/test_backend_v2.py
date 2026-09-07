@@ -2890,6 +2890,38 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("showing pending TopicAgent preview", html)
         self.assertIn('class="topic-row topic-read-row topic-preview-row"', html)
 
+    def test_topic_agent_form_allows_explicit_source_selection(self):
+        html = web.render_topics_page()
+
+        self.assertIn('name="sources" value="arxiv" checked', html)
+        self.assertIn('name="sources" value="semantic_scholar" checked', html)
+        self.assertIn('name="sources" value="openalex" checked', html)
+
+    def test_topic_agent_form_overrides_proposal_sources(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config([], config_path)
+        proposal = TopicProposal(
+            action="create_new",
+            label="Cloud incident response",
+            query="llm cloud incident response",
+            sources=["arxiv", "semantic_scholar", "openalex"],
+        )
+        with patch("paper_agents.web.suggest_topic_proposal", return_value=proposal):
+            result = web.propose_topic_form(
+                {"request_text": ["LLM cloud incident response"], "sources": ["semantic_scholar"]},
+                config_path=config_path,
+            )
+
+        self.assertEqual(result.sources, ["semantic_scholar"])
+        self.assertIn("Sources selected", result.source_rationale)
+
+    def test_topic_agent_form_requires_a_source_selection(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config([], config_path)
+
+        with self.assertRaisesRegex(ValueError, "Select at least one source"):
+            web.propose_topic_form({"request_text": ["LLM cloud incident response"]}, config_path=config_path)
+
     def test_topics_page_previews_update_proposal_in_topic_list(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
         save_topic_config(
