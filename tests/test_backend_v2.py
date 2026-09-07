@@ -3613,6 +3613,8 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page()
 
         self.assertIn("Project Paper Scout Topics", html)
+        self.assertIn("Next scheduled topics (", html)
+        self.assertIn("Configured topics (", html)
         self.assertNotIn("Topic changes apply to future scheduled runs.", html)
         self.assertIn("Source schedule inventory", html)
         self.assertIn("Topic Agent", html)

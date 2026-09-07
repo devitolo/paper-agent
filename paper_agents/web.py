@@ -692,11 +692,14 @@ def render_topics_page(
 
 
 def render_topic_source_section(item: dict[str, Any]) -> str:
-    active_topics = "".join(f"<li>{escape(topic)}</li>" for topic in item["active_topics"])
+    next_scheduled_topics = "".join(f"<li>{escape(topic)}</li>" for topic in item["active_topics"])
     topics = "".join(
         f"<li>{escape(topic.label)} <span>{escape(topic.cadence)} / {escape(topic.priority)} / {'enabled' if topic.enabled else 'disabled'}</span></li>"
         for topic in item["topics"]
     )
+    configured_count = len(item["topics"])
+    enabled_count = sum(topic.enabled for topic in item["topics"])
+    next_scheduled_count = len(item["active_topics"])
     return f"""<section class="topic-source" id="{escape(item["source"])}">
       <div class="topic-source-head">
         <h2><span class="source-badge {source_badge_class(item["source"])}">{escape(item["label"])}</span></h2>
@@ -705,11 +708,11 @@ def render_topic_source_section(item: dict[str, Any]) -> str:
       <p>{escape(item["description"])}</p>
       <div class="topic-columns">
         <div>
-          <h3>Active schedule topic</h3>
-          <ol class="topic-list active-topic-list">{active_topics}</ol>
+          <h3>Next scheduled topics ({next_scheduled_count})</h3>
+          <ol class="topic-list active-topic-list">{next_scheduled_topics}</ol>
         </div>
         <div>
-          <h3>Configured topics</h3>
+          <h3>Configured topics ({configured_count} total; {enabled_count} enabled)</h3>
           <ol class="topic-list">{topics}</ol>
         </div>
       </div>
