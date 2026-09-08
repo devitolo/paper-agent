@@ -2118,6 +2118,15 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(output["status"], "no_feedback")
         self.assertEqual(output["message"], "No structured feedback rows found for profile rebuild.")
 
+    def test_render_pulled_date_marks_naive_database_timestamp_as_utc(self):
+        rendered = web.render_pulled_date({"pulled_at": "2026-09-08 01:43:02"})
+
+        self.assertEqual(
+            rendered,
+            '<time class="pulled-date" data-pulled-at="2026-09-08T01:43:02Z" '
+            'datetime="2026-09-08T01:43:02Z">Pulled 2026-09-08</time>',
+        )
+
     def test_review_queue_renders_simplified_review_workflow(self):
         self._seed_review_recommendation()
         self.connection.commit()
@@ -2162,6 +2171,11 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
         self.assertIn('<div class="paper-meta">', html)
         self.assertIn("Pulled ", html)
+        self.assertRegex(html, r'data-pulled-at="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"')
+        self.assertRegex(html, r'datetime="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"')
+        self.assertIn('pulledAt.getFullYear()', html)
+        self.assertIn('pulledAt.getMonth() + 1', html)
+        self.assertIn('pulledAt.getDate()', html)
         self.assertLess(html.index('<div class="paper-meta">'), html.index("Pulled "))
         self.assertLess(html.index('aria-label="Copy paper URL">Copy</button>'), html.index("Pulled "))
         self.assertLess(html.index("Pulled "), html.index('<section class="match-rationale">'))

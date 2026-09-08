@@ -333,6 +333,18 @@ def render_review_queue(
     <div class="cards">{card_html}</div>
     {pagination}
     <script>
+      document.querySelectorAll(".pulled-date[data-pulled-at]").forEach((element) => {{
+        const pulledAt = new Date(element.dataset.pulledAt);
+        if (Number.isNaN(pulledAt.getTime())) {{
+          return;
+        }}
+        const localDay = [
+          pulledAt.getFullYear(),
+          String(pulledAt.getMonth() + 1).padStart(2, "0"),
+          String(pulledAt.getDate()).padStart(2, "0"),
+        ].join("-");
+        element.textContent = `Pulled ${{localDay}}`;
+      }});
       document.querySelectorAll("[data-copy-value]").forEach((button) => {{
         const originalText = button.textContent;
         button.addEventListener("click", async () => {{
@@ -1439,11 +1451,16 @@ def render_copy_control(card: dict[str, Any]) -> str:
 
 
 def render_pulled_date(card: dict[str, Any]) -> str:
-    pulled_at = card.get("pulled_at")
+    pulled_at = str(card.get("pulled_at") or "").strip()
     if not pulled_at:
         return ""
-    pulled_day = str(pulled_at)[:10]
-    return f'<span class="pulled-date">Pulled {escape(pulled_day)}</span>'
+    timestamp = pulled_at.replace(" ", "T")
+    if not re.search(r"(?:Z|[+-]\\d{2}:?\\d{2})$", timestamp, flags=re.IGNORECASE):
+        timestamp += "Z"
+    return (
+        f'<time class="pulled-date" data-pulled-at="{escape(timestamp)}" '
+        f'datetime="{escape(timestamp)}">Pulled {escape(pulled_at[:10])}</time>'
+    )
 
 
 def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
