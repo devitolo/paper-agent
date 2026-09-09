@@ -1647,7 +1647,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
     latest_cycle_age_hours = summary["top"]["latest_run_age_hours"]
     if latest_cycle and latest_cycle_age_hours is not None:
         terminal_states = {"recommendations_ready", "awaiting_manual_discussion", "profile_updated", "complete"}
-        if latest_cycle["state"] == "failed" or (
+        if latest_cycle["state"] != "failed" and (
             latest_cycle["state"] not in terminal_states and latest_cycle_age_hours > 6
         ):
             warnings.append(
@@ -1659,13 +1659,15 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
 
     for latest_scout in summary["latest_scout_runs_by_source"]:
         diagnostic_command = f"scripts/diagnose_scout_run.sh {latest_scout['source']}"
+        started_at = _format_local_run_time(latest_scout.get("started_at"))
+        run_label = f"Scout run at {started_at}" if started_at else "Latest Scout run"
         candidate_count = int(latest_scout["candidate_count"] or 0)
         if candidate_count == 0:
             warnings.append(
                 {
                     "level": "warning",
                     "message": (
-                        f"Latest {latest_scout['source']} Scout run returned 0 candidates. "
+                        f"{latest_scout['source']} {run_label} returned 0 candidates. "
                         f"On Mini, run {diagnostic_command}."
                     ),
                 }
@@ -1675,7 +1677,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "level": "warning",
                     "message": (
-                        f"Latest {latest_scout['source']} Scout run returned only {candidate_count} candidates. "
+                        f"{latest_scout['source']} {run_label} returned only {candidate_count} candidates. "
                         f"On Mini, run {diagnostic_command}."
                     ),
                 }
@@ -1685,7 +1687,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "level": "warning",
                     "message": (
-                        f"Latest {latest_scout['source']} Scout run had 0 eligible candidates. "
+                        f"{latest_scout['source']} {run_label} had 0 eligible candidates. "
                         f"On Mini, run {diagnostic_command}."
                     ),
                 }
@@ -1698,7 +1700,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "level": "warning",
                     "message": (
-                        f"Latest {latest_scout['source']} Scout run had only "
+                        f"{latest_scout['source']} {run_label} had only "
                         f"{latest_scout['eligible_count']} eligible candidates and produced 0 recommendations; "
                         "Curator needs 10. "
                         f"On Mini, run {diagnostic_command}."
@@ -1710,7 +1712,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "level": "warning",
                     "message": (
-                        f"Latest {latest_scout['source']} Scout run had only "
+                        f"{latest_scout['source']} {run_label} had only "
                         f"{latest_scout['eligible_count']} eligible candidates; Curator needs 10. "
                         f"On Mini, run {diagnostic_command}."
                     ),
@@ -1724,7 +1726,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "level": "warning",
                     "message": (
-                        f"Latest {latest_scout['source']} Scout run had "
+                        f"{latest_scout['source']} {run_label} had "
                         f"{latest_scout['eligible_count']} eligible candidates but produced 0 recommendations. "
                         f"On Mini, run {diagnostic_command}."
                     ),
@@ -1790,6 +1792,15 @@ def _days_since(value: str | None) -> float | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return round((datetime.now(timezone.utc) - parsed).total_seconds() / 86400, 2)
+
+
+def _format_local_run_time(value: str | None) -> str | None:
+    parsed = _parse_sqlite_datetime(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone().strftime("%Y-%m-%d %-I:%M %p %Z")
 
 
 def _parse_sqlite_datetime(value: str | None) -> datetime | None:

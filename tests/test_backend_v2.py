@@ -3605,10 +3605,21 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(summary["latest_scout_run"]["source"], "semantic_scholar")
         self.assertTrue(
             any(
-                "Latest openalex Scout run had 0 eligible candidates"
+                "openalex Scout run at " in warning["message"]
+                and "had 0 eligible candidates"
                 and "scripts/diagnose_scout_run.sh openalex" in warning["message"]
                 for warning in summary["warnings"]
             )
+        )
+
+    def test_health_summary_does_not_duplicate_failed_cycle_warning(self):
+        db.update_workflow_state(self.connection, self.cycle_id, "failed")
+        self.connection.commit()
+
+        summary = db.health_summary(self.db_path, days=21)
+
+        self.assertFalse(
+            any("Latest workflow cycle is failed" in warning["message"] for warning in summary["warnings"])
         )
 
     def test_health_summary_warns_when_eligible_source_produces_no_recommendations(self):
@@ -3634,6 +3645,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(
             any(
                 "had only 1 eligible candidates and produced 0 recommendations; Curator needs 10" in warning["message"]
+                and "arxiv Scout run at " in warning["message"]
                 and "scripts/diagnose_scout_run.sh arxiv" in warning["message"]
                 for warning in summary["warnings"]
             )
