@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents import db
+from paper_agents.manual_scout import exclusive_pipeline
 from paper_agents.curator_agent import (
     DEFAULT_MAX_RECOMMENDATIONS,
     DEFAULT_MIN_QUALITY_SCORE,
@@ -40,6 +41,7 @@ DEFAULT_PIPELINE_TIMEOUT = DEFAULT_REVIEWER_TIMEOUT
 DEFAULT_MAX_SCOUT_ATTEMPTS = 3
 
 
+@exclusive_pipeline
 def run_daily_pipeline(
     *,
     topics: list[str] | None = None,

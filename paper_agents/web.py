@@ -25,6 +25,7 @@ from paper_agents.topic_agent import (
     topic_proposal_to_json,
 )
 from paper_agents.scout import SCOUT_SOURCES
+from paper_agents.runtime_config import default_sources, gemini_enabled, packaged
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,
@@ -67,6 +68,9 @@ VIEWS = [
 
 def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEFAULT_DB_PATH) -> None:
     init_db(db_path)
+    if packaged():
+        from paper_agents.manual_scout import status as scout_status
+        scout_status(db_path)
     server = ThreadingHTTPServer((host, port), make_handler(db_path))
     print(f"review UI running at http://{host}:{port}")
     try:
@@ -81,12 +85,37 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
     class ReviewHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/scout/status":
+                if not packaged():
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                payload = json.dumps(manual_scout_snapshot(db_path)).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if parsed.path in {"/ready", "/runtime"}:
+                from paper_agents.package_runtime import app_status, model_status
+                status = app_status(db_path)
+                if parsed.path == "/runtime":
+                    status["model"] = model_status()
+                payload = json.dumps(status).encode("utf-8")
+                self.send_response(HTTPStatus.OK if status["ready"] else HTTPStatus.SERVICE_UNAVAILABLE)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
             if parsed.path == "/":
                 params = urllib.parse.parse_qs(parsed.query)
                 self.respond_html(
                     render_review_queue(
                         db_path,
                         saved=params.get("saved", [None])[0] == "1",
+                        scout_error=params.get("scout_error", [None])[0],
                         profile_apply_queued=params.get("profile_apply_queued", [None])[0] == "1",
                         profile_apply_failed=params.get("profile_apply_failed", [None])[0] == "1",
                         filter_value=params.get("filter", ["needs_review"])[0],
@@ -128,6 +157,25 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/scout/run":
+                if not packaged():
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                from paper_agents.manual_scout import ScoutBusy, start
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Run Scout from Project Paper")
+                    return
+                redirect = "/"
+                try:
+                    start(db_path)
+                except ScoutBusy:
+                    pass  # Existing status explains that a run is already active.
+                except (ValueError, RuntimeError, OSError) as error:
+                    redirect = "/?" + urllib.parse.urlencode({"scout_error": str(error)})
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", redirect)
+                self.end_headers()
+                return
             if parsed.path == "/topics":
                 length = int(self.headers.get("Content-Length", "0"))
                 body = self.rfile.read(length).decode("utf-8")
@@ -273,10 +321,65 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
     return ReviewHandler
 
 
+def manual_scout_snapshot(db_path: Path, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> dict[str, Any]:
+    from paper_agents.manual_scout import inference_readiness, selected_topics, status
+    state = status(db_path)
+    try:
+        count = len(selected_topics(config_path))
+        setup_message = "" if count else "Add at least one enabled arXiv topic in Topics to run Scout."
+    except (ValueError, OSError):
+        count = 0
+        setup_message = "Topic configuration is unavailable or invalid. Check Topics and the app logs."
+    readiness = inference_readiness(db_path) if count else {
+        "status": "preparing", "message": "Add an enabled arXiv topic before checking local Qwen inference."}
+    return {**state, "can_run": bool(count) and not state["busy"] and readiness["status"] == "ready",
+            "topic_count": count, "setup_message": setup_message, "readiness": readiness}
+
+
+def render_manual_scout_panel(db_path: Path, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> str:
+    if not packaged():
+        return ""
+    state = manual_scout_snapshot(db_path, config_path)
+    label = "Retry Scout" if state["status"] in {"failed", "empty", "interrupted"} else "Run Scout"
+    return f"""<section class="banner" aria-label="Manual discovery">
+      <form method="post" action="/scout/run">
+        <button id="run-scout" type="submit" {'' if state['can_run'] else 'disabled'}>{label}</button>
+        <span id="scout-state" role="status" aria-live="polite">{escape(state['status'].title())}: {escape(state['message'])}</span>
+      </form>
+      <p id="scout-setup">{escape(state['setup_message'])}</p>
+      <p id="scout-readiness">Local Qwen: {escape(state['readiness']['status'].title())}: {escape(state['readiness']['message'])}</p>
+      <a href="/topics">Topics</a> · <a href="/runtime">Runtime</a> · <a href="/health">Health</a> · <a href="/">Refresh papers</a>
+      <script>
+        (() => {{
+          const form = document.getElementById('run-scout').form;
+          form.addEventListener('submit', () => {{ document.getElementById('run-scout').disabled = true; }});
+          async function pollScout() {{
+            try {{
+              const response = await fetch('/scout/status', {{cache: 'no-store'}});
+              if (!response.ok) throw new Error('Status unavailable');
+              const state = await response.json();
+              document.getElementById('scout-state').textContent = state.status + ': ' + state.message;
+              document.getElementById('scout-setup').textContent = state.setup_message;
+              document.getElementById('scout-readiness').textContent = 'Local Qwen: ' + state.readiness.status + ': ' + state.readiness.message;
+              const button = document.getElementById('run-scout');
+              button.disabled = !state.can_run;
+              button.textContent = ['failed','empty','interrupted'].includes(state.status) ? 'Retry Scout' : 'Run Scout';
+            }} catch (error) {{
+              document.getElementById('scout-state').textContent = 'Status unavailable. Refresh this page to reconnect; saved papers remain local.';
+            }}
+            setTimeout(pollScout, 5000);
+          }}
+          setTimeout(pollScout, 5000);
+        }})();
+      </script>
+    </section>"""
+
+
 def render_review_queue(
     db_path: Path,
     *,
     saved: bool = False,
+    scout_error: str | None = None,
     profile_apply_queued: bool = False,
     profile_apply_failed: bool = False,
     filter_value: str = "needs_review",
@@ -294,6 +397,8 @@ def render_review_queue(
                               sort_value=sort_value, page=page_value)
     cards = result["cards"]
     banners = []
+    if scout_error:
+        banners.append(f'<div class="banner warning">{escape(scout_error)}</div>')
     if saved:
         banners.append('<div class="banner">Feedback saved.</div>')
     if profile_apply_queued:
@@ -329,6 +434,7 @@ def render_review_queue(
   <main>
     {render_app_header("Review Queue", f"{result['total']} papers | {escape(filter_label(filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}", controls, "review")}
     {saved_banner}
+    {render_manual_scout_panel(db_path)}
     {pagination}
     <div class="cards">{card_html}</div>
     {pagination}
@@ -759,7 +865,7 @@ def render_topic_agent_panel(
         <label>{escape(prompt)}
           <textarea name="request_text" required placeholder="datalake reliability and operations">{escape(request_text)}</textarea>
         </label>
-        {render_source_checkboxes(list(SCOUT_SOURCES))}
+        {render_source_checkboxes(default_sources())}
         <button type="submit" class="primary">Ask TopicAgent</button>
         <p class="topic-agent-status" aria-live="polite"></p>
       </form>
@@ -1037,7 +1143,7 @@ def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_
             form.get("topic_text", [""])[0],
             existing_topics=topics,
             query=form.get("query", [""])[0] or None,
-            sources=form.get("sources") or ["arxiv", "semantic_scholar", "openalex"],
+            sources=form.get("sources") or default_sources(),
             cadence=form.get("cadence", ["daily"])[0],
             priority=form.get("priority", ["normal"])[0],
             enabled=form.get("enabled", ["1"])[0] == "1",
@@ -2066,7 +2172,7 @@ def save_feedback(
         "profile_apply_error": None,
         "profile_apply_queued": False,
     }
-    if ingest_output is None:
+    if ingest_output is None or not gemini_enabled():
         return result
 
     structured_feedback_id = ingest_output["structured_feedback_id"]

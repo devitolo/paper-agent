@@ -2,6 +2,9 @@
 __pycache__/
 *.pyc
 .env
+.paper-install
+.paper-install.tmp
+.paper-install.lock/
 data/papers/
 data/scout/
 data/extractions/

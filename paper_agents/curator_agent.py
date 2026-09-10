@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from paper_agents import db
 from paper_agents.curator_evidence import assess_evidence
 from paper_agents.curator_scoring import SCORING_VERSION, evaluate_candidate
+from paper_agents.runtime_config import ollama_url
 
 DEFAULT_MAX_RECOMMENDATIONS = 3
 DEFAULT_MIN_QUALITY_SCORE = 25.0
@@ -19,7 +20,7 @@ class CuratorConfig:
     model: str = SCORING_VERSION
     evidence_enabled: bool = False
     evidence_model: str = "qwen2.5:1.5b-instruct"
-    evidence_ollama_url: str = "http://127.0.0.1:11434/api/generate"
+    evidence_ollama_url: str = field(default_factory=ollama_url)
     evidence_timeout: int = 45
     evidence_max_chars: int = 7000
 

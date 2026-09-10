@@ -2,6 +2,8 @@
 
 Project Paper is a system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
 
+> **Productization preview:** the new installer-fronted Docker Compose path and manual in-product Scout are under milestone validation. See the [M1 development usage guide](docs/m1-package-usage.md) and [acceptance report](docs/m1-qa-report.md). The older prototype and Mini instructions below remain development/operations references until the public quickstart replaces them.
+
 The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent stores pasted ChatGPT discussion summaries in immutable SQLite history with deterministic v1 parsing.
 
 ## Overview
@@ -486,6 +488,7 @@ See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
 
 ## Design Documents
 
+- [First supported release productization plan](docs/productization-plan.md) — PM-aligned Compose assessment, Fresh Install Produces Papers milestone, release gates, and owner-assigned backlog; packaging work is not yet implemented.
 - [Architecture](docs/architecture.md)
 - [AI stack](docs/ai-stack.md)
 - [Workflow](docs/workflow.md)

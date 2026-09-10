@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents.scout import DEFAULT_SCOUT_TOPICS, SCOUT_SOURCES
+from paper_agents.runtime_config import default_sources, packaged
 
 
 DEFAULT_TOPIC_CONFIG_PATH = Path("config/topics.yaml")
@@ -64,6 +65,8 @@ def load_topic_config(path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> list[TopicEntry
 
 
 def load_topic_config_or_seed(path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> list[TopicEntry]:
+    if packaged():
+        return load_topic_config(path)
     try:
         return load_topic_config(path)
     except (FileNotFoundError, ValueError):
@@ -93,6 +96,8 @@ def select_topics_for_source(
     try:
         topics = load_topic_config(path)
     except (FileNotFoundError, ValueError):
+        if packaged():
+            raise
         fallback = list(fallback_topics if fallback_topics is not None else _default_topics_for_source(source, cadences))
         return _select_rotating_batch(fallback, current, count=count, slot=slot)
 
@@ -194,7 +199,7 @@ def create_topic_from_fast_path(
     label = normalize_label(text)
     if not label:
         raise ValueError("Topic label is required")
-    selected_sources = normalize_sources(sources or list(SCOUT_SOURCES))
+    selected_sources = normalize_sources(sources or default_sources())
     entry = TopicEntry(
         id=unique_topic_id(label, existing_topics or []),
         label=label,

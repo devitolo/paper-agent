@@ -12,9 +12,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+from paper_agents.runtime_config import ollama_url as configured_ollama_url
+
 
 DEFAULT_MODEL = "qwen2.5:1.5b-instruct"
-DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
+DEFAULT_OLLAMA_URL = configured_ollama_url()
 DEFAULT_EXTRACTION_DIR = Path("data/extractions")
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
 REQUIRED_KEYS = [

@@ -1,5 +1,16 @@
-.git/
-.venv/
-__pycache__/
-*.pyc
-.env
+# Allowlist: do not send customer data, credentials or git to Docker.
+**
+!Dockerfile
+!requirements.txt
+!paper_agents/
+!paper_agents/**
+!scripts/
+!scripts/**
+!sql/
+!sql/**
+!deploy/
+!deploy/templates/
+!deploy/templates/**
+**/__pycache__/
+**/*.pyc
+**/.env*
