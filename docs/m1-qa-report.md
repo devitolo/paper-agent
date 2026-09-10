@@ -31,7 +31,7 @@ Passed evidence:
 
 - Repeat the full acceptance on Linux x86-64 before claiming Linux support.
 - Publish one pinned multi-platform Project Paper image and package/pin the model-preparation helper instead of bind-mounting it from the checkout.
-- Choose and qualify release image references, Docker/Compose versions and resource thresholds. The current use of `ollama/ollama:latest` was limited to development QA; the digest above is evidence, not a release selection.
+- Qualify the v0.1.0 Ollama candidate `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba` through live macOS arm64 and Linux amd64 QA, then choose the Project Paper release image, Docker/Compose versions and resource thresholds. Registry inspection on 2026-09-10 confirmed its OCI index and platform children, but that inspection is evidence only, not release acceptance. The earlier use of `ollama/ollama:latest` was limited to development QA.
 - Exercise a released-image upgrade/rollback and the later backup policy before public release. This is outside the Fresh Install Produces Papers milestone.
 - Add the approved sanitized README screenshot during showcase work.
 
