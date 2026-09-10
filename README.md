@@ -1,10 +1,36 @@
 # Project Paper
 
-Project Paper is a system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
+Project Paper is a local-first system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
 
-> **Productization preview:** the new installer-fronted Docker Compose path and manual in-product Scout are under milestone validation. See the [M1 development usage guide](docs/m1-package-usage.md) and [acceptance report](docs/m1-qa-report.md). The older prototype and Mini instructions below remain development/operations references until the public quickstart replaces them.
+> **Productization preview:** the installer-fronted Docker Compose path and manual in-product Scout have passed the implemented macOS Apple Silicon M1 scope. Linux x86-64 qualification and published multi-platform images are still outstanding, so this repository currently supports a development package, not a public release. See the [M1 package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
 
 The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent stores pasted ChatGPT discussion summaries in immutable SQLite history with deterministic v1 parsing.
+
+## First Supported Path
+
+The current first-user path is:
+
+1. Use a fresh clone on macOS Apple Silicon with Docker Desktop.
+2. Run the M1 installer with a locally built app image and an explicit Ollama image reference.
+3. Open the loopback web UI.
+4. Add an enabled arXiv topic in **Topics**.
+5. Return to **Review Queue** and choose **Run Scout**.
+6. Review returned papers, copy a discussion prompt to ChatGPT, then paste the final feedback blob back into Project Paper.
+
+From a clean checkout:
+
+```bash
+cd /absolute/path/to/paper-agent
+bash scripts/install_project_paper.sh --build --ollama-image ollama/ollama:latest
+```
+
+`ollama/ollama:latest` is a development convenience, not a pinned release selection. The installer creates `.env` if missing, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
+
+Gemini profile synthesis is disabled in this package. Feedback blobs are still saved, parsed when possible, and available to deterministic Scout guidance, but direct profile evolution is not promised without the later optional Gemini packaging work.
+
+The packaged runtime stores user state in Compose volumes: `paper-data` for SQLite/artifacts/profile, `paper-config` for topics, and `ollama-data` for the model cache. Re-run the installer to repair/retry without deleting volumes. Do not use `db reset`, remove Compose volumes, or change the recorded project name as a normal recovery or upgrade step.
+
+Linux x86-64, published images, release upgrade/rollback, broader backup/restore guarantees, and public support policy are tracked in the M1/V1 productization docs rather than claimed here.
 
 ## Overview
 
@@ -33,7 +59,7 @@ Use this path for local commands, cron entries, deployment scripts, and future C
 - Open-access PDFs should be downloaded automatically when available.
 - Deterministic code should handle downloading, parsing, filtering, and storage; LLMs should make judgments rather than perform file transfer.
 
-See [docs/architecture.md](docs/architecture.md) and [docs/ai-stack.md](docs/ai-stack.md) for the target design.
+See [docs/architecture.md](docs/architecture.md) and [docs/ai-stack.md](docs/ai-stack.md) for the target design. The Mac mini operational notes later in this README describe the creator's native deployment and are not the new-user packaged install path.
 
 ## Current Project Status
 
@@ -60,6 +86,8 @@ Not implemented yet:
 - General open-access PDF resolution beyond arXiv, beyond the current Semantic Reader fallback.
 - systemd service and timer.
 - Benchmark recording and generated run reports.
+- Published multi-platform release images and Linux x86-64 package qualification.
+- A supported packaged upgrade/rollback path.
 
 ## MVP Workflow
 
@@ -76,7 +104,13 @@ The current scheduled path covers Scout -> Curator -> recommended PDF extraction
 
 ## Requirements
 
-Current prototype:
+M1 packaged development path:
+
+- macOS Apple Silicon with Docker Desktop and Compose.
+- Network access to arXiv and to pull Docker/Ollama images/model weights.
+- Docker configured with at least the installer's provisional 4 GiB memory and 6 GiB free-space preflight thresholds.
+
+Current native prototype/Mini operations:
 
 - Python 3.12 or Docker
 - OpenAI API key
@@ -93,6 +127,8 @@ Target runtime:
 - Cloud provider access for ChatGPT/Codex, Gemini, or future providers
 
 ## Run The Current Prototype
+
+These are historical native/Mini operations, not packaged onboarding. The current Compose file has no `paper-agents` service, so the legacy `docker compose run --rm paper-agents ...` examples below do not work with this package. Use the [M1 guide](docs/m1-package-usage.md) for installation, review, diagnostics and recovery; native CLI examples require their own host dependencies and configuration.
 
 Add your API key to `.env`:
 
@@ -154,7 +190,7 @@ Scout uses arXiv by default, including for nightly cron. Semantic Scholar and Op
 
 Semantic Scholar accepts `SEMANTIC_SCHOLAR_API_KEY`, sent as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows searches toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage. OpenAlex remains outside the daily arXiv cron path; run it with the separate weekly rotating script so stable search results do not exhaust the same tiny topic pool every day.
 
-Scout topics live in `config/topics.yaml` and can be steered from `/topics`, the Topic Management page in the Review Queue web server. The default flow is TopicAgent: describe what you want Project Paper to scout or change, local Ollama/Qwen proposes structured topic config, and you approve before anything is saved. The default model is `qwen2.5:1.5b-instruct`, configurable with `PAPER_AGENT_TOPIC_MODEL`; the Ollama generate URL can be changed with `PAPER_AGENT_TOPIC_OLLAMA_URL` or `PAPER_AGENT_OLLAMA_URL`; timeout uses `PAPER_AGENT_TOPIC_TIMEOUT_SECONDS`, default 30 seconds. `remove`/`delete`/`drop` physically remove a topic from `config/topics.yaml`; `disable`/`turn off`/`pause` preserves it with `enabled: false`. Scheduled source jobs select enabled config topics on future runs, while explicit CLI `--topic` values still override the config for one run. The UI does not run Scout immediately. Curator also penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, power grid, smart grid, and transportation incidents.
+Scout topics live in `config/topics.yaml` and can be steered from `/topics`, the Topic Management page in the Review Queue web server. The default flow is TopicAgent: describe what you want Project Paper to scout or change, local Ollama/Qwen proposes structured topic config, and you approve before anything is saved. The default model is `qwen2.5:1.5b-instruct`, configurable with `PAPER_AGENT_TOPIC_MODEL`; the Ollama generate URL can be changed with `PAPER_AGENT_TOPIC_OLLAMA_URL` or `PAPER_AGENT_OLLAMA_URL`; timeout uses `PAPER_AGENT_TOPIC_TIMEOUT_SECONDS`, default 30 seconds. `remove`/`delete`/`drop` physically remove a topic from `config/topics.yaml`; `disable`/`turn off`/`pause` preserves it with `enabled: false`. Scheduled source jobs select enabled config topics on future runs, while explicit CLI `--topic` values still override the config for one run. Saving topics does not run Scout immediately; the packaged Review Queue has a separate **Run Scout** action. Curator also penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, power grid, smart grid, and transportation incidents.
 
 Feedback blobs can include `Score: N` or decimal ratings such as `Score: 4.5`; parsed user scores must be between 1 and 5 and display on Review Queue cards as `Your score: N/5`.
 
@@ -484,11 +520,13 @@ The next work should build on the V2 Scout/Curator backend:
 5. Add provider adapters beyond Gemini for profile synthesis.
 6. Add general open-access PDF resolution beyond arXiv.
 
-See [docs/roadmap.md](docs/roadmap.md) for phased delivery.
+See [docs/roadmap.md](docs/roadmap.md) and [docs/productization-plan.md](docs/productization-plan.md) for phased delivery.
 
 ## Design Documents
 
-- [First supported release productization plan](docs/productization-plan.md) — PM-aligned Compose assessment, Fresh Install Produces Papers milestone, release gates, and owner-assigned backlog; packaging work is not yet implemented.
+- [M1 package usage](docs/m1-package-usage.md) — current development Compose installer and first manual discovery path.
+- [M1 acceptance report](docs/m1-qa-report.md) — macOS Apple Silicon evidence and remaining release gates.
+- [First supported release productization plan](docs/productization-plan.md) — PM-aligned Compose assessment, Fresh Install Produces Papers milestone, release gates, and owner-assigned backlog.
 - [Architecture](docs/architecture.md)
 - [AI stack](docs/ai-stack.md)
 - [Workflow](docs/workflow.md)

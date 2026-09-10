@@ -1,6 +1,6 @@
 # Project Paper: V1 productization assessment and plan
 
-Status: M1.1 installer/Compose packaging and M1.2 manual discovery are implemented in the working tree. Independent code QA passes; [live M1 acceptance](m1-qa-report.md) passes conditionally on macOS Apple Silicon, with Linux x86-64 and published-image qualification outstanding. Updated 2026-09-09 against repository baseline `0b8401f` and the PM's supplied “Productization Lead Background.”
+Status: M1.1 installer/Compose packaging and M1.2 manual discovery are implemented on `main`. Independent code QA passes; [live M1 acceptance](m1-qa-report.md) passes for the implemented macOS Apple Silicon scope, with Linux x86-64 and published-image qualification outstanding. Updated 2026-09-10 against repository baseline `4ad40f1` and the PM's supplied “Productization Lead Background.”
 
 ## Brief and revised direction
 
@@ -85,10 +85,10 @@ PM owns scope/priorities/UX. Productization Lead coordinates evidence and sequen
 | ID / phase | Accountable owner; collaborators | Dependency | Deliverable / acceptance |
 | --- | --- | --- | --- |
 | A0 Assessment/contract | Architect; PM, Developer | Current assessment | Confirm mount layout, model readiness and manual-run integration; PM resolves topic UX and bootstrap defaults. Existing components reused, no scoring changes. |
-| M1.1 Installer and Compose package — implemented; Mac live pass | Developer; Architect | A0 | Idempotent installer, one multi-architecture app image reference, Ollama service/model preparation, volumes and `.env.example`; host detection plus empty-volume startup, endpoint and permissions checks pass on each claimed platform. Re-running the installer preserves data and customer choices. Linux and published-image qualification remain. |
+| M1.1 Installer and Compose package — implemented; Mac live pass | Developer; Architect | A0 | Idempotent installer, Compose app/Ollama/model-preparation services, volumes and `.env.example`; host detection plus empty-volume startup, endpoint and permissions checks pass for macOS Apple Silicon. Re-running the installer preserves data and customer choices. Linux and published-image qualification remain. |
 | M1.2 First-run workflow — implemented; Mac live pass | Developer; PM, Architect | A0; integrate M1.1 | Existing topic UI → Run Scout path, durable status/retry and shared exclusion using the existing pipeline; three real papers reached the Mac QA queue without credentials. |
-| M1.3 Quickstart — development guide drafted | Technical Writer; Developer | Draft with M1.1/M1.2 | Exact minimum setup/start/restart steps available before QA; no undocumented creator setup. Public README/image references remain release work. |
-| M1.4 Fresh-install acceptance — Mac conditional pass | QA; Developer, Writer | M1.1–M1.3 | Mac Apple Silicon evidence is recorded in `docs/m1-qa-report.md`; repeat on Linux x86-64 and published artifacts before claiming both platforms. |
+| M1.3 Quickstart — development guide available | Technical Writer; Developer | M1.1/M1.2 | Minimum setup/start/restart steps are in `docs/m1-package-usage.md` and summarized in the README. Public pinned image references remain release work. |
+| M1.4 Fresh-install acceptance — Mac implemented-scope pass | QA; Developer, Writer | M1.1–M1.3 | Mac Apple Silicon evidence is recorded in `docs/m1-qa-report.md`; repeat on Linux x86-64 and published artifacts before claiming both platforms. |
 | V1.1 Data/upgrade safety | Architect; Developer, QA | M1 package layout | Developer implements minimal version/migration handling and matched backup/restore; QA rehearses upgrade, rollback, disk/write failure and feedback survival. Required before public users accumulate data. |
 | V1.2 Optional integrations/learning | Developer; Architect, QA | M1.4 | Gemini opt-in/auth disclosure and durable pending/applied/failed/retry state; no duplicate apply after restart. Verify local Scout feedback path independently. Semantic Scholar optional key/failure coverage. |
 | V1.3 Discussion handoff | Technical Writer; PM, QA | M1.4 | Publish prompt for section-by-section discussion, technical explanation, claims vs interpretation, user reactions, overall score and parser-compatible feedback. QA round-trip through existing copy/save UI; no ChatGPT dependency. |
@@ -136,4 +136,4 @@ Defer Go migration, multi-user/accounts, SaaS, Kubernetes, enterprise deployment
 
 ## Validation of this assessment
 
-Architect and Developer/QA reviews ground the gaps in the current files. Earlier local QA ran 192 tests on Python 3.14: 187 non-skipped passes, 5 skips, overall OK, with SQLite connection ResourceWarnings. That is regression evidence only, not fresh Compose/source/model/upgrade acceptance. This turn changes planning documentation only; M1 remains to be implemented and tested.
+Architect and Developer/QA reviews ground the gaps in the current files. M1 implementation is now on `main`; macOS Apple Silicon acceptance evidence is recorded in `docs/m1-qa-report.md`. Linux x86-64, published images, upgrade/rollback and full backup/restore remain release gates. Regression tests still do not replace fresh-host source/model acceptance on each claimed platform.

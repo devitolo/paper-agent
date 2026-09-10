@@ -2,6 +2,30 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-09-10
+
+### M1 local package and manual discovery path
+
+Status: Implemented on `main` in commit `4ad40f1`; macOS Apple Silicon accepted for the implemented M1 scope. Linux x86-64 qualification and published multi-platform images remain outstanding.
+
+Decision: Productization M1 should support one clear local-first Compose path before public release polish: installer, app container, private Ollama service, prepared Qwen model, loopback web UI, topic setup, manual Run Scout, review, and feedback save.
+
+Completed behavior:
+
+- `scripts/install_project_paper.sh` validates supported host/container pairing, Docker/Compose availability, resource preflights, image selections, app readiness, and bounded model inference.
+- Docker Compose runs `app`, `ollama`, and one-shot `prepare-model` services with persistent `paper-data`, `paper-config`, and `ollama-data` volumes.
+- Fresh installs start with empty topics and an empty profile, not creator data.
+- The packaged app publishes only the web UI on loopback and keeps Ollama on the Compose network.
+- The Review Queue exposes manual `Run Scout` for enabled arXiv topics and prevents overlapping full pipeline runs through the shared data-volume lock.
+- Packaged feedback save keeps raw/structured feedback while Gemini is disabled by default.
+- Recovery is installer-rerun oriented; deleting volumes, changing the project name, or resetting the database is not a normal repair/upgrade path.
+
+Release caveats:
+
+- The current package is development packaging, not a published release.
+- Linux x86-64 and pinned published image artifacts still need qualification.
+- Upgrade/rollback, packaged backup/restore, optional Gemini authentication, and public support policy remain V1 work.
+
 ## 2026-09-06
 
 ### Curator V3 evidence-aware scoring

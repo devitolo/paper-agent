@@ -1,10 +1,10 @@
 # M1 acceptance report
 
-Status: conditional pass on macOS Apple Silicon; Linux x86-64 qualification and published multi-platform images remain outstanding. Test date: 2026-09-09. Source baseline for the persistent tester's current working-tree review: `d6ae935` plus the uncommitted M1 productization changes under review.
+Status: conditional pass on macOS Apple Silicon; Linux x86-64 qualification and published multi-platform images remain outstanding. Test date: 2026-09-09. Earlier persistent-tester review evidence used baseline `d6ae935` plus then-uncommitted M1 productization changes; the final accepted implementation is committed on `main` as `4ad40f1`.
 
 ## Code and static validation
 
-- The persistent tester has not yet cleared the integrated M1.1 installer/Compose package and M1.2 manual Scout workflow. Its current container/code checks do not invoke live model or source-discovery calls.
+- Earlier persistent-tester container/code checks reviewed the integrated M1.1 installer/Compose package and M1.2 manual Scout workflow before the final commit; they did not invoke live model or source-discovery calls.
 - Previous full local suite: 228 total tests: 223 passed and 5 private ranking replay fixtures skipped. Current remediation retest: 233 total tests: 228 passed and 5 skipped.
 - Previous focused package/manual-run suite: 23 passed. Current remediation-focused suite: 27 passed.
 - `git diff --check`, Python compilation, Bash/sh syntax and Compose static configuration passed.
@@ -39,7 +39,7 @@ The first milestone is functionally demonstrated on one of the two target platfo
 
 ## Persistent Tester Final Gate (2026-09-10)
 
-**SHIP** for the implemented macOS M1 scope. The persistent tester found no actionable remediation defects.
+**SHIP** for the implemented macOS M1 scope at committed SHA `4ad40f1` (`4ad40f19bfc5693bde7679f04c18c2dcbf5971e1`). Earlier baseline-plus-uncommitted evidence above remains historical evidence, not the final gate identifier. The persistent tester found no actionable remediation defects.
 
 - 58 independent malformed-state and readiness-cache probes passed.
 - Full suite: 233 total tests; 228 passed and 5 private-fixture skips.
