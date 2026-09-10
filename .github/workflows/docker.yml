@@ -2,8 +2,6 @@ name: Docker
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*.*.*"
   pull_request:
@@ -14,24 +12,70 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  RELEASE_EVENT_NAME: ${{ github.event_name }}
+  RELEASE_REF_TYPE: ${{ github.ref_type }}
+  RELEASE_REF_NAME: ${{ github.ref_name }}
 
 jobs:
-  build:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      release_version: ${{ steps.release.outputs.release_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Validate release tag
+        id: release
+        shell: bash
+        run: |
+          if [[ "$RELEASE_EVENT_NAME" == push && "$RELEASE_REF_TYPE" == tag && "$RELEASE_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "release_tag=true" >> "$GITHUB_OUTPUT"
+            echo "release_version=$RELEASE_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_tag=false" >> "$GITHUB_OUTPUT"
+            echo "release_version=validation" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate multi-platform build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.release.outputs.release_version }}
+
+  publish:
+    needs: validate
+    if: needs.validate.outputs.release_tag == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -39,18 +83,46 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=sha,prefix=sha-
-            type=ref,event=branch
             type=ref,event=tag
 
       - name: Build and publish
-        uses: docker/build-push-action@v6
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64,linux/arm64
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ needs.validate.outputs.release_version }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Write release metadata
+        run: |
+          mkdir -p release-metadata
+          cat > release-metadata/project-paper-${{ needs.validate.outputs.release_version }}.json <<'EOF'
+          {
+            "image": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}",
+            "version": "${{ needs.validate.outputs.release_version }}",
+            "revision": "${{ github.sha }}",
+            "digest": "${{ steps.build.outputs.digest }}",
+            "platforms": ["linux/amd64", "linux/arm64"],
+            "provenance": "build-push-action provenance attestation",
+            "sbom": "build-push-action SPDX SBOM attestation"
+          }
+          EOF
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-paper-release-metadata-${{ needs.validate.outputs.release_version }}
+          path: release-metadata/

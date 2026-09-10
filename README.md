@@ -24,7 +24,7 @@ cd /absolute/path/to/paper-agent
 bash scripts/install_project_paper.sh --build --ollama-image ollama/ollama:latest
 ```
 
-`ollama/ollama:latest` is a development convenience, not a pinned release selection. The installer creates `.env` if missing, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
+`ollama/ollama:latest` is a development convenience, not a pinned release selection. The installer creates `.env` if missing, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. `--build` selects the explicit local development Compose overlay; release Compose contains no build stanza or checkout helper mount and requires versioned/digest image selections. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
 
 Gemini profile synthesis is disabled in this package. Feedback blobs are still saved, parsed when possible, and available to deterministic Scout guidance, but direct profile evolution is not promised without the later optional Gemini packaging work.
 

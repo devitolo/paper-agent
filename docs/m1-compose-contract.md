@@ -14,7 +14,7 @@ M1 targets Linux x86-64 with Docker Engine/Compose and macOS Apple Silicon with 
 | --- | --- |
 | `app` | One application image runs the existing web server and bounded manual pipeline worker. Include Python/SQLite, `sql/`, assets, scripts, clean initialization templates and `pdftotext`. No personal `data/`, secrets, model weights or learned profile enter the image. |
 | `ollama` | Own inference, its API and model files. Use a private Compose network; do not publish its port to the host. |
-| `prepare-model` | One-shot helper uses the pinned Ollama image, waits for Ollama API readiness and checks for `qwen2.5:1.5b-instruct`. Pull only if absent; report failure and permit an explicit retry. No parallel pulls or permanent helper service. |
+| `prepare-model` | One-shot entrypoint in the same pinned Project Paper app image waits for Ollama API readiness and checks for `qwen2.5:1.5b-instruct`. It uses the Ollama HTTP API, pulls only if absent, reports failure and permits an explicit retry. No checkout mount, Ollama CLI dependency, parallel pulls or permanent helper service. |
 
 Publish `127.0.0.1:8000` to app port 8000; bind the web process to `0.0.0.0` inside its container so publishing works. Container-wide binding does not authorize host-wide publishing. An occupied host port is a reported installation failure; an explicit infrastructure port override is allowed and preserved. Do not terminate the process occupying it.
 

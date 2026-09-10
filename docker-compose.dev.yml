@@ -1,0 +1,5 @@
+# Development-only overlay. The release Compose file intentionally contains no build stanza.
+services:
+  app:
+    build:
+      context: .

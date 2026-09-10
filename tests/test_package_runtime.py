@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import signal
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
+from http.client import HTTPResponse
 from pathlib import Path
 from unittest.mock import patch
 
-from paper_agents import curator_agent, package_runtime, runtime_config, topics, web
+from paper_agents import curator_agent, package_runtime, prepare_model, runtime_config, topics, web
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -122,6 +128,16 @@ assert topic_agent.topic_ollama_url() == expected
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM structured_feedback").fetchone()[0], 1)
         connection.close()
 
+    def test_compose_prepare_model_uses_packaged_app_image_without_bind_mount(self):
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        development = (ROOT / "docker-compose.dev.yml").read_text(encoding="utf-8")
+        self.assertIn("prepare-model:", compose)
+        self.assertIn("image: ${PAPER_APP_IMAGE", compose)
+        self.assertIn('entrypoint: ["python", "-m", "paper_agents.prepare_model"]', compose)
+        self.assertNotIn("./deploy/prepare-model.sh:/prepare-model.sh", compose)
+        self.assertNotIn("build:", compose)
+        self.assertIn("build:", development)
+
 
 class InstallerTests(unittest.TestCase):
     def setUp(self):
@@ -139,8 +155,10 @@ a=sys.argv[1:]
 if os.environ.get('INSTALL_TEST_FAIL_IMAGES') == '1':
  if a[:2] == ['image','inspect'] or (a[:1] == ['compose'] and 'pull' in a): sys.exit(1)
 if a[:1]==['info']:
- print('linux/aarch64' if 'Architecture' in a[-1] else '8589934592')
-elif a[:2]==['image','inspect'] and '--format' in a: print('linux/arm64')
+ platform=os.environ.get('INSTALL_TEST_PLATFORM', 'linux/arm64')
+ print(('linux/x86_64' if platform == 'linux/amd64' else 'linux/aarch64') if 'Architecture' in a[-1] else '8589934592')
+elif a[:2]==['image','inspect'] and '--format' in a:
+ print('https://github.com/devitolo/paper-agent|v0.1.0' if 'org.opencontainers.image.source' in a[a.index('--format') + 1] else os.environ.get('INSTALL_TEST_PLATFORM', 'linux/arm64'))
 elif a[:1]==['inspect']: print('false' if 'Running' in a[2] else '0')
 elif a[:1]==['compose'] and 'ps' in a: print('helper-container')
 ''')
@@ -183,17 +201,17 @@ elif a[:1]==['compose'] and 'ps' in a: print('helper-container')
 
     def test_failed_first_image_acquisition_allows_corrected_selection(self):
         self.env['INSTALL_TEST_FAIL_IMAGES'] = '1'
-        failed = self.run_installer('--app-image', 'project-paper:typo', '--ollama-image', 'ollama/ollama:test')
+        failed = self.run_installer('--app-image', 'project-paper:v0.1.0', '--ollama-image', 'ollama/ollama:test')
         self.assertNotEqual(failed.returncode, 0)
-        self.assertIn('Selected app image unavailable', failed.stderr)
+        self.assertIn('Selected release app image unavailable', failed.stderr)
         self.assertFalse((self.root / '.paper-install').exists())
         with (self.root / '.env').open('a') as output:
-            output.write('\nPAPER_APP_IMAGE=project-paper:corrected\n')
+            output.write('\nPAPER_APP_IMAGE=project-paper:v0.1.1\n')
         del self.env['INSTALL_TEST_FAIL_IMAGES']
         corrected = self.run_installer()
         self.assertEqual(corrected.returncode, 0, corrected.stderr)
         record = (self.root / '.paper-install').read_bytes()
-        self.assertIn(b'app_image=project-paper:corrected', record)
+        self.assertIn(b'app_image=project-paper:v0.1.1', record)
         self.assertEqual(self.run_installer().returncode, 0)
         self.assertEqual((self.root / '.paper-install').read_bytes(), record)
 
@@ -203,38 +221,277 @@ elif a[:1]==['compose'] and 'ps' in a: print('helper-container')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / ".env").exists())
 
+    def test_linux_x86_64_selects_amd64_without_emulation(self):
+        self.executable("uname", '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n')
+        self.env["INSTALL_TEST_PLATFORM"] = "linux/amd64"
+        result = self.run_installer("--build", "--ollama-image", "ollama/ollama:test")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("platform=linux/amd64", (self.root / ".paper-install").read_text())
+
+    def test_release_rejects_latest_and_mode_change_on_rerun(self):
+        self.assertNotEqual(
+            self.run_installer("--app-image", "ghcr.io/devitolo/paper-agent:latest", "--ollama-image", "ollama/ollama:test").returncode,
+            0,
+        )
+        (self.root / ".env").unlink()
+        installed = self.run_installer("--app-image", "ghcr.io/devitolo/paper-agent:v0.1.0", "--ollama-image", "ollama/ollama:test")
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        result = self.run_installer("--build")
+        self.assertIn("mode differs", result.stderr)
+
+    def test_release_requires_oci_project_metadata(self):
+        self.executable("docker", self.root.joinpath("bin/docker").read_text().replace(
+            "https://github.com/devitolo/paper-agent|v0.1.0", "not-project-paper|unknown"
+        ))
+        result = self.run_installer("--app-image", "ghcr.io/devitolo/paper-agent:v0.1.0", "--ollama-image", "ollama/ollama:test")
+        self.assertIn("OCI source/version metadata", result.stderr)
+
+    def test_release_digest_references_are_exact_and_ollama_must_be_pinned(self):
+        digest = "a" * 64
+        app = f"ghcr.io/devitolo/paper-agent@sha256:{digest}"
+        ollama = f"ollama/ollama@sha256:{digest}"
+        valid = self.run_installer("--app-image", app, "--ollama-image", ollama)
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        for bad in (f"ghcr.io/devitolo/paper-agent@sha256:{'a' * 63}", f"ghcr.io/devitolo/paper-agent@sha256:{'g' * 64}"):
+            (self.root / ".env").unlink(missing_ok=True)
+            (self.root / ".paper-install").unlink(missing_ok=True)
+            result = self.run_installer("--app-image", bad, "--ollama-image", ollama)
+            self.assertIn("Release app image", result.stderr)
+        for bad in ("ollama/ollama", "ollama/ollama:latest", "ollama/ollama:latest-cpu"):
+            (self.root / ".env").unlink(missing_ok=True)
+            (self.root / ".paper-install").unlink(missing_ok=True)
+            result = self.run_installer("--app-image", app, "--ollama-image", bad)
+            self.assertIn("Release Ollama image", result.stderr)
+
 
 class ModelPreparationTests(unittest.TestCase):
-    def test_cached_model_is_not_pulled_again_and_hung_api_is_bounded(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            command = root / "ollama"
-            command.write_text(f'''#!{sys.executable}
-import os, pathlib, sys, time
-root=pathlib.Path(os.environ['MODEL_TEST_DIR'])
-if os.environ.get('MODEL_TEST_HANG') == '1': time.sleep(30)
-if sys.argv[1] == 'show': sys.exit(0 if (root/'model').exists() else 1)
-if sys.argv[1] == 'pull':
- (root/'model').touch()
- with (root/'pulls').open('a') as f: f.write('pull\\n')
-''')
-            command.chmod(0o755)
-            env = {**os.environ, "PATH": directory + ":" + os.environ["PATH"],
-                "MODEL_TEST_DIR": directory, "PAPER_MODEL_PREPARE_TIMEOUT": "2", "PAPER_MODEL_PULL_ATTEMPTS": "1"}
-            def prepare():
-                return subprocess.run(["sh", str(ROOT / "deploy/prepare-model.sh")],
-                    env=env, capture_output=True, text=True, timeout=6)
-            first = prepare()
-            self.assertEqual(first.returncode, 0, first.stderr)
-            self.assertIn("pulling:", first.stdout)
-            second = prepare()
-            self.assertEqual(second.returncode, 0, second.stderr)
-            self.assertNotIn("pulling:", second.stdout)
-            self.assertEqual((root / "pulls").read_text(), "pull\n")
-            env["MODEL_TEST_HANG"] = "1"
-            failed = prepare()
-            self.assertNotEqual(failed.returncode, 0)
-            self.assertIn("timed out or interrupted", failed.stderr)
+    def test_packaged_prepare_model_skips_cached_model_and_pulls_when_absent(self):
+        events = []
+
+        def fake_request(path, payload=None, *, timeout=5, deadline=None):
+            events.append((path, payload))
+            if path == "/api/tags":
+                present = any(event[0] == "/api/pull" for event in events)
+                return {"models": [{"name": "qwen2.5:1.5b-instruct"}]} if present else {"models": []}
+            return {}
+
+        with patch.object(prepare_model, "request_json", side_effect=fake_request), \
+             patch.object(prepare_model, "pull_model", side_effect=lambda model, deadline: events.append(("/api/pull", {"name": model}))):
+            prepare_model.prepare_model(budget=10, attempts=1)
+
+        self.assertIn(("/api/pull", {"name": "qwen2.5:1.5b-instruct"}), events)
+
+        with patch.object(prepare_model, "request_json", return_value={"models": [{"name": "qwen2.5:1.5b-instruct"}]}), \
+             patch.object(prepare_model, "pull_model") as pull:
+            prepare_model.prepare_model(budget=10, attempts=1)
+            pull.assert_not_called()
+
+    def test_packaged_prepare_model_retries_pull_and_rejects_malformed_responses(self):
+        calls = []
+        def tags(_path, _payload=None, *, timeout=5, deadline=None):
+            return {"models": [{"name": "qwen2.5:1.5b-instruct"}]} if len(calls) == 2 else {"models": []}
+
+        def pull(_model, _deadline):
+            calls.append("pull")
+            if len(calls) == 1:
+                raise OSError("temporary network failure")
+
+        with patch.object(prepare_model, "request_json", side_effect=tags), \
+             patch.object(prepare_model, "pull_model", side_effect=pull), \
+             patch.object(prepare_model.time, "sleep"):
+            prepare_model.prepare_model(budget=10, attempts=2)
+        self.assertEqual(calls, ["pull", "pull"])
+
+        with patch.object(prepare_model, "request_json", return_value={"models": "not-a-list"}), \
+             patch.object(prepare_model.time, "monotonic", side_effect=[0, 0]):
+            with self.assertRaisesRegex(prepare_model.ModelPreparationError, "malformed model listing"):
+                prepare_model.model_present("qwen2.5:1.5b-instruct", deadline=1)
+
+    def test_packaged_prepare_model_enforces_timeout_budget(self):
+        with patch.object(prepare_model, "request_json", side_effect=OSError("unavailable")), \
+             patch.object(prepare_model.time, "monotonic", side_effect=[0, 0, 2, 2]), \
+             patch.object(prepare_model.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+                prepare_model.wait_for_api(deadline=1)
+
+    def test_cached_result_after_deadline_and_malformed_models_are_rejected(self):
+        with patch.object(prepare_model, "request_json", return_value={"models": [{"name": "qwen2.5:1.5b-instruct"}]}), \
+             patch.object(prepare_model.time, "monotonic", side_effect=[0, 2]):
+            with self.assertRaisesRegex(prepare_model.ModelPreparationError, "timed out"):
+                prepare_model.model_present("qwen2.5:1.5b-instruct", deadline=1)
+        for payload in (None, [], "bad", {"models": [None]}, {"models": [{"name": None}]}, {"models": [{"name": ""}]}):
+            with self.assertRaises(prepare_model.ModelPreparationError):
+                prepare_model.validated_models(payload)  # type: ignore[arg-type]
+
+    def test_real_pull_stream_rejects_malformed_and_deadline_trickle(self):
+        class Response:
+            def __init__(self, payload): self.payload = iter(payload)
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _size): return next(self.payload)
+
+        with patch.object(prepare_model.urllib.request, "urlopen", return_value=Response([b'{"status":"pulling"}\n', b''])), \
+             patch.object(prepare_model.time, "monotonic", return_value=0):
+            prepare_model.pull_model("qwen2.5:1.5b-instruct", deadline=10)
+        for payload in ([b'[]\n', b''], [b'{"status":null}\n', b''], [b'{"done":"yes"}\n', b'']):
+            with patch.object(prepare_model.urllib.request, "urlopen", return_value=Response(payload)), \
+                 patch.object(prepare_model.time, "monotonic", return_value=0):
+                with self.assertRaises(prepare_model.ModelPreparationError):
+                    prepare_model.pull_model("qwen2.5:1.5b-instruct", deadline=10)
+        ticks = iter([0, 0, 0, 0, 0, 2])
+        with patch.object(prepare_model.urllib.request, "urlopen", return_value=Response([b'x', b'y', b'z'])), \
+             patch.object(prepare_model.time, "monotonic", side_effect=lambda: next(ticks)):
+            with self.assertRaisesRegex(prepare_model.ModelPreparationError, "timed out"):
+                prepare_model.pull_model("qwen2.5:1.5b-instruct", deadline=1)
+
+    def test_real_http_bodies_obey_wall_clock_budget(self):
+        def response(parts):
+            client, server = socket.socketpair()
+            total = sum(len(part) for part, _delay in parts)
+            server.sendall(f"HTTP/1.1 200 OK\r\nContent-Length: {total}\r\n\r\n".encode())
+            def write():
+                try:
+                    for part, delay in parts:
+                        server.sendall(part)
+                        time.sleep(delay)
+                except BrokenPipeError:
+                    pass
+                finally:
+                    server.close()
+            writer = threading.Thread(target=write)
+            writer.start()
+            result = HTTPResponse(client)
+            result.begin()
+            self.addCleanup(client.close)
+            self.addCleanup(writer.join, 1)
+            return result
+
+        started = time.monotonic()
+        with self.assertRaises(prepare_model.ModelPreparationError):
+            prepare_model.read_body(response([(bytes([byte]), 0.03) for byte in b'{"models":[]}']), started + 0.12)
+        self.assertLess(time.monotonic() - started, 0.35)
+
+    def test_chunked_protocol_framing_obeys_process_wall_clock_deadline(self):
+        def chunked_response(parts):
+            client, server = socket.socketpair()
+            server.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+            def write():
+                try:
+                    for part, delay in parts:
+                        server.sendall(part)
+                        time.sleep(delay)
+                except BrokenPipeError:
+                    pass
+                finally:
+                    server.close()
+            writer = threading.Thread(target=write)
+            writer.start()
+            result = HTTPResponse(client)
+            result.begin()
+            self.addCleanup(client.close)
+            self.addCleanup(writer.join, 1)
+            return result, writer
+
+        class ContextResponse:
+            def __init__(self, value): self.value = value
+            def __enter__(self): return self.value
+            def __exit__(self, *_args): self.value.close(); return False
+
+        tags, tags_writer = chunked_response([(b"F", 0.03)] * 20)
+        started = time.monotonic()
+        with patch.object(prepare_model.urllib.request, "urlopen", return_value=ContextResponse(tags)):
+            with self.assertRaises(prepare_model.ModelPreparationError):
+                with prepare_model.wall_clock_deadline(started + 0.12):
+                    prepare_model.request_json("/api/tags", deadline=started + 0.12)
+        self.assertLess(time.monotonic() - started, 0.35)
+        tags_writer.join(1)
+        self.assertFalse(tags_writer.is_alive())
+
+        event = b'{"status":"done"}\n'
+        first_chunk = f"{len(event):X}\r\n".encode() + event + b"\r\n0\r\nX"
+        pull, pull_writer = chunked_response([(first_chunk, 0.03)] + [(b"X", 0.03)] * 20)
+        started = time.monotonic()
+        with patch.object(prepare_model.urllib.request, "urlopen", return_value=ContextResponse(pull)):
+            with self.assertRaises(prepare_model.ModelPreparationError):
+                with prepare_model.wall_clock_deadline(started + 0.12):
+                    prepare_model.pull_model("qwen2.5:1.5b-instruct", deadline=started + 0.12)
+        self.assertLess(time.monotonic() - started, 0.35)
+        pull_writer.join(1)
+        self.assertFalse(pull_writer.is_alive())
+
+    def test_wall_clock_deadline_rejects_off_main_thread(self):
+        errors = []
+        def run():
+            try:
+                with prepare_model.wall_clock_deadline(time.monotonic() + 1):
+                    pass
+            except Exception as error:
+                errors.append(error)
+        worker = threading.Thread(target=run)
+        worker.start()
+        worker.join(1)
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], prepare_model.ModelPreparationError)
+        self.assertIn("main thread", str(errors[0]))
+
+    def test_wall_clock_deadline_rejects_and_preserves_active_timers(self):
+        original_handler = signal.getsignal(signal.SIGALRM)
+        original_timer = signal.getitimer(signal.ITIMER_REAL)
+        fired = []
+        def handler(_signum, _frame): fired.append("alarm")
+        try:
+            signal.signal(signal.SIGALRM, handler)
+            for delay, interval in ((0.05, 0.0), (0.05, 0.05)):
+                signal.setitimer(signal.ITIMER_REAL, delay, interval)
+                with self.assertRaisesRegex(prepare_model.ModelPreparationError, "another ITIMER_REAL"):
+                    with prepare_model.wall_clock_deadline(time.monotonic() + 1):
+                        pass
+                remaining, preserved_interval = signal.getitimer(signal.ITIMER_REAL)
+                self.assertGreater(remaining, 0)
+                self.assertEqual(preserved_interval, interval)
+                time.sleep(0.12)
+                self.assertTrue(fired)
+                fired.clear()
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            with self.assertRaises(ValueError):
+                with prepare_model.wall_clock_deadline(time.monotonic() + 1):
+                    raise ValueError("expected")
+            self.assertIs(signal.getsignal(signal.SIGALRM), handler)
+            self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, original_handler)
+            if original_timer[0] > 0 or original_timer[1] > 0:
+                signal.setitimer(signal.ITIMER_REAL, *original_timer)
+
+    def test_unicode_errors_retry_as_model_preparation_errors_and_main_fails_cleanly(self):
+        with self.assertRaises(prepare_model.ModelPreparationError):
+            prepare_model.decode_json(b"\xff", "tags")
+        with patch.object(prepare_model, "request_json", side_effect=[prepare_model.ModelPreparationError("bad utf-8"), {"models": []}]), \
+             patch.object(prepare_model.time, "monotonic", return_value=0), \
+             patch.object(prepare_model.time, "sleep"):
+            prepare_model.wait_for_api(deadline=1)
+        with patch.object(prepare_model, "prepare_model", side_effect=prepare_model.ModelPreparationError("bad utf-8")):
+            self.assertEqual(prepare_model.main(), 1)
+
+
+class WorkflowContractTests(unittest.TestCase):
+    def test_only_strict_semver_pushes_can_publish(self):
+        workflow = (ROOT / ".github/workflows/docker.yml").read_text(encoding="utf-8")
+        match = re.search(r"=~ (\^v\([^\n]+\$)", workflow)
+        self.assertIsNotNone(match)
+        pattern = match.group(1)
+        self.assertTrue(re.fullmatch(pattern, "v0.1.0"))
+        for value in ("v01.2.3", "v1.02.3", "v1.2.03", "v1.2.3-rc.1", "v1.2", "version1.2.3"):
+            self.assertIsNone(re.fullmatch(pattern, value), value)
+        self.assertIn('"$RELEASE_REF_NAME"', workflow)
+        self.assertNotIn('"${{ github.ref_name }}"', workflow)
+        self.assertIn("workflow_dispatch", workflow)
+        self.assertIn("publish:", workflow)
+        self.assertIn("if: needs.validate.outputs.release_tag == 'true'", workflow)
+        self.assertIn("packages: write", workflow)
+        self.assertIn("docker/setup-qemu-action@v3", workflow)
+        self.assertIn("platforms: linux/amd64,linux/arm64", workflow)
 
 
 if __name__ == "__main__":

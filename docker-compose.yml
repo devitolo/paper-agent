@@ -1,7 +1,6 @@
 services:
   app:
     image: ${PAPER_APP_IMAGE:?Set the selected application image reference}
-    build: .
     restart: unless-stopped
     ports:
       - "127.0.0.1:${PAPER_PORT:-8000}:8000"
@@ -31,18 +30,17 @@ services:
       timeout: 5s
       retries: 12
   prepare-model:
-    image: ${PAPER_OLLAMA_IMAGE}
+    image: ${PAPER_APP_IMAGE:?Set the selected application image reference}
     restart: "no"
     depends_on:
       ollama:
         condition: service_started
     environment:
-      OLLAMA_HOST: http://ollama:11434
+      PAPER_AGENT_PACKAGED: "1"
+      PAPER_AGENT_OLLAMA_URL: http://ollama:11434/api/generate
       PAPER_MODEL_PREPARE_TIMEOUT: ${PAPER_MODEL_PREPARE_TIMEOUT:-1800}
       PAPER_MODEL_PULL_ATTEMPTS: ${PAPER_MODEL_PULL_ATTEMPTS:-2}
-    entrypoint: ["/bin/sh", "/prepare-model.sh"]
-    volumes:
-      - ./deploy/prepare-model.sh:/prepare-model.sh:ro
+    entrypoint: ["python", "-m", "paper_agents.prepare_model"]
 volumes:
   paper-data:
   paper-config:

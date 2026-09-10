@@ -1,5 +1,16 @@
 FROM python:3.12-slim
 
+ARG BUILD_DATE=unknown
+ARG VCS_REF=unknown
+ARG VERSION=dev
+
+LABEL org.opencontainers.image.title="Project Paper" \
+      org.opencontainers.image.description="Local-first research paper discovery and review app" \
+      org.opencontainers.image.source="https://github.com/devitolo/paper-agent" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}"
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils \

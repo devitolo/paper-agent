@@ -1,4 +1,4 @@
-# M1 Compose package (development, not a published release)
+# M1 Compose package (v0.1.0 candidate, not a published or qualified release)
 
 This installs the app and local model runtime, with manual discovery from the Review Queue. The implemented macOS Apple Silicon scope has passed M1 acceptance; Linux x86-64 qualification and published multi-platform images remain outstanding. The existing native Mini deployment is unchanged.
 
@@ -11,9 +11,9 @@ cd /absolute/path/to/paper-agent
 bash scripts/install_project_paper.sh --build --ollama-image ollama/ollama:latest
 ```
 
-`ollama/ollama:latest` is the current development example used for local installation; release engineering must assign and qualify a pinned Ollama digest and the single multi-architecture Project Paper image before publication. `--build` creates `project-paper:local-m1` for the current architecture only if that image is absent; a cached image is reused even with this flag; it does not publish or demonstrate a multi-platform manifest. A published package will select its pinned image using `--app-image` without `--build`.
+`ollama/ollama:latest` is the current development example used for local installation; it is rejected for a release install. Release engineering must assign and qualify a pinned Ollama index digest and the single multi-architecture Project Paper image before publication. `--build` creates `project-paper:local-arm64` or `project-paper:local-amd64` for the current architecture only if that image is absent; a cached image is reused even with this flag; it does not publish or demonstrate a multi-platform manifest. A published package will select its pinned app image using `--app-image` without `--build`; the installer rejects `latest`, validates Project Paper OCI source/version labels, and records the exact chosen image references.
 
-The `prepare-model` script currently uses a bind mount from this checkout. This is development packaging only: publication must package that helper as a versioned, pinned release artifact rather than depend on mutable checkout content.
+`prepare-model` is included in the Project Paper app image and talks only to the private Ollama HTTP API. It never mounts or executes a checkout helper and does not require the Ollama CLI in the app image.
 
 The installer creates `.env` from `.env.example` only when absent. Existing `.env` values are preserved; set literal unquoted values for the documented package keys. `PAPER_PORT` defaults to 8000 and may be changed if occupied. Gemini is disabled in this package. arXiv is the default topic source; initial topics and profile interests are empty. The package does not import the creator's papers, configuration or learned profile. Optional-provider setup is later work.
 
@@ -92,7 +92,7 @@ Known M1 limits:
 - macOS Apple Silicon is the only live accepted development path recorded so far.
 - Linux x86-64 remains a target, not a qualified support claim.
 - No Project Paper multi-platform image has been published.
-- `prepare-model` is still mounted from the checkout instead of shipped as a pinned release artifact.
+- v0.1.0 has not been published or qualified; release installs must use the published multi-platform app and Ollama index digests once QA has approved them.
 - No packaged automatic schedule is installed.
 - OpenAlex, Semantic Scholar, and Gemini are not part of the default packaged flow.
 - Upgrade/rollback, full packaged backup/restore, and old-version support policy remain V1 work.

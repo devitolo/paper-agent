@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M1.1 development installer. Never sources customer configuration or deletes volumes.
+# Installer for either an immutable release image or an explicit local development build.
 set -euo pipefail
 umask 077
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -18,9 +18,21 @@ while [[ $# -gt 0 ]]; do
     *) fail "Usage: bash scripts/install_project_paper.sh [--build] [--ollama-image REFERENCE] [--app-image REFERENCE]" ;;
   esac
 done
+mode=release
+[[ "$build" == 1 ]] && mode=development
 for requested in "$requested_ollama" "$requested_app"; do
   [[ -z "$requested" || "$requested" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$ ]] || fail "Image references must be literal Docker references"
 done
+is_immutable_ref() { [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*@sha256:[a-f0-9]{64}$ ]]; }
+is_release_tag() { [[ "$1" =~ :v[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9._-]+)?$ ]]; }
+is_pinned_ollama_ref() {
+  is_immutable_ref "$1" && return 0
+  local final_component=${1##*/}
+  [[ "$final_component" == *:* ]] || return 1
+  local tag=${final_component##*:}
+  case "$tag" in [Ll][Aa][Tt][Ee][Ss][Tt]*) return 1 ;; esac
+  [[ "$tag" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]
+}
 case "$(uname -s)/$(uname -m)" in
   Darwin/arm64) platform=linux/arm64 ;;
   Linux/x86_64) platform=linux/amd64 ;;
@@ -41,6 +53,9 @@ if [[ ! -e .env ]]; then
   # The template is trusted, but customer .env is never executed.
   [[ -z "$requested_ollama" ]] || printf '\nPAPER_OLLAMA_IMAGE=%s\n' "$requested_ollama" >> .env
   [[ -z "$requested_app" ]] || printf '\nPAPER_APP_IMAGE=%s\n' "$requested_app" >> .env
+  if [[ "$build" == 1 && -z "$requested_app" ]]; then
+    printf '\nPAPER_APP_IMAGE=project-paper:local-%s\n' "${platform#linux/}" >> .env
+  fi
 fi
 chmod 600 .env
 read_setting() {
@@ -70,20 +85,41 @@ if [[ -f "$record" ]]; then
   [[ "$identity" =~ ^paper-[a-z0-9-]+$ ]] || fail "Invalid saved installation identity; do not create replacement volumes"
   [[ "$(recorded directory)" == "$INSTALL_DIR" ]] || fail "Installation directory moved; explicit relocation is required to preserve volume identity"
   [[ "$(recorded platform)" == "$platform" ]] || fail "Saved installation platform differs; migration is separate explicit work"
+  recorded_mode=$(recorded mode)
+  [[ "$recorded_mode" == development || "$recorded_mode" == release ]] || fail "Saved installation mode is invalid"
+  if [[ "$build" == 1 ]]; then
+    [[ "$recorded_mode" == development ]] || fail "Saved installation mode differs; development and release installations are separate explicit work"
+  else
+    mode="$recorded_mode"
+  fi
   [[ "$(recorded app_image)" == "$PAPER_APP_IMAGE" && "$(recorded ollama_image)" == "$PAPER_OLLAMA_IMAGE" ]] || fail "Image selections changed; an installer rerun is not an upgrade"
   echo "Repairing existing installation $identity at its recorded image selection."
 else
   identity="paper-$(date +%s)-$$"
 fi
+if [[ "$mode" == release ]]; then
+  [[ "$PAPER_APP_IMAGE" != *:latest ]] || fail "Release installation does not accept latest; select a versioned tag or immutable digest"
+  (is_immutable_ref "$PAPER_APP_IMAGE" || is_release_tag "$PAPER_APP_IMAGE") || fail "Release app image must use a vMAJOR.MINOR.PATCH tag or immutable sha256 digest"
+  is_pinned_ollama_ref "$PAPER_OLLAMA_IMAGE" || fail "Release Ollama image must use an explicit non-latest version tag or immutable sha256 digest"
+fi
 export COMPOSE_PROJECT_NAME="$identity"
-compose() { docker compose --project-name "$identity" --project-directory "$INSTALL_DIR" --env-file "$INSTALL_DIR/.env" -f "$INSTALL_DIR/docker-compose.yml" "$@"; }
+compose_files=(-f "$INSTALL_DIR/docker-compose.yml")
+[[ "$mode" == development ]] && compose_files+=(-f "$INSTALL_DIR/docker-compose.dev.yml")
+compose() { docker compose --project-name "$identity" --project-directory "$INSTALL_DIR" --env-file "$INSTALL_DIR/.env" "${compose_files[@]}" "$@"; }
 compose config --quiet || fail "Compose configuration is invalid; requires a compatible Compose v2"
 # Never rebuild a previously selected local image implicitly on an ordinary rerun.
 if ! docker image inspect "$PAPER_APP_IMAGE" >/dev/null 2>&1; then
   if [[ "$build" == 1 ]]; then compose build app || fail "Application image build failed";
-  else compose pull app || fail "Selected app image unavailable; no public release is currently published. Use --build for local development"; fi
+  else compose pull app || fail "Selected release app image unavailable; select a published release digest/tag or use --build for local development"; fi
 fi
 docker image inspect "$PAPER_OLLAMA_IMAGE" >/dev/null 2>&1 || compose pull ollama || fail "Selected Ollama image could not be obtained"
+release_version=
+if [[ "$mode" == release ]]; then
+  release_metadata=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.source" }}|{{ index .Config.Labels "org.opencontainers.image.version" }}' "$PAPER_APP_IMAGE")
+  release_source=${release_metadata%%|*}
+  release_version=${release_metadata#*|}
+  [[ "$release_source" == "https://github.com/devitolo/paper-agent" && -n "$release_version" && "$release_version" != "<no value>" ]] || fail "Selected release app image is missing Project Paper OCI source/version metadata"
+fi
 for selected in "$PAPER_APP_IMAGE" "$PAPER_OLLAMA_IMAGE"; do
   actual=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$selected")
   [[ "$actual" == "$platform" ]] || fail "Selected image has an incompatible platform; emulation is not a supported fallback"
@@ -92,8 +128,8 @@ done
 # before creating any services or volumes. Failed first pulls remain correctable.
 if [[ ! -f "$record" ]]; then
   {
-    printf 'project=%s\ndirectory=%s\nplatform=%s\n' "$identity" "$INSTALL_DIR" "$platform"
-    printf 'app_image=%s\nollama_image=%s\n' "$PAPER_APP_IMAGE" "$PAPER_OLLAMA_IMAGE"
+    printf 'project=%s\ndirectory=%s\nplatform=%s\nmode=%s\n' "$identity" "$INSTALL_DIR" "$platform" "$mode"
+    printf 'app_image=%s\nollama_image=%s\nrelease_version=%s\n' "$PAPER_APP_IMAGE" "$PAPER_OLLAMA_IMAGE" "$release_version"
   } > "$record.tmp"
   mv "$record.tmp" "$record"
 fi
