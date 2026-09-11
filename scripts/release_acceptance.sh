@@ -10,7 +10,8 @@ APP_IMAGE=${PAPER_ACCEPTANCE_APP_IMAGE:-}
 OLLAMA_IMAGE=${PAPER_ACCEPTANCE_OLLAMA_IMAGE:-}
 REPORT_DIR=${PAPER_ACCEPTANCE_REPORT_DIR:-$ROOT/release-acceptance-results}
 SCOUT_TIMEOUT=${PAPER_ACCEPTANCE_SCOUT_TIMEOUT:-2100}
-BASE_URL=http://127.0.0.1:8000
+PORT=${PAPER_ACCEPTANCE_PORT:-8000}
+BASE_URL=http://127.0.0.1:$PORT
 project=
 passed=0
 
@@ -20,11 +21,12 @@ fail() { echo "Release acceptance failed: $*" >&2; exit 1; }
 [[ -n "$OLLAMA_IMAGE" ]] || fail "Set PAPER_ACCEPTANCE_OLLAMA_IMAGE to the selected Ollama digest"
 [[ "$OLLAMA_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]] || fail "Ollama image must use an immutable sha256 digest"
 [[ "$SCOUT_TIMEOUT" != *[!0-9]* && "$SCOUT_TIMEOUT" -gt 0 ]] || fail "Scout timeout must be a positive integer"
+[[ "$PORT" != *[!0-9]* && "$PORT" -gt 0 && "$PORT" -le 65535 ]] || fail "Port must be an integer from 1 to 65535"
 
 mkdir -p "$REPORT_DIR"
 rm -f "$REPORT_DIR/status.txt" "$REPORT_DIR/compose.log" "$REPORT_DIR/scout-status.json"
-printf 'host=%s/%s\napp_image=%s\nollama_image=%s\nstarted_at=%s\n' \
-  "$(uname -s)" "$(uname -m)" "$APP_IMAGE" "$OLLAMA_IMAGE" "$(date -u +%FT%TZ)" > "$REPORT_DIR/status.txt"
+printf 'host=%s/%s\napp_image=%s\nollama_image=%s\nport=%s\nstarted_at=%s\n' \
+  "$(uname -s)" "$(uname -m)" "$APP_IMAGE" "$OLLAMA_IMAGE" "$PORT" "$(date -u +%FT%TZ)" > "$REPORT_DIR/status.txt"
 
 compose() {
   [[ -n "$project" ]] || return 1
@@ -47,6 +49,10 @@ collect_and_clean() {
 trap collect_and_clean EXIT
 
 [[ ! -e .env && ! -e .paper-install ]] || fail "Acceptance requires a fresh checkout without installation state"
+if [[ "$PORT" != 8000 ]]; then
+  cp .env.example .env
+  printf '\nPAPER_PORT=%s\n' "$PORT" >> .env
+fi
 bash scripts/install_project_paper.sh --app-image "$APP_IMAGE" --ollama-image "$OLLAMA_IMAGE"
 project=$(sed -n 's/^project=//p' .paper-install)
 [[ "$project" =~ ^paper-[a-z0-9-]+$ ]] || fail "Installer did not record a valid project identity"

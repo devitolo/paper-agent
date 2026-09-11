@@ -520,7 +520,7 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertTrue(references, action)
             self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", reference) for reference in references), action)
         content = script.read_text(encoding="utf-8")
-        for behavior in ("install_project_paper.sh", "/topics", "/scout/run", "/feedback", "force-recreate app", "scout_recovery=interrupted", "down --volumes"):
+        for behavior in ("install_project_paper.sh", "PAPER_ACCEPTANCE_PORT", "/topics", "/scout/run", "/feedback", "force-recreate app", "scout_recovery=interrupted", "down --volumes"):
             self.assertIn(behavior, content)
 
 

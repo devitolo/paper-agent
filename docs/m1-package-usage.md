@@ -91,6 +91,8 @@ Support is through [GitHub Issues](https://github.com/devitolo/paper-agent/issue
 
 Maintainers can qualify the exact public image on a fresh GitHub-hosted Ubuntu x86-64 runner. Open **Actions → Release Acceptance → Run workflow**, retain the immutable default app and Ollama digests, and start the run. The manual workflow runs the normal installer, Qwen preparation and inference, live arXiv discovery, topic and feedback form submissions, persistence across app recreation, and interrupted-run recovery. It uploads status and service logs for review and removes its temporary containers and volumes even after failure. A transient external source or registry failure is a failed run with evidence; rerun only after confirming the failure was external.
 
+The same harness can qualify a fresh macOS Apple Silicon checkout. Set `PAPER_ACCEPTANCE_PORT` to an unused loopback port if another installation uses 8000. The harness refuses a checkout containing `.env` or `.paper-install`, and it removes only the unique temporary Compose project's volumes.
+
 Known M1 limits:
 
 - macOS Apple Silicon is the only live accepted development path recorded so far.
