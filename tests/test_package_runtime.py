@@ -490,7 +490,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("publish:", workflow)
         self.assertIn("if: needs.validate.outputs.release_tag == 'true'", workflow)
         self.assertIn("packages: write", workflow)
-        self.assertIn("docker/setup-qemu-action@v3", workflow)
+        for action in ("docker/setup-qemu-action", "docker/setup-buildx-action", "actions/upload-artifact"):
+            references = re.findall(rf"uses: {re.escape(action)}@([^\s]+)", workflow)
+            self.assertTrue(references, action)
+            self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", reference) for reference in references), action)
         self.assertIn("platforms: linux/amd64,linux/arm64", workflow)
 
 

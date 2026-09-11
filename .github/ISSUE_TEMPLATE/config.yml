@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/devitolo/paper-agent/security/advisories/new
+    about: Report sensitive security issues privately. Do not disclose them in a public issue.

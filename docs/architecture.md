@@ -12,7 +12,7 @@ The complete runtime environment is planned to run on:
 - Ubuntu
 - Original system had a 1 TB spinning HDD
 
-The canonical local repository checkout for Project Paper is `/Users/vhl/workspace/paper-agent`. Runtime commands, scheduled jobs, and deployment notes should use that path unless the checkout is intentionally moved.
+The native deployment examples use `$HOME/workspace/paper-agent`. Set `PAPER_AGENT_REPO` when the checkout lives elsewhere. The packaged installer records its own installation directory and does not depend on this native path.
 
 The Mac mini hosts:
 

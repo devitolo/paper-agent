@@ -135,7 +135,7 @@ scripts/apply_pending_feedback_profile.sh --apply
 
 ## Repository Path
 
-Use `/Users/vhl/workspace/paper-agent` as the canonical local checkout path for Project Paper commands, cron entries, deployment scripts, and Codex follow-up work.
+The native deployment examples use `$HOME/workspace/paper-agent`. Set `PAPER_AGENT_REPO` when the checkout lives elsewhere. The packaged installer records its own installation directory.
 
 ## Pipeline Commands
 

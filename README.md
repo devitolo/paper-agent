@@ -38,15 +38,15 @@ Project Paper is intended to become a provider-agnostic, hybrid local/cloud pape
 
 The first production-oriented implementation should favor simple Python, SQLite, explicit workflow stages, and systemd timers over a heavy agent framework.
 
-## Canonical Local Checkout
+## Local Checkout
 
-For this project, the canonical local repository checkout is:
+Clone Project Paper into a directory you control. The native Mini examples use:
 
 ```text
-/Users/vhl/workspace/paper-agent
+$HOME/workspace/paper-agent
 ```
 
-Use this path for local commands, cron entries, deployment scripts, and future Codex work on Project Paper.
+Override `PAPER_AGENT_REPO` when using another native checkout location. The packaged installer works from the current clone and records its installation directory.
 
 ## Architecture Summary
 
@@ -524,6 +524,8 @@ See [docs/roadmap.md](docs/roadmap.md) and [docs/productization-plan.md](docs/pr
 
 ## Design Documents
 
+- [Contributing](CONTRIBUTING.md) — scope, privacy rules, and validation steps for changes.
+- [Security policy](SECURITY.md) — supported versions and private vulnerability reporting.
 - [M1 package usage](docs/m1-package-usage.md) — current development Compose installer and first manual discovery path.
 - [M1 acceptance report](docs/m1-qa-report.md) — macOS Apple Silicon evidence and remaining release gates.
 - [First supported release productization plan](docs/productization-plan.md) — PM-aligned Compose assessment, Fresh Install Produces Papers milestone, release gates, and owner-assigned backlog.

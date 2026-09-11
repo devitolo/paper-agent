@@ -1,0 +1,42 @@
+name: Support request
+description: Ask for help with the supported local package
+title: "[Support]: "
+labels: [support]
+body:
+  - type: markdown
+    attributes:
+      value: Before V1, help is limited to the current main branch and newest release candidate. After V1 launches, support covers the current major version. Do not upload `.env`, databases, feedback, papers, credentials, or unsanitized logs.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 or a full commit SHA
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Host and runtime
+      placeholder: OS, architecture, Docker version, Compose version
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Installation
+        - Local model
+        - Discovery
+        - Review and feedback
+        - Data recovery
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: request
+    attributes:
+      label: Help needed
+      description: Explain what you tried, what you expected, and the sanitized error or Health output.
+    validations:
+      required: true
