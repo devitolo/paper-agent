@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils \
 COPY requirements.txt ./
 RUN if [ -s requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
 
+COPY LICENSE NOTICE ./
 COPY paper_agents ./paper_agents
 COPY scripts ./scripts
 COPY sql ./sql

@@ -2,6 +2,8 @@
 **
 !Dockerfile
 !requirements.txt
+!LICENSE
+!NOTICE
 !paper_agents/
 !paper_agents/**
 !scripts/

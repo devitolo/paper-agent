@@ -6,7 +6,7 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ### M1 local package and manual discovery path
 
-Status: Implemented on `main` in commit `4ad40f1`; macOS Apple Silicon accepted for the implemented M1 scope. Linux x86-64 qualification and published multi-platform images remain outstanding.
+Status: Implemented on `main`; macOS Apple Silicon accepted for the implemented M1 scope. A public multi-platform image is available; Linux x86-64 host qualification remains outstanding.
 
 Decision: Productization M1 should support one clear local-first Compose path before public release polish: installer, app container, private Ollama service, prepared Qwen model, loopback web UI, topic setup, manual Run Scout, review, and feedback save.
 

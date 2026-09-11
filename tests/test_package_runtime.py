@@ -476,6 +476,13 @@ class ModelPreparationTests(unittest.TestCase):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_container_packages_license_and_notice(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+        self.assertIn("COPY LICENSE NOTICE ./", dockerfile)
+        self.assertIn("!LICENSE", dockerignore)
+        self.assertIn("!NOTICE", dockerignore)
+
     def test_only_strict_semver_pushes_can_publish(self):
         workflow = (ROOT / ".github/workflows/docker.yml").read_text(encoding="utf-8")
         match = re.search(r"=~ (\^v\([^\n]+\$)", workflow)

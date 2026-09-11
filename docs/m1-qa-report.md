@@ -1,6 +1,6 @@
 # M1 acceptance report
 
-Status: conditional pass on macOS Apple Silicon; Linux x86-64 qualification and published multi-platform images remain outstanding. Test date: 2026-09-09. Earlier persistent-tester review evidence used baseline `d6ae935` plus then-uncommitted M1 productization changes; the final accepted implementation is committed on `main` as `4ad40f1`.
+Status: conditional pass on macOS Apple Silicon; Linux x86-64 host qualification remains outstanding. A public multi-platform image was independently checked for anonymous access, architecture manifests, source correspondence, SBOM, provenance, empty-volume startup, persistence, and interrupted-state recovery on 2026-09-10. Full installer/model/arXiv acceptance on Linux remains pending.
 
 ## Code and static validation
 
@@ -31,7 +31,7 @@ Passed evidence:
 
 - Repeat the full acceptance on Linux x86-64 before claiming Linux support.
 - Publish one pinned multi-platform Project Paper image and package/pin the model-preparation helper instead of bind-mounting it from the checkout.
-- Qualify the v0.1.0 Ollama candidate `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba` through live macOS arm64 and Linux amd64 QA, then choose the Project Paper release image, Docker/Compose versions and resource thresholds. Registry inspection on 2026-09-10 confirmed its OCI index and platform children, but that inspection is evidence only, not release acceptance. The earlier use of `ollama/ollama:latest` was limited to development QA.
+- Complete fresh Linux amd64 installer, Qwen model download/inference, live arXiv discovery, persistence, and recovery acceptance with the selected Ollama digest. Registry inspection and isolated image smoke testing are evidence, but do not qualify the Linux host path.
 - Exercise a released-image upgrade/rollback and the later backup policy before public release. This is outside the Fresh Install Produces Papers milestone.
 - Add the approved sanitized README screenshot during showcase work.
 

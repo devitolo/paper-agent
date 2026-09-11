@@ -4,7 +4,7 @@
 
 Project Paper is a local-first system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
 
-> **Productization preview:** the installer-fronted Docker Compose path and manual in-product Scout have passed the implemented macOS Apple Silicon M1 scope. Linux x86-64 qualification and published multi-platform images are still outstanding, so this repository currently supports a development package, not a public release. See the [M1 package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
+> **Public preview:** the installer-fronted Docker Compose path and manual in-product Scout have passed the implemented macOS Apple Silicon scope. The public multi-platform image includes Linux amd64, but Linux x86-64 host qualification remains outstanding. See the [package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
 
 The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent stores pasted ChatGPT discussion summaries in immutable SQLite history with deterministic v1 parsing.
 
@@ -13,7 +13,7 @@ The repository currently contains a Python MVP called `paper_agents`. The V2 bac
 The current first-user path is:
 
 1. Use a fresh clone on macOS Apple Silicon with Docker Desktop.
-2. Run the M1 installer with a locally built app image and an explicit Ollama image reference.
+2. Run the installer; its defaults select the public Project Paper image and pinned Ollama image.
 3. Open the loopback web UI.
 4. Add an enabled arXiv topic in **Topics**.
 5. Return to **Review Queue** and choose **Run Scout**.
@@ -23,16 +23,16 @@ From a clean checkout:
 
 ```bash
 cd /absolute/path/to/paper-agent
-bash scripts/install_project_paper.sh --build --ollama-image ollama/ollama:latest
+bash scripts/install_project_paper.sh
 ```
 
-`ollama/ollama:latest` is a development convenience, not a pinned release selection. The installer creates `.env` if missing, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. `--build` selects the explicit local development Compose overlay; release Compose contains no build stanza or checkout helper mount and requires versioned/digest image selections. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
+The installer creates `.env` if missing, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. Docker selects the matching arm64 image automatically. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
 
 Gemini profile synthesis is disabled in this package. Feedback blobs are still saved, parsed when possible, and available to deterministic Scout guidance, but direct profile evolution is not promised without the later optional Gemini packaging work.
 
 The packaged runtime stores user state in Compose volumes: `paper-data` for SQLite/artifacts/profile, `paper-config` for topics, and `ollama-data` for the model cache. Re-run the installer to repair/retry without deleting volumes. Do not use `db reset`, remove Compose volumes, or change the recorded project name as a normal recovery or upgrade step.
 
-Linux x86-64, published images, release upgrade/rollback, broader backup/restore guarantees, and public support policy are tracked in the M1/V1 productization docs rather than claimed here.
+Linux x86-64 host qualification, release upgrade/rollback, and broader backup/restore guarantees remain tracked work. Support is through GitHub Issues for the current major version and one prior major version.
 
 ## Overview
 

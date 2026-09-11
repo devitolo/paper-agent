@@ -1,6 +1,6 @@
 # Project Paper: V1 productization assessment and plan
 
-Status: M1.1 installer/Compose packaging and M1.2 manual discovery are implemented on `main`. Independent code QA passes; [live M1 acceptance](m1-qa-report.md) passes for the implemented macOS Apple Silicon scope, with Linux x86-64 and published-image qualification outstanding. Updated 2026-09-10 against repository baseline `4ad40f1` and the PM's supplied “Productization Lead Background.”
+Status: M1.1 installer/Compose packaging and M1.2 manual discovery are implemented on `main`. Independent code QA passes; [live M1 acceptance](m1-qa-report.md) passes for macOS Apple Silicon. A public multi-platform image is available; Linux x86-64 host qualification remains outstanding. Updated 2026-09-10.
 
 ## Brief and revised direction
 

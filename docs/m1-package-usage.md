@@ -1,17 +1,17 @@
-# M1 Compose package (v0.1.0 candidate, not a published or qualified release)
+# Public Compose package
 
-This installs the app and local model runtime, with manual discovery from the Review Queue. The implemented macOS Apple Silicon scope has passed M1 acceptance; Linux x86-64 qualification and published multi-platform images remain outstanding. The existing native Mini deployment is unchanged.
+This installs the public app image and local model runtime, with manual discovery from the Review Queue. The implemented macOS Apple Silicon scope has passed acceptance. The image includes Linux amd64, but Linux x86-64 host qualification remains outstanding. The existing native Mini deployment is unchanged.
 
 The qualified development pairing is macOS Apple Silicon with Docker Desktop/Linux arm64 containers. Linux x86-64 with Docker Engine/Linux amd64 containers remains a target but is not yet qualified. CPU inference is the baseline. Have Git and a writable clone of this repository, and start Docker Desktop with Compose v2 first; no host Python, Ollama, cron, systemd, or provider keys are needed. The installer checks provisional Docker RAM (4 GiB) and installation-filesystem free space (6 GiB) thresholds. These are configurable preflight guards, not measured minimum requirements; Docker's separate VM/disk-image capacity must also be sufficient.
 
-From a clean clone, choose an Ollama image reference explicitly, then run:
+From a clean clone, run:
 
 ```bash
 cd /absolute/path/to/paper-agent
-bash scripts/install_project_paper.sh --build --ollama-image ollama/ollama:latest
+bash scripts/install_project_paper.sh
 ```
 
-`ollama/ollama:latest` is the current development example used for local installation; it is rejected for a release install. The v0.1.0 candidate Ollama reference is `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba`. Registry inspection on 2026-09-10 found Linux amd64 child `sha256:aa6f86f01fee264c81f1edd9083ebfb07c8116d95d8bedd1ad470874b66a40b4` and Linux arm64 child `sha256:8a39a0a3ef5a08cd7206fe2d2ffbbc3d7aee9d7b22e0e2098d17c4bdf1b0b7e9`. This is an inspected candidate, not a release acceptance: live macOS arm64 and Linux amd64 QA must still pass, along with publication of the single multi-architecture Project Paper app image. `--build` creates `project-paper:local-arm64` or `project-paper:local-amd64` for the current architecture only if that image is absent; a cached image is reused even with this flag; it does not publish or demonstrate a multi-platform manifest. A published package will select its pinned app image using `--app-image` without `--build`; the installer rejects `latest`, validates Project Paper OCI source/version labels, and records the exact chosen image references.
+The defaults select the public Project Paper image and the pinned multi-platform Ollama image `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba`. Docker selects the matching container platform automatically. The installer rejects `latest` for release installs, validates Project Paper OCI source/version labels, and records the exact selected image references. Developers can still use `--build --ollama-image ollama/ollama:latest` for an explicit local build; that path is outside release qualification.
 
 `prepare-model` is included in the Project Paper app image and talks only to the private Ollama HTTP API. It never mounts or executes a checkout helper and does not require the Ollama CLI in the app image.
 
@@ -85,14 +85,13 @@ If a process was forcibly killed and left `.paper-install.lock`, first verify no
 
 ## Support and Known Limits
 
-Until a public release exists, support is through [GitHub Issues](https://github.com/devitolo/paper-agent/issues) (repository access required) with the exact commit, host OS/architecture, Docker/Compose versions, installer command, `.paper-install` project name, and redacted logs. Do not include `data/paper_agent.db`, raw feedback, `.env`, or full paper artifacts in an issue unless you have intentionally sanitized them.
+Support is through [GitHub Issues](https://github.com/devitolo/paper-agent/issues) for the current major version and one prior major version. Include the exact commit, host OS/architecture, Docker/Compose versions, installer command, `.paper-install` project name, and redacted logs. Do not include `data/paper_agent.db`, raw feedback, `.env`, or full paper artifacts unless intentionally sanitized.
 
 Known M1 limits:
 
 - macOS Apple Silicon is the only live accepted development path recorded so far.
 - Linux x86-64 remains a target, not a qualified support claim.
-- No Project Paper multi-platform image has been published.
-- v0.1.0 has not been published or qualified. Its inspected Ollama candidate digest is not accepted until live macOS arm64 and Linux amd64 QA approves it; release installs must also use the published multi-platform app image.
+- The public Project Paper image has arm64 and amd64 variants with SBOM and provenance attestations. Linux amd64 host acceptance remains pending.
 - No packaged automatic schedule is installed.
 - OpenAlex, Semantic Scholar, and Gemini are not part of the default packaged flow.
-- Upgrade/rollback, full packaged backup/restore, and old-version support policy remain V1 work.
+- Upgrade/rollback and full packaged backup/restore remain V1 work.
