@@ -11,7 +11,7 @@ cd /absolute/path/to/paper-agent
 bash scripts/install_project_paper.sh
 ```
 
-The defaults select the public Project Paper image and the pinned multi-platform Ollama image `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba`. Docker selects the matching container platform automatically. The installer rejects `latest` for release installs, validates Project Paper OCI source/version labels, and records the exact selected image references. Developers can still use `--build --ollama-image ollama/ollama:latest` for an explicit local build; that path is outside release qualification.
+The defaults select Project Paper `v0.1.2` by immutable index digest `sha256:9ca07d264124fff083f34f358fe0897b0a48fea2161e31349cf1d95b0b15c25f` and the pinned multi-platform Ollama image `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba`. Docker selects the matching container platform automatically. The installer rejects `latest` for release installs, validates Project Paper OCI source/version labels, and records the exact selected image references. Developers can still use `--build --ollama-image ollama/ollama:latest` for an explicit local build; that path is outside release qualification.
 
 `prepare-model` is included in the Project Paper app image and talks only to the private Ollama HTTP API. It never mounts or executes a checkout helper and does not require the Ollama CLI in the app image.
 

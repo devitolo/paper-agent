@@ -26,7 +26,7 @@ cd /absolute/path/to/paper-agent
 bash scripts/install_project_paper.sh
 ```
 
-The installer creates `.env` if missing, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. Docker selects the matching arm64 image automatically. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
+The installer creates `.env` if missing, selects the immutable `v0.1.2` image digest, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. Docker selects the matching arm64 image automatically. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
 
 Gemini profile synthesis is disabled in this package. Feedback blobs are still saved, parsed when possible, and available to deterministic Scout guidance, but direct profile evolution is not promised without the later optional Gemini packaging work.
 
