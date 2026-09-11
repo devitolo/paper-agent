@@ -47,7 +47,7 @@ jobs:
 
       - name: Upload redacted acceptance evidence
         if: always()
-        uses: actions/upload-artifact@4cec3d8a65e1f7949fcd1feeb2ef3cd1c11aff2a
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: project-paper-linux-amd64-acceptance-${{ github.run_id }}
           path: release-acceptance-results/
