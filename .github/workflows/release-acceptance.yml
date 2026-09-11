@@ -1,0 +1,55 @@
+name: Release Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_image:
+        description: Immutable Project Paper image reference
+        required: true
+        default: ghcr.io/devitolo/paper-agent@sha256:9ca07d264124fff083f34f358fe0897b0a48fea2161e31349cf1d95b0b15c25f
+        type: string
+      ollama_image:
+        description: Immutable Ollama image reference
+        required: true
+        default: docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-acceptance-linux-amd64
+  cancel-in-progress: false
+
+jobs:
+  linux-amd64:
+    name: Ubuntu x86-64 full package acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Confirm runner architecture
+        shell: bash
+        run: |
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          docker info
+          docker compose version
+
+      - name: Run exact-image release acceptance
+        shell: bash
+        env:
+          PAPER_ACCEPTANCE_APP_IMAGE: ${{ inputs.app_image }}
+          PAPER_ACCEPTANCE_OLLAMA_IMAGE: ${{ inputs.ollama_image }}
+        run: bash scripts/release_acceptance.sh
+
+      - name: Upload redacted acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@4cec3d8a65e1f7949fcd1feeb2ef3cd1c11aff2a
+        with:
+          name: project-paper-linux-amd64-acceptance-${{ github.run_id }}
+          path: release-acceptance-results/
+          if-no-files-found: error
+          retention-days: 14

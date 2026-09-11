@@ -503,6 +503,26 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", reference) for reference in references), action)
         self.assertIn("platforms: linux/amd64,linux/arm64", workflow)
 
+    def test_release_acceptance_is_manual_exact_image_linux_gate(self):
+        workflow = (ROOT / ".github/workflows/release-acceptance.yml").read_text(encoding="utf-8")
+        script = ROOT / "scripts/release_acceptance.sh"
+        result = subprocess.run(["bash", "-n", script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("pull_request:", workflow)
+        self.assertNotIn("push:", workflow)
+        self.assertIn("runs-on: ubuntu-latest", workflow)
+        self.assertIn("timeout-minutes: 50", workflow)
+        self.assertRegex(workflow, r"app_image:[\s\S]+default: ghcr\.io/devitolo/paper-agent@sha256:[a-f0-9]{64}")
+        self.assertRegex(workflow, r"ollama_image:[\s\S]+default: docker\.io/ollama/ollama@sha256:[a-f0-9]{64}")
+        for action in ("actions/checkout", "actions/upload-artifact"):
+            references = re.findall(rf"uses: {re.escape(action)}@([^\s]+)", workflow)
+            self.assertTrue(references, action)
+            self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", reference) for reference in references), action)
+        content = script.read_text(encoding="utf-8")
+        for behavior in ("install_project_paper.sh", "/topics", "/scout/run", "/feedback", "force-recreate app", "scout_recovery=interrupted", "down --volumes"):
+            self.assertIn(behavior, content)
+
 
 if __name__ == "__main__":
     unittest.main()

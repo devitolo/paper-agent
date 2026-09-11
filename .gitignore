@@ -5,6 +5,7 @@ __pycache__/
 .paper-install
 .paper-install.tmp
 .paper-install.lock/
+release-acceptance-results/
 data/papers/
 data/scout/
 data/extractions/
