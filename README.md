@@ -1,5 +1,7 @@
 # Project Paper
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Project Paper is a local-first system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
 
 > **Productization preview:** the installer-fronted Docker Compose path and manual in-product Scout have passed the implemented macOS Apple Silicon M1 scope. Linux x86-64 qualification and published multi-platform images are still outstanding, so this repository currently supports a development package, not a public release. See the [M1 package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
@@ -536,3 +538,7 @@ See [docs/roadmap.md](docs/roadmap.md) and [docs/productization-plan.md](docs/pr
 - [Roadmap](docs/roadmap.md)
 - [Decision log](docs/decision-log.md)
 - [Product changelog](docs/product-changelog.md)
+
+## License
+
+Project Paper is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for the copyright notice.
