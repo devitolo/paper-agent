@@ -127,7 +127,16 @@ class ScoutDiagnosticsTests(unittest.TestCase):
                                 text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout), load_report(self.path, run_id))
 
-    def test_download_handler_returns_attachment_and_rejects_invalid_ids(self):
+    def test_diagnostics_page_escapes_report_content(self):
+        run_id = self.scout()
+        report = load_report(self.path, run_id)
+        report["candidates"][0]["title"] = '</textarea><script>alert("test")</script>'
+        html = web.render_scout_diagnostics_page(report)
+        self.assertNotIn('</textarea><script>alert', html)
+        self.assertIn('&lt;/textarea&gt;&lt;script&gt;', html)
+        self.assertEqual(html.count('</textarea>'), 1)
+
+    def test_diagnostics_handler_returns_copyable_page_and_rejects_invalid_ids(self):
         run_id = self.scout()
         handler_class = web.make_handler(self.path)
         handler = object.__new__(handler_class)
@@ -139,9 +148,17 @@ class ScoutDiagnosticsTests(unittest.TestCase):
         handler.path = f"/health/scout-diagnostics/{run_id}"
         handler.do_GET()
         handler.send_response.assert_called_once_with(200)
-        handler.send_header.assert_any_call("Content-Disposition", f'attachment; filename="scout-run-{run_id}-diagnostics.json"')
+        handler.send_header.assert_any_call("Content-Type", "text/html; charset=utf-8")
+        self.assertFalse(any(call.args[0] == "Content-Disposition" for call in handler.send_header.call_args_list))
         handler.send_header.assert_any_call("Cache-Control", "no-store")
-        self.assertEqual(json.loads(handler.wfile.getvalue())["run"]["id"], run_id)
+        from html import unescape
+        import re
+        html = handler.wfile.getvalue().decode("utf-8")
+        report_text = re.search(r'<textarea[^>]*>(.*?)</textarea>', html, re.S).group(1)
+        self.assertEqual(json.loads(unescape(report_text))["run"]["id"], run_id)
+        self.assertIn("Copy report", html)
+        self.assertIn("Report selected. Press Ctrl+C or Command+C", html)
+        self.assertIn('target="_blank"', web.render_diagnostic_link({"scout_run_id": run_id}))
         for value in ("99999", "../.env", "1%20OR%201=1", "-1", "9" * 30):
             handler.path = f"/health/scout-diagnostics/{value}"
             handler.do_GET()

@@ -136,10 +136,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 if report is None:
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
-                payload = json.dumps(report, indent=2, ensure_ascii=False).encode("utf-8")
+                payload = render_scout_diagnostics_page(report).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Disposition", f'attachment; filename="scout-run-{int(run_value)}-diagnostics.json"')
+                self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Content-Length", str(len(payload)))
@@ -1227,7 +1226,52 @@ def render_diagnostic_link(warning: dict) -> str:
     run_id = warning.get("scout_run_id")
     if not isinstance(run_id, int) or run_id <= 0:
         return ""
-    return f' <a href="/health/scout-diagnostics/{run_id}">Download diagnostics</a>'
+    return f' <a href="/health/scout-diagnostics/{run_id}" target="_blank" rel="noopener">View diagnostics</a>'
+
+
+def render_scout_diagnostics_page(report: dict[str, Any]) -> str:
+    run = report["run"]
+    title = f"Scout diagnostics — {run['source']} run #{run['id']}"
+    report_text = escape(json.dumps(report, indent=2, ensure_ascii=False))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(title)}</title>
+  <style>{page_css()}
+    #diagnostic-report {{ display: block; box-sizing: border-box; width: 100%; height: 65vh;
+      margin-top: 12px; font-family: monospace; white-space: pre; overflow: auto; }}
+  </style>
+</head>
+<body><main>
+  <a href="/health">Back to Health</a>
+  <h1>{escape(title)}</h1>
+  <p>Run started: {escape(str(run['started_at']))} · Report captured: {escape(report['captured_at'])}</p>
+  <p>Copy this report to share the recorded troubleshooting details.</p>
+  <button type="button" id="copy-report">Copy report</button>
+  <span id="copy-status" role="status" aria-live="polite"></span>
+  <label for="diagnostic-report">Diagnostic report</label>
+  <textarea id="diagnostic-report" readonly spellcheck="false">{report_text}</textarea>
+</main>
+<script>
+  document.getElementById('copy-report').addEventListener('click', async () => {{
+    const report = document.getElementById('diagnostic-report');
+    const status = document.getElementById('copy-status');
+    try {{
+      if (!navigator.clipboard || !window.isSecureContext) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(report.value);
+      status.textContent = 'Copied.';
+    }} catch (_) {{
+      report.focus();
+      report.select();
+      let copied = false;
+      try {{ copied = document.execCommand('copy'); }} catch (_) {{}}
+      status.textContent = copied ? 'Copied.' : 'Report selected. Press Ctrl+C or Command+C to copy.';
+    }}
+  }});
+</script>
+</body></html>"""
 
 
 def render_profile_maintenance(notices: list[dict[str, str]]) -> str:
