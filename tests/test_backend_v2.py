@@ -3554,7 +3554,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(any("0 eligible" in warning["message"] for warning in summary["warnings"]))
         self.assertTrue(
             any(
-                "scripts/diagnose_scout_run.sh openalex" in warning["message"]
+                isinstance(warning.get("scout_run_id"), int)
                 for warning in summary["warnings"]
             )
         )
@@ -3590,7 +3590,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(
             any(
                 "returned only 2 candidates" in warning["message"]
-                and "scripts/diagnose_scout_run.sh arxiv" in warning["message"]
+                and isinstance(warning.get("scout_run_id"), int)
                 for warning in summary["warnings"]
             )
         )
@@ -3606,8 +3606,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(
             any(
                 "openalex Scout run at " in warning["message"]
-                and "had 0 eligible candidates"
-                and "scripts/diagnose_scout_run.sh openalex" in warning["message"]
+                and "had 0 eligible candidates" in warning["message"]
+                and isinstance(warning.get("scout_run_id"), int)
                 for warning in summary["warnings"]
             )
         )
@@ -3631,7 +3631,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(
             any(
                 "1 eligible candidates and produced 0 recommendations" in warning["message"]
-                and "scripts/diagnose_scout_run.sh openalex" in warning["message"]
+                and isinstance(warning.get("scout_run_id"), int)
                 for warning in summary["warnings"]
             )
         )
@@ -3646,7 +3646,7 @@ class BackendV2Tests(unittest.TestCase):
             any(
                 "had only 1 eligible candidates and produced 0 recommendations; Curator needs 10" in warning["message"]
                 and "arxiv Scout run at " in warning["message"]
-                and "scripts/diagnose_scout_run.sh arxiv" in warning["message"]
+                and isinstance(warning.get("scout_run_id"), int)
                 for warning in summary["warnings"]
             )
         )

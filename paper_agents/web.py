@@ -126,6 +126,26 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     )
                 )
                 return
+            if parsed.path.startswith("/health/scout-diagnostics/"):
+                run_value = parsed.path.removeprefix("/health/scout-diagnostics/")
+                if not run_value.isascii() or not run_value.isdigit() or len(run_value) > 18:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                from paper_agents.scout_diagnostics import load_report
+                report = load_report(db_path, int(run_value))
+                if report is None:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                payload = json.dumps(report, indent=2, ensure_ascii=False).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="scout-run-{int(run_value)}-diagnostics.json"')
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
             if parsed.path == "/health":
                 params = urllib.parse.parse_qs(parsed.query)
                 self.respond_html(
@@ -1193,14 +1213,21 @@ def save_topics_form(form: dict[str, list[str]], *, config_path: Path = DEFAULT_
     raise ValueError("Unknown topic action")
 
 
-def render_warnings(warnings: list[dict[str, str]]) -> str:
+def render_warnings(warnings: list[dict[str, Any]]) -> str:
     if not warnings:
         return ""
     items = "".join(
-        f'<li class="{escape(warning["level"])}"><strong>{escape(warning["level"])}</strong> {escape(warning["message"])}</li>'
+        f'<li class="{escape(warning["level"])}"><strong>{escape(warning["level"])}</strong> {escape(warning["message"])}{render_diagnostic_link(warning)}</li>'
         for warning in warnings
     )
     return f'<section class="health-warnings"><h2>Warnings</h2><p>Scout warnings: latest run per scheduled source in the last 7 days, independent of the selected chart range. Run times are shown below.</p><ul>{items}</ul></section>'
+
+
+def render_diagnostic_link(warning: dict) -> str:
+    run_id = warning.get("scout_run_id")
+    if not isinstance(run_id, int) or run_id <= 0:
+        return ""
+    return f' <a href="/health/scout-diagnostics/{run_id}">Download diagnostics</a>'
 
 
 def render_profile_maintenance(notices: list[dict[str, str]]) -> str:

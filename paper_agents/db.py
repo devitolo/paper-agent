@@ -1632,8 +1632,8 @@ def _artifact_health(connection: sqlite3.Connection, latest_cycle_id: int | None
     }
 
 
-def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
-    warnings: list[dict[str, str]] = []
+def _health_warnings(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
     integrity = summary["db"]["integrity"]
     if integrity != "ok":
         warnings.append({"level": "critical", "message": f"DB integrity check failed: {integrity}"})
@@ -1663,7 +1663,6 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
     for latest_scout in summary["latest_scout_runs_by_source"]:
         if not _is_recent_scheduled_scout(latest_scout):
             continue
-        diagnostic_command = f"scripts/diagnose_scout_run.sh {latest_scout['source']}"
         started_at = _format_local_run_time(latest_scout.get("started_at"))
         run_label = f"Scout run at {started_at}" if started_at else "Latest Scout run"
         candidate_count = int(latest_scout["candidate_count"] or 0)
@@ -1671,9 +1670,9 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             warnings.append(
                 {
                     "level": "warning",
+                    "scout_run_id": latest_scout["id"],
                     "message": (
                         f"{latest_scout['source']} {run_label} returned 0 candidates. "
-                        f"On Mini, run {diagnostic_command}."
                     ),
                 }
             )
@@ -1681,9 +1680,9 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             warnings.append(
                 {
                     "level": "warning",
+                    "scout_run_id": latest_scout["id"],
                     "message": (
                         f"{latest_scout['source']} {run_label} returned only {candidate_count} candidates. "
-                        f"On Mini, run {diagnostic_command}."
                     ),
                 }
             )
@@ -1691,9 +1690,9 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             warnings.append(
                 {
                     "level": "warning",
+                    "scout_run_id": latest_scout["id"],
                     "message": (
                         f"{latest_scout['source']} {run_label} had 0 eligible candidates. "
-                        f"On Mini, run {diagnostic_command}."
                     ),
                 }
             )
@@ -1704,11 +1703,11 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             warnings.append(
                 {
                     "level": "warning",
+                    "scout_run_id": latest_scout["id"],
                     "message": (
                         f"{latest_scout['source']} {run_label} had only "
                         f"{latest_scout['eligible_count']} eligible candidates and produced 0 recommendations; "
                         "Curator needs 10. "
-                        f"On Mini, run {diagnostic_command}."
                     ),
                 }
             )
@@ -1716,10 +1715,10 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             warnings.append(
                 {
                     "level": "warning",
+                    "scout_run_id": latest_scout["id"],
                     "message": (
                         f"{latest_scout['source']} {run_label} had only "
                         f"{latest_scout['eligible_count']} eligible candidates; Curator needs 10. "
-                        f"On Mini, run {diagnostic_command}."
                     ),
                 }
             )
@@ -1730,10 +1729,10 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             warnings.append(
                 {
                     "level": "warning",
+                    "scout_run_id": latest_scout["id"],
                     "message": (
                         f"{latest_scout['source']} {run_label} had "
                         f"{latest_scout['eligible_count']} eligible candidates but produced 0 recommendations. "
-                        f"On Mini, run {diagnostic_command}."
                     ),
                 }
             )

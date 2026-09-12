@@ -81,6 +81,11 @@ CREATE TABLE IF NOT EXISTS scout_runs (
 CREATE INDEX IF NOT EXISTS idx_scout_runs_cycle ON scout_runs (workflow_cycle_id);
 CREATE INDEX IF NOT EXISTS idx_scout_runs_started_at ON scout_runs (started_at);
 
+CREATE TABLE IF NOT EXISTS scout_diagnostic_reports (
+    scout_run_id INTEGER PRIMARY KEY REFERENCES scout_runs(id) ON DELETE CASCADE,
+    report_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scout_candidates (
     id INTEGER PRIMARY KEY,
     scout_run_id INTEGER NOT NULL REFERENCES scout_runs(id) ON DELETE CASCADE,

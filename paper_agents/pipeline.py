@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents import db
+from paper_agents.scout_diagnostics import capture_report
 from paper_agents.manual_scout import exclusive_pipeline
 from paper_agents.curator_agent import (
     DEFAULT_MAX_RECOMMENDATIONS,
@@ -160,6 +161,8 @@ def run_daily_pipeline(
                     evidence_ollama_url=ollama_url,
                 ),
             )
+            for result in scout_results:
+                capture_report(connection, result["scout_run_id"], phase="curator_complete")
             cycle_recommendations.extend(curator_result.get("recommendations") or [])
             if not curator_result["requested_rescout"]:
                 break

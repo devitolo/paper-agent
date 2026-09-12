@@ -542,3 +542,19 @@ See [docs/roadmap.md](docs/roadmap.md) and [docs/productization-plan.md](docs/pr
 ## License
 
 Project Paper is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for the copyright notice.
+
+### Scout warning diagnostics
+
+Health warnings for arXiv, OpenAlex, and Semantic Scholar include **Download diagnostics** for the exact Scout run. Scheduled pipelines automatically save a local JSON snapshot when Scout returns a small or empty eligible pool or source errors, and refresh it after Curator to include evaluation/run context and recommendation counts. Capture uses the local Python diagnostic collector; it does not repeat source requests or call a model.
+
+Reports are stored in the application database (`scout_diagnostic_reports`) and retained with their Scout run. They include run time and capture time, source/configured topics, source/refill diagnostics, errors, candidate counts, exclusion reasons, and candidate titles/queries. They do not collect `.env`, system logs, or credentials from the environment. Downloads for older runs reconstruct a report from recorded database rows and use `capture_phase: requested`; automatic snapshots use `scout_complete` or `curator_complete`.
+
+The same collector can be run manually:
+
+```bash
+python3 -m paper_agents.scout_diagnostics --db data/paper_agent.db --run-id 123
+# Or inspect the latest recorded run for a source:
+scripts/diagnose_scout_run.sh openalex
+```
+
+The table is added by normal database initialization after updating the app. No new cron job is required. Diagnostic capture failures are logged without stopping Scout or Curator; the download can still reconstruct the recorded evidence.

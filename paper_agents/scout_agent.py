@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from paper_agents import db
+from paper_agents.scout_diagnostics import capture_report
 from paper_agents.scout import (
     DEFAULT_ARXIV_REQUEST_DELAY,
     DEFAULT_ARXIV_RETRIES,
@@ -180,6 +181,7 @@ class ScoutAgent:
             errors=errors,
         )
         db.update_workflow_state(connection, workflow_cycle_id, "scout_complete")
+        capture_report(connection, scout_run_id, phase="scout_complete")
         return {
             "scout_run_id": scout_run_id,
             "source": source.name,
