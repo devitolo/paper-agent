@@ -67,7 +67,11 @@ def capture_report(connection, run_id: int, *, phase: str) -> None:
         report = build_report(connection, run_id, phase=phase)
         if report and report["run"]["source"] in SOURCES and report["run"]["completed_at"]:
             counts = report["counts"]
-            if (counts["candidates"] <= 2 or counts["eligible"] < 10
+            # Once captured, keep the report current even after Curator recovery.
+            existing = connection.execute(
+                "SELECT 1 FROM scout_diagnostic_reports WHERE scout_run_id = ?", (run_id,)
+            ).fetchone()
+            if (existing or counts["candidates"] <= 2 or counts["eligible"] < 10
                     or (phase != "scout_complete" and counts["recommendations"] == 0)
                     or report["run"]["errors_json"] != "[]"):
                 connection.execute("""

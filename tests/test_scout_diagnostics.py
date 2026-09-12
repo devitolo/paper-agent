@@ -85,6 +85,39 @@ class ScoutDiagnosticsTests(unittest.TestCase):
         self.connection.commit()
         self.assertEqual(load_report(self.path, run_id)["capture_phase"], "curator_complete")
 
+    def test_saved_report_refreshes_when_later_curator_recovers(self):
+        run_id = self.scout(count=20)
+        curator_ids = []
+        for attempt in (1, 2):
+            curator_id = db.create_curator_run(
+                self.connection, workflow_cycle_id=self.cycle, profile_version_id=None,
+                scout_attempt_count=attempt, max_scout_attempts=2, min_quality_score=25,
+                max_recommendations=3, model=None,
+            )
+            curator_ids.append(curator_id)
+            if attempt == 1:
+                self.connection.execute("UPDATE curator_runs SET requested_rescout=1 WHERE id=?", (curator_id,))
+            else:
+                candidate_id, paper_id = self.connection.execute(
+                    "SELECT id, paper_id FROM scout_candidates WHERE scout_run_id=? ORDER BY id LIMIT 1", (run_id,)
+                ).fetchone()
+                db.insert_curator_evaluation(
+                    self.connection, curator_run_id=curator_id, paper_id=paper_id,
+                    scout_candidate_id=candidate_id, score=50, rationale="Recovered",
+                    matched_signals=[], quality_threshold_met=True,
+                )
+                db.insert_recommendation(self.connection, curator_run_id=curator_id,
+                                         paper_id=paper_id, recommendation_order=1, rationale="Recovered")
+            capture_report(self.connection, run_id, phase="curator_complete")
+            self.connection.commit()
+            saved = load_report(self.path, run_id)
+            self.assertEqual(saved["counts"]["recommendations"], attempt - 1)
+            self.assertEqual([row["id"] for row in saved["curator_runs"]], curator_ids)
+        current = build_report(self.connection, run_id, phase="curator_complete")
+        self.assertEqual(saved["counts"], current["counts"])
+        self.assertEqual(saved["curator_runs"], current["curator_runs"])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM scout_diagnostic_reports").fetchone()[0], 1)
+
     def test_manual_source_does_not_save_report(self):
         run_id = self.scout("manual_backfill")
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM scout_diagnostic_reports").fetchone()[0], 0)
