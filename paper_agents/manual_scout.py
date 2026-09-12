@@ -272,7 +272,7 @@ def worker(db_path: Path, descriptor: int) -> int:
             profile_path=db_path.parent / "profile.json", scout_dir=db_path.parent / "scout",
             pdf_dir=db_path.parent / "papers", model=DEFAULT_MODEL, ollama_url=ollama_url(),
             fetch_limit=20, keep_limit=3, max_scout_attempts=1, request_delay=5,
-            scout_retries=2, scout_timeout=60, timeout=120, workers=1, limit_chunks=2, mode="quick")
+            scout_retries=2, scout_timeout=60, timeout=300, workers=1, limit_chunks=2, mode="quick")
         write_status(db_path, {**state, **terminal_state(result)})
         return 0
     except Exception:

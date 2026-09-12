@@ -23,6 +23,9 @@ fail() { echo "Release acceptance failed: $*" >&2; exit 1; }
 [[ "$SCOUT_TIMEOUT" != *[!0-9]* && "$SCOUT_TIMEOUT" -gt 0 ]] || fail "Scout timeout must be a positive integer"
 [[ "$PORT" != *[!0-9]* && "$PORT" -gt 0 && "$PORT" -le 65535 ]] || fail "Port must be an integer from 1 to 65535"
 
+[[ ! -e .env && ! -e .paper-install ]] || fail "Acceptance requires a fresh checkout without installation state"
+[[ ! -e .paper-install.lock ]] || fail "An installer lock already exists"
+
 mkdir -p "$REPORT_DIR"
 rm -f "$REPORT_DIR/status.txt" "$REPORT_DIR/compose.log" "$REPORT_DIR/scout-status.json" "$REPORT_DIR/scout-last.log"
 printf 'host=%s/%s\napp_image=%s\nollama_image=%s\nport=%s\nstarted_at=%s\n' \
@@ -49,10 +52,9 @@ collect_and_clean() {
 }
 trap collect_and_clean EXIT
 
-[[ ! -e .env && ! -e .paper-install ]] || fail "Acceptance requires a fresh checkout without installation state"
 if [[ "$PORT" != 8000 ]]; then
   cp .env.example .env
-  printf '\nPAPER_PORT=%s\n' "$PORT" >> .env
+  printf '\nPAPER_PORT=%s\nPAPER_APP_IMAGE=%s\nPAPER_OLLAMA_IMAGE=%s\n' "$PORT" "$APP_IMAGE" "$OLLAMA_IMAGE" >> .env
 fi
 bash scripts/install_project_paper.sh --app-image "$APP_IMAGE" --ollama-image "$OLLAMA_IMAGE"
 project=$(sed -n 's/^project=//p' .paper-install)

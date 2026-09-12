@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from email.utils import parsedate_to_datetime
 import hashlib
 import html
 import json
@@ -197,6 +198,10 @@ class ArxivSource:
                 if error.code != 429 or attempt >= self.retries:
                     raise
                 delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After"))
+                from paper_agents.runtime_config import packaged
+                if packaged():
+                    # Allow the source to recover; keep native scheduling unchanged.
+                    delay = max(delay, 60 * (2 ** attempt))
                 if self.verbose:
                     print(f"arXiv rate limited topic '{topic}', retrying in {delay:.0f}s")
                 time.sleep(delay)
@@ -224,6 +229,11 @@ class ArxivSource:
     def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.isdigit():
             return float(retry_after)
+        if retry_after:
+            try:
+                return max(0, parsedate_to_datetime(retry_after).timestamp() - time.time())
+            except (ValueError, TypeError, OverflowError):
+                pass
         return self.request_delay * (2 ** attempt)
 
 
