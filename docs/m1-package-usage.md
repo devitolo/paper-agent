@@ -79,13 +79,13 @@ The Scout log exists after a manual run starts. Inspect it before retrying becau
 
 Data, artifacts and profile live in `paper-data`; mutable topics live in `paper-config`; model weights live in `ollama-data`, all scoped to the saved project name. Stop/start and container recreation retain these volumes. **Do not remove volumes or change the project name to fix an installation.** A failed startup preserves malformed state and reports an error rather than silently replacing it. Moving the installation directory or importing native data requires a separate explicit migration.
 
-For the packaged runtime, normal backup/restore and upgrades are not yet public-release features. Before relying on the package with durable personal data, export or copy the `paper-data` and `paper-config` volumes with Docker-native tooling while containers are stopped, then verify the SQLite database with `PRAGMA integrity_check`. Retain `.paper-install`, a private copy of `.env`, the matching checkout/helper and image selections alongside the backup. Volume names are project-scoped; repository files alone do not back up user data. This is a preservation precaution, not a tested restore or rollback procedure. The native Mini `scripts/backup_db.sh` remains available for checkout-based operations, but it is not yet the packaged-volume backup contract.
+Use [packaged backup and restore](package-backup.md) for an offline archive of both authoritative volumes and restoration into empty volumes with the identical app image. Save installation configuration privately alongside it. Upgrades and rollback remain deferred. The native Mini SQLite-only backup script is separate.
 
 If a process was forcibly killed and left `.paper-install.lock`, first verify no installer is running, then remove that empty lock directory and retry. A model-preparation service already running is reused rather than launching a second pull. Timeout and resource failures leave logs, app and volumes available for inspection. No automatic scouting is installed.
 
 ## Support and Known Limits
 
-Support is through [GitHub Issues](https://github.com/devitolo/paper-agent/issues) for the current major version and one prior major version. Include the exact commit, host OS/architecture, Docker/Compose versions, installer command, `.paper-install` project name, and redacted logs. Do not include `data/paper_agent.db`, raw feedback, `.env`, or full paper artifacts unless intentionally sanitized.
+Support is through [GitHub Issues](https://github.com/devitolo/paper-agent/issues) for the current major version only. Include the exact commit, host OS/architecture, Docker/Compose versions, installer command, `.paper-install` project name, and redacted logs. Do not include `data/paper_agent.db`, raw feedback, `.env`, or full paper artifacts unless intentionally sanitized.
 
 ## Linux release acceptance
 
@@ -100,4 +100,4 @@ Known M1 limits:
 - The public Project Paper image has arm64 and amd64 variants with SBOM and provenance attestations.
 - No packaged automatic schedule is installed.
 - OpenAlex, Semantic Scholar, and Gemini are not part of the default packaged flow.
-- Upgrade/rollback and full packaged backup/restore remain V1 work.
+- Upgrade/rollback remains deferred; packaged same-image backup/restore has a separate documented drill.

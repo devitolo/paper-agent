@@ -10,13 +10,13 @@ The PM has selected Docker/Compose as the primary V1 deployment mechanism, front
 
 Preserve Scout → Curator → Review Queue → external Paper Discussion → pasted feedback/score → existing learning paths. The Review Queue is sufficient unless fresh-user testing identifies a concrete problem. Gemini is optional; direct ChatGPT integration is unnecessary. Do not redesign ranking, retrieval, or topic agents to make packaging appear more complete.
 
-## Current-state assessment
+## Initial gap assessment (historical)
 
-“Reuse” means an existing implementation is available, not that a fresh Compose installation has been validated.
+This table records the pre-M1 assessment, not the present implementation. The acceptance evidence and checklist below supersede its packaging gaps.
 
 | Work area | Existing behavior and evidence | Smallest productization gap |
 | --- | --- | --- |
-| Docker/Compose | [Dockerfile](../Dockerfile) packages the Python CLI; [Compose](../docker-compose.yml) mounts `.env` and `data`, then runs `profile`. | Package required `sql/`, configuration templates and `pdftotext`; start web, publish loopback port, add Ollama/model preparation. Remove personal `data/` from build distribution. |
+| Docker/Compose (initial assessment; superseded by M1 evidence below) | [Dockerfile](../Dockerfile) packages the Python CLI; [Compose](../docker-compose.yml) mounts `.env` and `data`, then runs `profile`. | Package required `sql/`, configuration templates and `pdftotext`; start web, publish loopback port, add Ollama/model preparation. Remove personal `data/` from build distribution. |
 | Local model | [Extraction](../paper_agents/local_extract.py), [pipeline](../paper_agents/pipeline.py) and [Curator evidence](../paper_agents/curator_evidence.py) use Qwen/Ollama. | Persistent Ollama service/model cache; prepare `qwen2.5:1.5b-instruct` once; wire all app calls to the Compose service instead of container-local localhost. |
 | Persistence | [SQLite schema/init](../paper_agents/db.py), [topic config](../paper_agents/topics.py), [profile file](../paper_agents/store.py). | Stable writable volumes for DB, artifacts, profile and topics; initialize only absent state, without creator history or learned preferences. Confirm permissions and restart/recreate behavior. |
 | Configuration/secrets | Existing CLI options and provider configuration; current service/cron use different environment sources. | Clean `.env.example`, documented minimum settings and consistent container configuration. Mounting a file alone does not establish that every execution path reads it. No secrets in logs/build context. |
@@ -52,11 +52,12 @@ Gemini-off must be safe from the first package, but full optional-Gemini setup/r
 
 ### M1 acceptance criteria
 
-- [ ] QA records the exact commit/image, Compose/runtime versions, host OS/architecture/resources and default model. Only that configuration is claimed tested.
+- [x] Automated acceptance records the selected images and runtime configuration; see v0.1.3 acceptance evidence. Only recorded configurations are claimed tested.
 - [ ] A technically competent tester unfamiliar with the project follows the quickstart with empty app/model volumes, no private fixture/history/profile and no API/cloud credentials. No creator help, internal YAML edits, or host cron/systemd setup is needed.
 - [ ] Compose starts the app and Ollama, prepares the default Qwen model, and exposes the UI on a host loopback port. Failed or interrupted model preparation is visible and retryable.
 - [ ] User configures research topics in the product and triggers a bounded bootstrap pipeline. With reachable core sources and a documented known-productive topic, at least one real discovered recommendation appears in Review Queue; QA records source/run IDs and elapsed time.
-- [ ] The default arXiv-only no-key path is exercised. Absence of OpenAlex, Semantic Scholar and Gemini does not block use. OpenAlex's no-key path and cross-source partial-failure behavior are validated before OpenAlex is presented as a supported opt-in.
+- [x] The default arXiv-only no-key path passed both platform runs; optional providers were absent.
+- [ ] Validate OpenAlex and cross-source partial-failure behavior before presenting a packaged opt-in.
 - [ ] If all sources fail or genuinely return no candidates, the UI explains the condition and offers a bounded retry or topic correction. This fault test verifies recovery, but does not replace the required successful real-paper test. Never fabricate papers or retry indefinitely to meet a quota.
 - [ ] User saves feedback/score on a returned paper. Restart and container recreation preserve its exact content, recommendations/history, topic configuration and profile state. A seeded test profile may test persistence separately but is not used to fake cold-start personalization.
 - [ ] Normal restart/recreation uses the cached model without pulling its weights again; failed readiness never masquerades as a working model.
@@ -87,8 +88,8 @@ PM owns scope/priorities/UX. Productization Lead coordinates evidence and sequen
 | A0 Assessment/contract | Architect; PM, Developer | Current assessment | Confirm mount layout, model readiness and manual-run integration; PM resolves topic UX and bootstrap defaults. Existing components reused, no scoring changes. |
 | M1.1 Installer and Compose package — implemented; Linux release pass | Developer; Architect | A0 | Idempotent installer, Compose app/Ollama/model-preparation services, volumes and `.env.example`; full exact-image acceptance passes on Ubuntu x86-64. Re-running the installer preserves data and customer choices. Both platforms passed the v0.1.3 fresh-install acceptance gate. |
 | M1.2 First-run workflow — implemented; Mac live pass | Developer; PM, Architect | A0; integrate M1.1 | Existing topic UI → Run Scout path, durable status/retry and shared exclusion using the existing pipeline; three real papers reached the Mac QA queue without credentials. |
-| M1.3 Quickstart — development guide available | Technical Writer; Developer | M1.1/M1.2 | Minimum setup/start/restart steps are in `docs/m1-package-usage.md` and summarized in the README. Public pinned image references remain release work. |
-| M1.4 Fresh-install acceptance — Mac implemented-scope pass | QA; Developer, Writer | M1.1–M1.3 | Mac Apple Silicon evidence is recorded in `docs/m1-qa-report.md`; repeat on Linux x86-64 and published artifacts before claiming both platforms. |
+| M1.3 Quickstart — published package guide available | Technical Writer; Developer | M1.1/M1.2 | Minimum setup/start/restart steps are in `docs/m1-package-usage.md` and summarized in the README. The public v0.1.3 image is pinned by digest. |
+| M1.4 Fresh-install acceptance — published image passed both platforms | QA; Developer, Writer | M1.1–M1.3 | Published v0.1.3 passed fresh-install automation on both platforms; exact evidence is recorded in `docs/m1-qa-report.md`. Independent usability and remaining composite checks below are still open. |
 | V1.1 Data/upgrade safety | Architect; Developer, QA | M1 package layout | Developer implements minimal version/migration handling and matched backup/restore; QA rehearses upgrade, rollback, disk/write failure and feedback survival. Required before public users accumulate data. |
 | V1.2 Optional integrations/learning | Developer; Architect, QA | M1.4 | Gemini opt-in/auth disclosure and durable pending/applied/failed/retry state; no duplicate apply after restart. Verify local Scout feedback path independently. Semantic Scholar optional key/failure coverage. |
 | V1.3 Discussion handoff | Technical Writer; PM, QA | M1.4 | Publish prompt for section-by-section discussion, technical explanation, claims vs interpretation, user reactions, overall score and parser-compatible feedback. QA round-trip through existing copy/save UI; no ChatGPT dependency. |
@@ -101,13 +102,15 @@ V1.1–V1.4 can be scoped independently after mount/run contracts stabilize. Do 
 
 ## Public-release readiness (after M1)
 
-- [ ] M1 passed on a declared supported configuration; README leads with that single Compose path.
+Status reconciled 2026-09-12: v0.1.3 fresh-install acceptance passed on Ubuntu x86-64 and macOS Apple Silicon; see [recorded evidence](m1-qa-report.md). Unchecked composite gates below retain their untested portions. Same-image backup/restore is tracked in [the backup drill](package-backup-qa.md); upgrade/rollback is explicitly deferred by the user.
+
+- [x] Published v0.1.3 fresh-install automation passed on both declared platforms; README leads with the supported Compose path. Independent unfamiliar-user usability testing remains unverified.
 - [ ] Restart/rebuild/upgrade preserve DB, scores/reviews, raw feedback, profile, topics and model cache. Migration/version strategy and matched restore/rollback are exercised before public data accumulates.
 - [ ] Feedback save succeeds independently of Gemini availability; optional cloud calls require explicit configuration/consent. Gemini-off local learning limitations are documented accurately.
 - [ ] External Paper Discussion handoff and pasted feedback round-trip work with the documented prompt; no ChatGPT account/integration is required by the product.
 - [ ] Source rate limits, partial/all-source failure, model failure and interrupted jobs produce visible, bounded behavior without discarding prior data. Saved papers remain usable during network outages.
 - [ ] Manual discovery remains first-class. Any shipped automated schedule uses the packaged ownership/locking contract and can be disabled; no host scheduling expertise needed.
-- [ ] Backup integrity and full-state restoration are demonstrated. Retain seven daily and four weekly backups, document the independent storage responsibility and recovery limitations, and verify pruning never removes the newest valid backup.
+- [ ] Same-image full-state restore: see backup drill evidence. Seven daily/four weekly retention and independent storage are documented; automated scheduling/pruning is deferred. Ubuntu backup/restore execution remains to be verified separately from fresh-install acceptance.
 - [ ] Loopback exposure, private state permissions, credential redaction and safe local mutation/artifact access are reviewed. Support export is opt-in; private feedback/database contents are not silently uploaded. No automatic telemetry.
 - [ ] README includes purpose, screenshot/demo, workflow, quickstart, requirements/configuration, optional integrations, discussion/feedback explanation and links to deeper architecture/operations docs. Historical Mini/reset instructions cannot be mistaken for new-user setup.
 - [ ] QA reports exact test evidence and limitations. Support uses GitHub Issues with issue templates for bug reports and support requests; maintainers support only the current major version. Algorithm validation is tracked separately, with no unsupported “recommendations proven better” claim.
@@ -136,4 +139,4 @@ Defer Go migration, multi-user/accounts, SaaS, Kubernetes, enterprise deployment
 
 ## Validation of this assessment
 
-Architect and Developer/QA reviews ground the gaps in the current files. M1 implementation is now on `main`; macOS Apple Silicon acceptance evidence is recorded in `docs/m1-qa-report.md`. Linux x86-64, published images, upgrade/rollback and full backup/restore remain release gates. Regression tests still do not replace fresh-host source/model acceptance on each claimed platform.
+Architect and Developer/QA reviews ground the gaps in the current files. M1 implementation is now on `main`; macOS Apple Silicon acceptance evidence is recorded in `docs/m1-qa-report.md`. Published v0.1.3 fresh-install gates now pass on Ubuntu x86-64 and macOS Apple Silicon. Same-image backup/restore has its own evidence and limitations; upgrade/rollback remains deferred. Regression tests still do not replace fresh-host source/model acceptance on each claimed platform.
