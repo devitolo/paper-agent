@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1475,6 +1475,8 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
             FROM scout_runs
             LEFT JOIN scout_candidates ON scout_candidates.scout_run_id = scout_runs.id
             WHERE (? IS NULL OR scout_runs.source = ?)
+              AND scout_runs.source IN ('arxiv', 'openalex', 'semantic_scholar')
+              AND julianday(scout_runs.started_at) BETWEEN julianday('now', '-7 days') AND julianday('now')
             GROUP BY scout_runs.id
             ORDER BY scout_runs.id DESC
             LIMIT 3
@@ -1551,6 +1553,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
         "feedback_profile": feedback_profile,
     }
     summary["warnings"] = _health_warnings(summary)
+    summary["profile_maintenance"] = _health_profile_maintenance(summary)
     return summary
 
 
@@ -1658,6 +1661,8 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             )
 
     for latest_scout in summary["latest_scout_runs_by_source"]:
+        if not _is_recent_scheduled_scout(latest_scout):
+            continue
         diagnostic_command = f"scripts/diagnose_scout_run.sh {latest_scout['source']}"
         started_at = _format_local_run_time(latest_scout.get("started_at"))
         run_label = f"Scout run at {started_at}" if started_at else "Latest Scout run"
@@ -1734,13 +1739,14 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             )
 
     low_ratio_runs = 0
-    for row in summary["recent_scout_runs"]:
+    recent_scout_runs = [row for row in summary["recent_scout_runs"] if _is_recent_scheduled_scout(row)]
+    for row in recent_scout_runs:
         candidates = int(row["candidate_count"] or 0)
         eligible = int(row["eligible_count"] or 0)
         if candidates > 0 and eligible / candidates < 0.10:
             low_ratio_runs += 1
-    if len(summary["recent_scout_runs"]) >= 3 and low_ratio_runs >= 3:
-        warnings.append({"level": "warning", "message": "Eligible/stored ratio is below 10% for the latest 3 Scout runs."})
+    if len(recent_scout_runs) >= 3 and low_ratio_runs >= 3:
+        warnings.append({"level": "warning", "message": "Eligible/stored ratio is below 10% for the latest 3 scheduled Scout runs in the last 7 days."})
 
     recent_cycle_recommendations = summary["recent_cycle_recommendations"]
     if len(recent_cycle_recommendations) >= 2 and all(
@@ -1760,11 +1766,26 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, str]]:
             }
         )
 
+    return warnings
+
+
+def _is_recent_scheduled_scout(run: dict[str, Any]) -> bool:
+    started_at = _parse_sqlite_datetime(run.get("started_at"))
+    if started_at is None or run["source"] not in {"arxiv", "openalex", "semantic_scholar"}:
+        return False
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - started_at
+    return timedelta(0) <= age <= timedelta(days=7)
+
+
+def _health_profile_maintenance(summary: dict[str, Any]) -> list[dict[str, str]]:
+    warnings: list[dict[str, str]] = []
     feedback_profile = summary["feedback_profile"]
     if feedback_profile["recent_apply_failures_count"] > 0:
         warnings.append({"level": "warning", "message": "Gemini/profile apply failed in the last 7 days."})
     if feedback_profile["unapplied_structured_feedback_count"] > 0:
-        warnings.append({"level": "warning", "message": "Structured feedback is waiting to be applied to the profile."})
+        warnings.append({"level": "warning", "message": "Structured feedback is waiting to be applied to the profile (current pending backlog, all dates)."})
     return warnings
 
 

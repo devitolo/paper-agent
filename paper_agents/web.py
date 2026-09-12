@@ -685,6 +685,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
     {warning_html}
     <div class="health-cards">{card_html}</div>
+    {render_profile_maintenance(summary["profile_maintenance"])}
     {graph_html}
     <section class="health-section">
       <h2>Daily Funnel</h2>
@@ -1199,7 +1200,14 @@ def render_warnings(warnings: list[dict[str, str]]) -> str:
         f'<li class="{escape(warning["level"])}"><strong>{escape(warning["level"])}</strong> {escape(warning["message"])}</li>'
         for warning in warnings
     )
-    return f'<section class="health-warnings"><h2>Warnings</h2><ul>{items}</ul></section>'
+    return f'<section class="health-warnings"><h2>Warnings</h2><p>Scout warnings: latest run per scheduled source in the last 7 days, independent of the selected chart range. Run times are shown below.</p><ul>{items}</ul></section>'
+
+
+def render_profile_maintenance(notices: list[dict[str, str]]) -> str:
+    if not notices:
+        return ""
+    items = "".join(f'<li>{escape(notice["message"])}</li>' for notice in notices)
+    return f'<section class="health-section"><h2>Profile maintenance / Needs attention</h2><ul>{items}</ul></section>'
 
 
 def render_health_graphs(summary: dict[str, Any]) -> str:

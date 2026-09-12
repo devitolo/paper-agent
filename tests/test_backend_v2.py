@@ -3690,7 +3690,11 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertEqual(summary["feedback_profile"]["unapplied_structured_feedback_count"], 1)
         self.assertEqual(summary["feedback_profile"]["recent_apply_failures_count"], 1)
-        messages = [warning["message"] for warning in summary["warnings"]]
+        messages = [warning["message"] for warning in summary["profile_maintenance"]]
+        self.assertFalse(any("profile" in w["message"] for w in summary["warnings"]))
+        html = web.render_health_page(self.db_path)
+        self.assertIn("Profile maintenance / Needs attention", html)
+        self.assertIn("current pending backlog, all dates", html)
         self.assertTrue(any("Gemini/profile apply failed" in message for message in messages))
         self.assertTrue(any("Structured feedback is waiting" in message for message in messages))
 
@@ -3739,9 +3743,38 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertEqual(summary["feedback_profile"]["unapplied_structured_feedback_count"], 0)
         self.assertEqual(summary["feedback_profile"]["recent_apply_failures_count"], 0)
-        messages = [warning["message"] for warning in summary["warnings"]]
+        messages = [warning["message"] for warning in summary["profile_maintenance"]]
         self.assertFalse(any("Gemini/profile apply failed" in message for message in messages))
         self.assertFalse(any("Structured feedback is waiting" in message for message in messages))
+
+    def test_health_scout_warnings_exclude_manual_and_stale_history(self):
+        for source in ("arxiv", "openalex", "semantic_scholar", "manual_backfill", "manual"):
+            self._seed_scout_candidate(source=source, excluded=True, source_id=source)
+        self.connection.commit()
+        summary = db.health_summary(self.db_path, days=90)
+        messages = " ".join(w["message"] for w in summary["warnings"])
+        for source in ("arxiv", "openalex", "semantic_scholar"):
+            self.assertIn(f"{source} Scout run at ", messages)
+        self.assertNotIn("manual", messages)
+        self.assertIn("latest 3 scheduled Scout runs in the last 7 days", messages)
+        self.assertEqual(len(summary["latest_scout_runs_by_source"]), 5)
+        self.connection.execute("UPDATE scout_runs SET started_at = datetime('now', '-8 days')")
+        self.connection.commit()
+        summary = db.health_summary(self.db_path, days=90)
+        self.assertFalse(any("Scout" in w["message"] for w in summary["warnings"]))
+        manual = db.health_summary(self.db_path, source="manual_backfill")
+        self.assertFalse(any("Scout" in w["message"] for w in manual["warnings"]))
+
+    def test_health_scout_warning_recency_boundary(self):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        for source in ("arxiv", "openalex", "semantic_scholar"):
+            self.assertTrue(db._is_recent_scheduled_scout({"source": source, "started_at": (now - timedelta(days=6, hours=23)).isoformat()}))
+            self.assertFalse(db._is_recent_scheduled_scout({"source": source, "started_at": (now - timedelta(days=7, seconds=1)).isoformat()}))
+        self.assertFalse(db._is_recent_scheduled_scout({"source": "arxiv", "started_at": "invalid"}))
+        self.assertFalse(db._is_recent_scheduled_scout({"source": "arxiv", "started_at": (now + timedelta(days=1)).isoformat()}))
+        self.assertEqual(web.render_profile_maintenance([]), "")
+        self.assertIn("last 7 days", web.render_warnings([{"level": "warning", "message": "test"}]))
 
     def test_health_page_omits_empty_warning_banner(self):
         self.assertEqual(web.render_warnings([]), "")

@@ -667,6 +667,10 @@ def format_health_summary(summary: dict[str, Any]) -> str:
     else:
         lines.append("- none")
 
+    if summary["profile_maintenance"]:
+        lines.extend(["", "Profile maintenance / Needs attention:"])
+        lines.extend(f"- {notice['message']}" for notice in summary["profile_maintenance"])
+
     lines.extend(["", "Daily Scout funnel:", "day | source | runs | candidates | eligible | excluded"])
     lines.extend(
         _format_table_row(row, ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])
