@@ -29,8 +29,18 @@ python3 tests/package_backup_docker.py
 
 The Docker drill requires host Python only as test tooling; customer backup/restore does not. It allocates and removes its own test projects and leaves synthetic archives in the system temporary directory.
 
+## Ubuntu x86-64 confirmation
+
+The same-image backup/restore gate also **passed on Ubuntu 24.04 x86-64** in [GitHub Actions run 34721084164](https://github.com/devitolo/paper-agent/actions/runs/34721084164), at commit `020396027c50347f703681472f5efb7c2499992b`. The job ran from 2026-09-12 21:50:30 to 21:50:57 UTC.
+
+GitHub reports success for environment recording, unit safety checks, the published-image Docker drill, and evidence upload. The drill additionally seeds and verifies a synthetic saved value in SQLite. No arXiv requests, model download, customer state or native Mini operations are needed.
+
+Artifact: `project-paper-linux-backup-restore-34721084164` (14-day retention). It contains the runner/Docker/Python versions, selected image and source commit, structured result, drill output and synthetic app logs. Archives and customer configuration are not uploaded.
+
+To repeat, open **Actions → Backup Restore → Run workflow**. Changes to the helper, tests or workflow on `main` also run this gate automatically. The workflow uses the immutable app image selected in `.env.example`.
+
 ## Limits
 
-This is a developer-run recovery drill, not independent tester sign-off. Ubuntu execution, cross-architecture restoration, full model re-download following restore, disk-full/interruption fault injection, and visual verification of restored review content remain untested here. Fresh-install model/discovery evidence is separate in [v0.1.3 acceptance](v0.1.3-acceptance.md).
+This is a developer-run recovery drill, not independent tester sign-off. Cross-architecture restoration, full model re-download following restore, disk-full/interruption fault injection, and visual verification of restored review content remain untested here. Fresh-install model/discovery evidence is separate in [v0.1.3 acceptance](v0.1.3-acceptance.md).
 
 Automatic retention/pruning and cross-version upgrade/rollback are deferred. The runbook specifies manual seven-daily/four-weekly retention and independent storage. The helper refuses populated targets rather than replacing existing state; a failed partial copy requires another empty target.
