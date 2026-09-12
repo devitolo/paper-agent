@@ -24,7 +24,7 @@ fail() { echo "Release acceptance failed: $*" >&2; exit 1; }
 [[ "$PORT" != *[!0-9]* && "$PORT" -gt 0 && "$PORT" -le 65535 ]] || fail "Port must be an integer from 1 to 65535"
 
 mkdir -p "$REPORT_DIR"
-rm -f "$REPORT_DIR/status.txt" "$REPORT_DIR/compose.log" "$REPORT_DIR/scout-status.json"
+rm -f "$REPORT_DIR/status.txt" "$REPORT_DIR/compose.log" "$REPORT_DIR/scout-status.json" "$REPORT_DIR/scout-last.log"
 printf 'host=%s/%s\napp_image=%s\nollama_image=%s\nport=%s\nstarted_at=%s\n' \
   "$(uname -s)" "$(uname -m)" "$APP_IMAGE" "$OLLAMA_IMAGE" "$PORT" "$(date -u +%FT%TZ)" > "$REPORT_DIR/status.txt"
 
@@ -39,6 +39,7 @@ collect_and_clean() {
   if [[ -n "$project" ]]; then
     compose logs --no-color app ollama prepare-model > "$REPORT_DIR/compose.log" 2>&1 || true
     compose exec -T app sh -c 'cat /app/data/scout-status.json 2>/dev/null || true' > "$REPORT_DIR/scout-status.json" 2>/dev/null || true
+    compose exec -T app sh -c 'cat /app/data/scout-last.log 2>/dev/null || true' > "$REPORT_DIR/scout-last.log" 2>/dev/null || true
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   fi
   rm -f .env .paper-install
