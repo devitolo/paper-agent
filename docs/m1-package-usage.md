@@ -1,8 +1,8 @@
 # Public Compose package
 
-This installs the public app image and local model runtime, with manual discovery from the Review Queue. Ubuntu x86-64 is the first supported packaged path. The image includes arm64, but macOS Apple Silicon remains a preview until a clean exact-release end-to-end run passes. The existing native Mini deployment is unchanged.
+This installs the public app image and local model runtime, with manual discovery from the Review Queue. Ubuntu x86-64 is the first supported packaged path. The same v0.1.3 image passed macOS Apple Silicon acceptance on 2026-09-12. The existing native Mini deployment is unchanged.
 
-The supported pairing is Linux x86-64 with Docker Engine/Linux amd64 containers. macOS Apple Silicon with Docker Desktop/Linux arm64 containers is a preview. CPU inference is the baseline. Have Git and a writable clone of this repository, and start Docker with Compose v2 first; no host Python, Ollama, cron, systemd, or provider keys are needed. The installer checks provisional Docker RAM (4 GiB) and installation-filesystem free space (6 GiB) thresholds. These are configurable preflight guards; Docker's separate VM/disk-image capacity must also be sufficient.
+The supported pairing is Linux x86-64 with Docker Engine/Linux amd64 containers. macOS Apple Silicon with Docker Desktop/Linux arm64 containers also passed acceptance. CPU inference is the baseline. Have Git and a writable clone of this repository, and start Docker with Compose v2 first; no host Python, Ollama, cron, systemd, or provider keys are needed. The installer checks provisional Docker RAM (4 GiB) and installation-filesystem free space (6 GiB) thresholds. These are configurable preflight guards; Docker's separate VM/disk-image capacity must also be sufficient.
 
 From a clean clone, run:
 
@@ -11,7 +11,7 @@ cd /absolute/path/to/paper-agent
 bash scripts/install_project_paper.sh
 ```
 
-The defaults select Project Paper `v0.1.2` by immutable index digest `sha256:9ca07d264124fff083f34f358fe0897b0a48fea2161e31349cf1d95b0b15c25f` and the pinned multi-platform Ollama image `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba`. Docker selects the matching container platform automatically. The installer rejects `latest` for release installs, validates Project Paper OCI source/version labels, and records the exact selected image references. Developers can still use `--build --ollama-image ollama/ollama:latest` for an explicit local build; that path is outside release qualification.
+The defaults select Project Paper `v0.1.3` by immutable index digest `sha256:116e994bef7294767df08754c20870c596946a916e4e66f047efc973c858df13` and the pinned multi-platform Ollama image `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba`. Docker selects the matching container platform automatically. The installer rejects `latest` for release installs, validates Project Paper OCI source/version labels, and records the exact selected image references. Developers can still use `--build --ollama-image ollama/ollama:latest` for an explicit local build; that path is outside release qualification.
 
 `prepare-model` is included in the Project Paper app image and talks only to the private Ollama HTTP API. It never mounts or executes a checkout helper and does not require the Ollama CLI in the app image.
 
@@ -96,7 +96,7 @@ The same harness can qualify a fresh macOS Apple Silicon checkout. Set `PAPER_AC
 Known M1 limits:
 
 - Ubuntu x86-64 passed the full exact-image acceptance workflow on 2026-09-11.
-- macOS Apple Silicon remains a preview: two exact-image runs passed installation and Qwen readiness but did not complete the entire live workflow, once because an Ollama request reached its timeout and once because arXiv returned HTTP 429 after retries.
+- v0.1.3 passed full automated fresh-install acceptance on Ubuntu x86-64 and macOS Apple Silicon; earlier source and model failures remain documented in the release acceptance report.
 - The public Project Paper image has arm64 and amd64 variants with SBOM and provenance attestations.
 - No packaged automatic schedule is installed.
 - OpenAlex, Semantic Scholar, and Gemini are not part of the default packaged flow.

@@ -4,7 +4,7 @@
 
 Project Paper is a local-first system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
 
-> **First supported release:** the installer-fronted Docker Compose path and manual in-product Scout have passed exact-image acceptance on Ubuntu x86-64. The public image also includes arm64; macOS Apple Silicon remains a preview path pending a clean exact-release end-to-end pass. See the [package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
+> **First supported release:** the installer-fronted Docker Compose path and manual in-product Scout have passed exact-image acceptance on Ubuntu x86-64. The same v0.1.3 image also passed macOS Apple Silicon acceptance. See the [package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
 
 The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent stores pasted ChatGPT discussion summaries in immutable SQLite history with deterministic v1 parsing.
 
@@ -12,7 +12,7 @@ The repository currently contains a Python MVP called `paper_agents`. The V2 bac
 
 The current first-user path is:
 
-1. Use a fresh clone on Linux x86-64 with Docker Engine and Compose v2.
+1. Use a fresh clone on Ubuntu x86-64 with Docker Engine and Compose v2, or macOS Apple Silicon with Docker Desktop.
 2. Run the installer; its defaults select the public Project Paper image and pinned Ollama image.
 3. Open the loopback web UI.
 4. Add an enabled arXiv topic in **Topics**.
@@ -26,13 +26,13 @@ cd /absolute/path/to/paper-agent
 bash scripts/install_project_paper.sh
 ```
 
-The installer creates `.env` if missing, selects the immutable `v0.1.2` image digest, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. Docker selects the matching arm64 image automatically. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
+The installer creates `.env` if missing, selects the immutable `v0.1.3` image digest, prepares the default local Qwen model in Docker, starts the app on a loopback URL, and prints runtime/log/retry commands. Docker selects the matching architecture image automatically. The packaged path requires Docker with Compose; it does not require host Python, host Ollama, cron, systemd, OpenAI, Gemini, OpenAlex, or Semantic Scholar credentials for the default arXiv flow.
 
 Gemini profile synthesis is disabled in this package. Feedback blobs are still saved, parsed when possible, and available to deterministic Scout guidance, but direct profile evolution is not promised without the later optional Gemini packaging work.
 
 The packaged runtime stores user state in Compose volumes: `paper-data` for SQLite/artifacts/profile, `paper-config` for topics, and `ollama-data` for the model cache. Re-run the installer to repair/retry without deleting volumes. Do not use `db reset`, remove Compose volumes, or change the recorded project name as a normal recovery or upgrade step.
 
-macOS exact-release qualification, release upgrade/rollback, and broader backup/restore guarantees remain tracked work. Support is through GitHub Issues for the current major version and one prior major version.
+Release upgrade/rollback, and broader backup/restore guarantees remain tracked work. Support is through GitHub Issues for the current major version and one prior major version.
 
 ## Overview
 
@@ -88,7 +88,6 @@ Not implemented yet:
 - General open-access PDF resolution beyond arXiv, beyond the current Semantic Reader fallback.
 - systemd service and timer.
 - Benchmark recording and generated run reports.
-- macOS Apple Silicon exact-release end-to-end qualification.
 - A supported packaged upgrade/rollback path.
 
 ## MVP Workflow
@@ -108,7 +107,7 @@ The current scheduled path covers Scout -> Curator -> recommended PDF extraction
 
 Supported packaged path:
 
-- Linux x86-64 with Docker Engine and Compose v2. macOS Apple Silicon with Docker Desktop is available as a preview.
+- Linux x86-64 with Docker Engine and Compose v2. macOS Apple Silicon with Docker Desktop also passed fresh-install acceptance.
 - Network access to arXiv and to pull Docker/Ollama images/model weights.
 - Docker configured with at least the installer's provisional 4 GiB memory and 6 GiB free-space preflight thresholds.
 
@@ -545,9 +544,9 @@ Project Paper is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](
 
 ### Scout warning diagnostics
 
-Health warnings for arXiv, OpenAlex, and Semantic Scholar include **Download diagnostics** for the exact Scout run. Scheduled pipelines automatically save a local JSON snapshot when Scout returns a small or empty eligible pool or source errors, and refresh it after Curator to include evaluation/run context and recommendation counts. Capture uses the local Python diagnostic collector; it does not repeat source requests or call a model.
+Health warnings for arXiv, OpenAlex, and Semantic Scholar include **View diagnostics**, opening a separate page for the exact Scout run with a **Copy report** button and selectable text. Scheduled pipelines automatically save a local JSON snapshot when Scout returns a small or empty eligible pool or source errors, and refresh it after Curator to include evaluation/run context and recommendation counts. Capture uses the local Python diagnostic collector; it does not repeat source requests or call a model.
 
-Reports are stored in the application database (`scout_diagnostic_reports`) and retained with their Scout run. They include run time and capture time, source/configured topics, source/refill diagnostics, errors, candidate counts, exclusion reasons, and candidate titles/queries. They do not collect `.env`, system logs, or credentials from the environment. Downloads for older runs reconstruct a report from recorded database rows and use `capture_phase: requested`; automatic snapshots use `scout_complete` or `curator_complete`.
+Reports are stored in the application database (`scout_diagnostic_reports`) and retained with their Scout run. They include run time and capture time, source/configured topics, source/refill diagnostics, errors, candidate counts, exclusion reasons, and candidate titles/queries. They do not collect `.env`, system logs, or credentials from the environment. Reports for older runs reconstruct a report from recorded database rows and use `capture_phase: requested`; automatic snapshots use `scout_complete` or `curator_complete`.
 
 The same collector can be run manually:
 
@@ -557,4 +556,4 @@ python3 -m paper_agents.scout_diagnostics --db data/paper_agent.db --run-id 123
 scripts/diagnose_scout_run.sh openalex
 ```
 
-The table is added by normal database initialization after updating the app. No new cron job is required. Diagnostic capture failures are logged without stopping Scout or Curator; the download can still reconstruct the recorded evidence.
+The table is added by normal database initialization after updating the app. No new cron job is required. Diagnostic capture failures are logged without stopping Scout or Curator; the diagnostic page can still reconstruct the recorded evidence.

@@ -1,6 +1,6 @@
 # M1 acceptance report
 
-Status: **pass for the first supported Ubuntu x86-64 package path**. The exact public v0.1.2 app and selected Ollama image passed fresh installer, Qwen, live arXiv discovery, feedback, persistence, recreation and recovery acceptance on a GitHub-hosted Ubuntu x86-64 VM on 2026-09-11. macOS Apple Silicon remains a preview path pending a clean exact-release end-to-end pass.
+Status: v0.1.3 passed automated fresh-install acceptance on Ubuntu x86-64 and macOS Apple Silicon. See [v0.1.3 acceptance evidence](v0.1.3-acceptance.md). Earlier results below remain historical.
 
 ## Public v0.1.2 Linux acceptance
 
@@ -37,11 +37,10 @@ Passed evidence:
 
 ## Remaining work
 
-- Obtain a clean exact-release end-to-end pass on macOS Apple Silicon before promoting that preview path to supported. Two isolated attempts passed installation and model readiness; one later hit an Ollama 120-second generation failure and the other received arXiv HTTP 429 after the existing retries. Neither failure occurred in the Linux acceptance run.
 - Exercise released-image upgrade/rollback and the later backup policy before claiming those operational guarantees. This is outside the Fresh Install Produces Papers milestone.
 - Add the approved sanitized README screenshot during showcase work.
 
-The first milestone is fully demonstrated on the supported Linux path. The package is not yet a two-platform supported release.
+The first milestone is fully demonstrated on the supported Linux path. Both platforms passed the v0.1.3 fresh-install gate; operational upgrade/restore work remains.
 
 ## Persistent Tester Final Gate (2026-09-10)
 

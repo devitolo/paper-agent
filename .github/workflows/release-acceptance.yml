@@ -6,7 +6,7 @@ on:
       app_image:
         description: Immutable Project Paper image reference
         required: true
-        default: ghcr.io/devitolo/paper-agent@sha256:9ca07d264124fff083f34f358fe0897b0a48fea2161e31349cf1d95b0b15c25f
+        default: ghcr.io/devitolo/paper-agent@sha256:116e994bef7294767df08754c20870c596946a916e4e66f047efc973c858df13
         type: string
       ollama_image:
         description: Immutable Ollama image reference

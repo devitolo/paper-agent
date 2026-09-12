@@ -6,7 +6,7 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ### M1 local package and manual discovery path
 
-Status: Implemented on `main`; Ubuntu x86-64 passed exact public-image acceptance on 2026-09-11. macOS Apple Silicon remains a preview pending a clean exact-release end-to-end pass.
+Status: Implemented on `main`; Ubuntu x86-64 passed exact public-image acceptance on 2026-09-11. macOS Apple Silicon passed the v0.1.3 fresh-install acceptance gate on 2026-09-12.
 
 Decision: Productization M1 should support one clear local-first Compose path before public release polish: installer, app container, private Ollama service, prepared Qwen model, loopback web UI, topic setup, manual Run Scout, review, and feedback save.
 

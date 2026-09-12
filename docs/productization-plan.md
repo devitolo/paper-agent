@@ -1,6 +1,6 @@
 # Project Paper: V1 productization assessment and plan
 
-Status: M1.1 installer/Compose packaging and M1.2 manual discovery are implemented on `main`. Independent code QA passes and the exact public image pair passed full Ubuntu x86-64 acceptance on 2026-09-11. macOS Apple Silicon remains a preview pending a clean exact-release end-to-end pass. See [live M1 acceptance](m1-qa-report.md).
+Status: M1.1 installer/Compose packaging and M1.2 manual discovery are implemented on `main`. Independent code QA passes and the exact public image pair passed full Ubuntu x86-64 acceptance on 2026-09-11. macOS Apple Silicon passed the v0.1.3 fresh-install acceptance gate on 2026-09-12. See [live M1 acceptance](m1-qa-report.md).
 
 ## Brief and revised direction
 
@@ -85,7 +85,7 @@ PM owns scope/priorities/UX. Productization Lead coordinates evidence and sequen
 | ID / phase | Accountable owner; collaborators | Dependency | Deliverable / acceptance |
 | --- | --- | --- | --- |
 | A0 Assessment/contract | Architect; PM, Developer | Current assessment | Confirm mount layout, model readiness and manual-run integration; PM resolves topic UX and bootstrap defaults. Existing components reused, no scoring changes. |
-| M1.1 Installer and Compose package — implemented; Linux release pass | Developer; Architect | A0 | Idempotent installer, Compose app/Ollama/model-preparation services, volumes and `.env.example`; full exact-image acceptance passes on Ubuntu x86-64. Re-running the installer preserves data and customer choices. macOS exact-release qualification remains. |
+| M1.1 Installer and Compose package — implemented; Linux release pass | Developer; Architect | A0 | Idempotent installer, Compose app/Ollama/model-preparation services, volumes and `.env.example`; full exact-image acceptance passes on Ubuntu x86-64. Re-running the installer preserves data and customer choices. Both platforms passed the v0.1.3 fresh-install acceptance gate. |
 | M1.2 First-run workflow — implemented; Mac live pass | Developer; PM, Architect | A0; integrate M1.1 | Existing topic UI → Run Scout path, durable status/retry and shared exclusion using the existing pipeline; three real papers reached the Mac QA queue without credentials. |
 | M1.3 Quickstart — development guide available | Technical Writer; Developer | M1.1/M1.2 | Minimum setup/start/restart steps are in `docs/m1-package-usage.md` and summarized in the README. Public pinned image references remain release work. |
 | M1.4 Fresh-install acceptance — Mac implemented-scope pass | QA; Developer, Writer | M1.1–M1.3 | Mac Apple Silicon evidence is recorded in `docs/m1-qa-report.md`; repeat on Linux x86-64 and published artifacts before claiming both platforms. |
