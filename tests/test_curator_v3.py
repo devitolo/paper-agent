@@ -128,6 +128,38 @@ class CuratorV3EvidenceCallTests(unittest.TestCase):
             }, {})["score"]
             self.assertLessEqual(score, 70)
 
+    def test_placeholder_evidence_is_unavailable_and_earns_no_credit(self):
+        fields = ("experiment_or_evaluation", "real_data_or_deployment", "implementation_detail", "novelty", "rationale")
+        for field in fields:
+            for placeholder in ("string", "  StRiNg\n", field, field.replace("_", " ")):
+                with self.subTest(field=field, placeholder=placeholder), patch(
+                    "paper_agents.curator_evidence.call_ollama",
+                    return_value={"response": json.dumps(assessment(**{field: placeholder}))},
+                ):
+                    result = assess_evidence(CuratorV3ScoringTests.candidate)
+                self.assertEqual(result["status"], "unavailable")
+                self.assertIn(field, result["error"])
+                self.assertEqual(result["evidence_quality"], "unknown")
+                self.assertEqual(result["rationale"], "No usable evidence assessment.")
+                evaluated = evaluate_candidate(CuratorV3ScoringTests.candidate | {
+                    "evidence": {"full_text_triage": True, "pdf_artifact": True},
+                    "evidence_assessment": result,
+                }, {})
+                self.assertEqual(evaluated["score_components"]["evidence_adjustment"], 0)
+                self.assertLessEqual(evaluated["score"], 70)
+
+    def test_short_technical_evidence_and_string_prose_remain_valid(self):
+        payload = assessment(experiment_or_evaluation="A/B test", real_data_or_deployment="Linux",
+                             implementation_detail="eBPF", novelty="String matching")
+        with patch("paper_agents.curator_evidence.call_ollama", return_value={"response": json.dumps(payload)}):
+            result = assess_evidence(CuratorV3ScoringTests.candidate)
+        self.assertEqual(result["status"], "ok")
+        self.assertIsNone(result["error"])
+        for field in ("experiment_or_evaluation", "real_data_or_deployment", "implementation_detail", "novelty"):
+            self.assertEqual(result[field], payload[field])
+        evaluated = evaluate_candidate(CuratorV3ScoringTests.candidate | {"evidence_assessment": result}, {})
+        self.assertGreater(evaluated["score_components"]["evidence_adjustment"], 0)
+
     def test_timeout_becomes_unavailable_assessment(self):
         with patch("paper_agents.curator_evidence.call_ollama", side_effect=TimeoutError("timed out")):
             result = assess_evidence({"title": "Test", "abstract": "Some abstract"})

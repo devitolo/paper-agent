@@ -1707,7 +1707,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, Any]]:
                     "message": (
                         f"{latest_scout['source']} {run_label} had only "
                         f"{latest_scout['eligible_count']} eligible candidates and produced 0 recommendations; "
-                        "Curator needs 10. "
+                        "target pool: 10 eligible candidates. "
                     ),
                 }
             )
@@ -1718,7 +1718,7 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, Any]]:
                     "scout_run_id": latest_scout["id"],
                     "message": (
                         f"{latest_scout['source']} {run_label} had only "
-                        f"{latest_scout['eligible_count']} eligible candidates; Curator needs 10. "
+                        f"{latest_scout['eligible_count']} eligible candidates; target pool: 10 eligible candidates. "
                     ),
                 }
             )

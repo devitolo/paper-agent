@@ -96,6 +96,10 @@ def _validate_response(value: Any) -> dict[str, Any]:
                if not isinstance(value.get(field), str) or not value[field].strip()]
     if missing:
         raise ValueError("model response has invalid required evidence fields: " + ", ".join(missing))
+    placeholders = [field for field in REQUIRED_EVIDENCE_FIELDS
+                    if value[field].strip().casefold() in {"string", field, field.replace("_", " ")}]
+    if placeholders:
+        raise ValueError("model response has placeholder evidence fields: " + ", ".join(placeholders))
     if value["research_type"].lower() not in RESEARCH_TYPES:
         raise ValueError("model response has an invalid research_type")
     if value["evidence_quality"].lower() not in EVIDENCE_QUALITIES:

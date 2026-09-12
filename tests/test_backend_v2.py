@@ -3644,7 +3644,7 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "had only 1 eligible candidates and produced 0 recommendations; Curator needs 10" in warning["message"]
+                "had only 1 eligible candidates and produced 0 recommendations; target pool: 10 eligible candidates" in warning["message"]
                 and "arxiv Scout run at " in warning["message"]
                 and isinstance(warning.get("scout_run_id"), int)
                 for warning in summary["warnings"]
