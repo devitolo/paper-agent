@@ -1,6 +1,14 @@
 # M1 acceptance report
 
-Status: conditional pass on macOS Apple Silicon; Linux x86-64 host qualification remains outstanding. A public multi-platform image was independently checked for anonymous access, architecture manifests, source correspondence, SBOM, provenance, empty-volume startup, persistence, and interrupted-state recovery on 2026-09-10. Full installer/model/arXiv acceptance on Linux remains pending.
+Status: **pass for the first supported Ubuntu x86-64 package path**. The exact public v0.1.2 app and selected Ollama image passed fresh installer, Qwen, live arXiv discovery, feedback, persistence, recreation and recovery acceptance on a GitHub-hosted Ubuntu x86-64 VM on 2026-09-11. macOS Apple Silicon remains a preview path pending a clean exact-release end-to-end pass.
+
+## Public v0.1.2 Linux acceptance
+
+- Run: [Release Acceptance #2](https://github.com/devitolo/paper-agent/actions/runs/34574831727), completed successfully on GitHub-hosted Ubuntu x86-64.
+- App: `ghcr.io/devitolo/paper-agent@sha256:9ca07d264124fff083f34f358fe0897b0a48fea2161e31349cf1d95b0b15c25f`.
+- Ollama: `docker.io/ollama/ollama@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba`.
+- Passed: host/platform validation, normal fresh installer, model download and bounded inference, topic submission, live arXiv Scout, persisted papers and recommendations, feedback submission, app recreation with unchanged counts, abandoned-run reconciliation, evidence upload and volume cleanup.
+- Evidence artifact: `project-paper-linux-amd64-acceptance-34574831727`, retained by GitHub Actions for 14 days.
 
 ## Code and static validation
 
@@ -27,15 +35,13 @@ Passed evidence:
 7. Installer rerun completed with the cached model and no pull. Forced app/Ollama container recreation preserved 3 recommendations, exact feedback, topic configuration and model data. Post-recreation app/database/Ollama/model-presence checks passed.
 8. Independent code QA verified shared web/packaged-CLI exclusion, durable queued/running/completed/empty/failed/interrupted states, canonical worker launch, packaged-only UI/locking, and unchanged native Mini behavior.
 
-## Remaining gates
+## Remaining work
 
-- Repeat the full acceptance on Linux x86-64 before claiming Linux support.
-- Publish one pinned multi-platform Project Paper image and package/pin the model-preparation helper instead of bind-mounting it from the checkout.
-- Complete fresh Linux amd64 installer, Qwen model download/inference, live arXiv discovery, persistence, and recovery acceptance with the selected Ollama digest. Registry inspection and isolated image smoke testing are evidence, but do not qualify the Linux host path.
-- Exercise a released-image upgrade/rollback and the later backup policy before public release. This is outside the Fresh Install Produces Papers milestone.
+- Obtain a clean exact-release end-to-end pass on macOS Apple Silicon before promoting that preview path to supported. Two isolated attempts passed installation and model readiness; one later hit an Ollama 120-second generation failure and the other received arXiv HTTP 429 after the existing retries. Neither failure occurred in the Linux acceptance run.
+- Exercise released-image upgrade/rollback and the later backup policy before claiming those operational guarantees. This is outside the Fresh Install Produces Papers milestone.
 - Add the approved sanitized README screenshot during showcase work.
 
-The first milestone is functionally demonstrated on one of the two target platforms. It is not yet a two-platform supported release.
+The first milestone is fully demonstrated on the supported Linux path. The package is not yet a two-platform supported release.
 
 ## Persistent Tester Final Gate (2026-09-10)
 
@@ -47,4 +53,4 @@ The first milestone is functionally demonstrated on one of the two target platfo
 - Python compilation, `git diff --check`, shell syntax, and Compose static checks passed.
 - No live model, source, or container calls were repeated for this final gate.
 
-This gate does not change the outstanding release qualifications above: Linux x86-64 validation and a pinned, published multi-platform image remain required before claiming a two-platform supported release.
+This historical gate was superseded by the public v0.1.2 Linux acceptance recorded above.

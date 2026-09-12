@@ -1,8 +1,8 @@
 # Public Compose package
 
-This installs the public app image and local model runtime, with manual discovery from the Review Queue. The implemented macOS Apple Silicon scope has passed acceptance. The image includes Linux amd64, but Linux x86-64 host qualification remains outstanding. The existing native Mini deployment is unchanged.
+This installs the public app image and local model runtime, with manual discovery from the Review Queue. Ubuntu x86-64 is the first supported packaged path. The image includes arm64, but macOS Apple Silicon remains a preview until a clean exact-release end-to-end run passes. The existing native Mini deployment is unchanged.
 
-The qualified development pairing is macOS Apple Silicon with Docker Desktop/Linux arm64 containers. Linux x86-64 with Docker Engine/Linux amd64 containers remains a target but is not yet qualified. CPU inference is the baseline. Have Git and a writable clone of this repository, and start Docker Desktop with Compose v2 first; no host Python, Ollama, cron, systemd, or provider keys are needed. The installer checks provisional Docker RAM (4 GiB) and installation-filesystem free space (6 GiB) thresholds. These are configurable preflight guards, not measured minimum requirements; Docker's separate VM/disk-image capacity must also be sufficient.
+The supported pairing is Linux x86-64 with Docker Engine/Linux amd64 containers. macOS Apple Silicon with Docker Desktop/Linux arm64 containers is a preview. CPU inference is the baseline. Have Git and a writable clone of this repository, and start Docker with Compose v2 first; no host Python, Ollama, cron, systemd, or provider keys are needed. The installer checks provisional Docker RAM (4 GiB) and installation-filesystem free space (6 GiB) thresholds. These are configurable preflight guards; Docker's separate VM/disk-image capacity must also be sufficient.
 
 From a clean clone, run:
 
@@ -95,9 +95,9 @@ The same harness can qualify a fresh macOS Apple Silicon checkout. Set `PAPER_AC
 
 Known M1 limits:
 
-- macOS Apple Silicon is the only live accepted development path recorded so far.
-- Linux x86-64 remains a target, not a qualified support claim.
-- The public Project Paper image has arm64 and amd64 variants with SBOM and provenance attestations. Linux amd64 host acceptance remains pending.
+- Ubuntu x86-64 passed the full exact-image acceptance workflow on 2026-09-11.
+- macOS Apple Silicon remains a preview: two exact-image runs passed installation and Qwen readiness but did not complete the entire live workflow, once because an Ollama request reached its timeout and once because arXiv returned HTTP 429 after retries.
+- The public Project Paper image has arm64 and amd64 variants with SBOM and provenance attestations.
 - No packaged automatic schedule is installed.
 - OpenAlex, Semantic Scholar, and Gemini are not part of the default packaged flow.
 - Upgrade/rollback and full packaged backup/restore remain V1 work.

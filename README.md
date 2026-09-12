@@ -4,7 +4,7 @@
 
 Project Paper is a local-first system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
 
-> **Public preview:** the installer-fronted Docker Compose path and manual in-product Scout have passed the implemented macOS Apple Silicon scope. The public multi-platform image includes Linux amd64, but Linux x86-64 host qualification remains outstanding. See the [package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
+> **First supported release:** the installer-fronted Docker Compose path and manual in-product Scout have passed exact-image acceptance on Ubuntu x86-64. The public image also includes arm64; macOS Apple Silicon remains a preview path pending a clean exact-release end-to-end pass. See the [package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
 
 The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent stores pasted ChatGPT discussion summaries in immutable SQLite history with deterministic v1 parsing.
 
@@ -12,7 +12,7 @@ The repository currently contains a Python MVP called `paper_agents`. The V2 bac
 
 The current first-user path is:
 
-1. Use a fresh clone on macOS Apple Silicon with Docker Desktop.
+1. Use a fresh clone on Linux x86-64 with Docker Engine and Compose v2.
 2. Run the installer; its defaults select the public Project Paper image and pinned Ollama image.
 3. Open the loopback web UI.
 4. Add an enabled arXiv topic in **Topics**.
@@ -32,7 +32,7 @@ Gemini profile synthesis is disabled in this package. Feedback blobs are still s
 
 The packaged runtime stores user state in Compose volumes: `paper-data` for SQLite/artifacts/profile, `paper-config` for topics, and `ollama-data` for the model cache. Re-run the installer to repair/retry without deleting volumes. Do not use `db reset`, remove Compose volumes, or change the recorded project name as a normal recovery or upgrade step.
 
-Linux x86-64 host qualification, release upgrade/rollback, and broader backup/restore guarantees remain tracked work. Support is through GitHub Issues for the current major version and one prior major version.
+macOS exact-release qualification, release upgrade/rollback, and broader backup/restore guarantees remain tracked work. Support is through GitHub Issues for the current major version and one prior major version.
 
 ## Overview
 
@@ -88,7 +88,7 @@ Not implemented yet:
 - General open-access PDF resolution beyond arXiv, beyond the current Semantic Reader fallback.
 - systemd service and timer.
 - Benchmark recording and generated run reports.
-- Published multi-platform release images and Linux x86-64 package qualification.
+- macOS Apple Silicon exact-release end-to-end qualification.
 - A supported packaged upgrade/rollback path.
 
 ## MVP Workflow
@@ -106,9 +106,9 @@ The current scheduled path covers Scout -> Curator -> recommended PDF extraction
 
 ## Requirements
 
-M1 packaged development path:
+Supported packaged path:
 
-- macOS Apple Silicon with Docker Desktop and Compose.
+- Linux x86-64 with Docker Engine and Compose v2. macOS Apple Silicon with Docker Desktop is available as a preview.
 - Network access to arXiv and to pull Docker/Ollama images/model weights.
 - Docker configured with at least the installer's provisional 4 GiB memory and 6 GiB free-space preflight thresholds.
 
