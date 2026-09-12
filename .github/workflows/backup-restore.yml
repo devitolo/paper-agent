@@ -1,0 +1,66 @@
+name: Backup Restore
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/backup-restore.yml
+      - scripts/package_backup.sh
+      - scripts/package_backup/**
+      - tests/package_backup_docker.py
+      - tests/test_package_backup.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-restore-linux-amd64
+  cancel-in-progress: false
+
+jobs:
+  linux-amd64:
+    name: Ubuntu x86-64 same-image backup and restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Record tested environment
+        shell: bash
+        run: |
+          mkdir -p backup-restore-results
+          {
+            uname -a
+            cat /etc/os-release
+            docker version
+            docker compose version
+            python3 --version
+            git rev-parse HEAD
+            cat .env.example
+          } > backup-restore-results/environment.txt
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+
+      - name: Unit safety checks
+        run: |
+          python3 -m unittest tests.test_package_backup
+          bash -n scripts/package_backup.sh
+
+      - name: Run published-image backup and restore drill
+        shell: bash
+        env:
+          PAPER_BACKUP_EVIDENCE_DIR: ${{ github.workspace }}/backup-restore-results
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -o pipefail
+          python3 tests/package_backup_docker.py 2>&1 | tee backup-restore-results/drill.log
+
+      - name: Upload synthetic test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: project-paper-linux-backup-restore-${{ github.run_id }}
+          path: backup-restore-results/
+          if-no-files-found: error
+          retention-days: 14
