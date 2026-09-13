@@ -13,7 +13,7 @@ import urllib.request
 from socket import timeout as SocketTimeout
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -129,8 +129,20 @@ class ArxivSource:
         self.retries = retries
         self.timeout = timeout
         self.verbose = verbose
+        self.cooldown_active = False
+        self.last_diagnostics: dict[str, Any] = {}
+
+    def _record(self, event: str, **details: Any) -> None:
+        record = {"at": datetime.now(timezone.utc).isoformat(), "event": event, **details}
+        self.last_diagnostics.setdefault("requests", []).append(record)
+        if self.verbose:
+            print(f"{record['at']} arXiv {event}: {details}", flush=True)
 
     def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
+        if self.cooldown_active:
+            raise RuntimeError("arXiv source cooldown: requests stopped for the remainder of this run after exhausted HTTP 429 retries")
+        self.last_diagnostics = {"requests": [], "successful_topics": 0, "failed_topics": 0,
+                                 "empty_topics": 0, "skipped_topics": 0}
         terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
         per_topic = max(1, min(10, (max_results + len(terms) - 1) // len(terms)))
         cutoff = date.today() - timedelta(days=freshness_months * 31)
@@ -146,9 +158,18 @@ class ArxivSource:
                 entries = self._fetch_topic(topic, per_topic)
             except (OSError, ET.ParseError) as error:
                 errors.append(f"{topic}: {error}")
+                self.last_diagnostics["failed_topics"] += 1
+                if isinstance(error, urllib.error.HTTPError) and error.code == 429:
+                    self.cooldown_active = True
+                    self.last_diagnostics.update(cooldown_active=True, cooldown_scope="remainder_of_run",
+                                                 skipped_topics=len(terms) - index - 1)
+                    self._record("cooldown", topic=topic, reason="HTTP 429 retries exhausted")
+                    break
                 if self.verbose:
                     print(f"arXiv topic failed: {topic}: {error}")
                 continue
+            self.last_diagnostics["successful_topics"] += 1
+            self.last_diagnostics["empty_topics"] += int(not entries)
             if self.verbose:
                 print(f"received {len(entries)} arXiv entries for topic: {topic}")
 
@@ -169,7 +190,10 @@ class ArxivSource:
             print(f"arXiv partial failures: {len(errors)}/{len(terms)} topics failed")
         if not candidates and errors:
             raise RuntimeError(
-                "arXiv fetch returned 0 candidates because every topic failed: "
+                f"arXiv fetch returned 0 candidates: {self.last_diagnostics['failed_topics']} failed, "
+                f"{self.last_diagnostics['successful_topics']} successful "
+                f"({self.last_diagnostics['empty_topics']} empty), "
+                f"{self.last_diagnostics['skipped_topics']} skipped topics. "
                 + "; ".join(errors[:3])
             )
         return dedupe_candidates(candidates)[:max_results]
@@ -189,37 +213,47 @@ class ArxivSource:
 
         last_error: OSError | ET.ParseError | None = None
         for attempt in range(self.retries + 1):
+            self._record("request", topic=topic, attempt=attempt + 1)
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     root = ET.fromstring(response.read())
-                return list(root.findall("atom:entry", ARXIV_NS))
+                entries = list(root.findall("atom:entry", ARXIV_NS))
+                self._record("success", topic=topic, attempt=attempt + 1, entries=len(entries))
+                return entries
             except urllib.error.HTTPError as error:
                 last_error = error
+                self._record("http_error", topic=topic, attempt=attempt + 1, status=error.code,
+                             retry_after=error.headers.get("Retry-After") if error.headers else None)
                 if error.code != 429 or attempt >= self.retries:
                     raise
-                delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After"))
+                delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After") if error.headers else None)
                 from paper_agents.runtime_config import packaged
                 if packaged():
                     # Allow the source to recover; keep native scheduling unchanged.
                     delay = max(delay, 60 * (2 ** attempt))
                 if self.verbose:
                     print(f"arXiv rate limited topic '{topic}', retrying in {delay:.0f}s")
+                self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
             except (urllib.error.URLError, TimeoutError, SocketTimeout) as error:
+                self._record("network_error", topic=topic, attempt=attempt + 1, error=str(error))
                 last_error = error
                 if attempt >= self.retries:
                     raise
                 delay = self._retry_delay(attempt)
                 if self.verbose:
                     print(f"arXiv request failed for topic '{topic}' ({error}), retrying in {delay:.0f}s")
+                self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
             except ET.ParseError as error:
+                self._record("parse_error", topic=topic, attempt=attempt + 1, error=str(error))
                 last_error = error
                 if attempt >= self.retries:
                     raise
                 delay = self._retry_delay(attempt)
                 if self.verbose:
                     print(f"arXiv returned malformed XML for topic '{topic}', retrying in {delay:.0f}s")
+                self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
 
         if last_error:

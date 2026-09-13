@@ -239,6 +239,7 @@ class ScoutAgent:
                 )
             except Exception as error:  # Source adapters normalize most errors, but keep runs recoverable.
                 errors.append(str(error))
+                source_diagnostics = dict(getattr(source, "last_diagnostics", {}) or {})
                 stop_reason = "source_error"
                 break
 
@@ -261,6 +262,9 @@ class ScoutAgent:
                 }
             )
 
+            if source.name == "arxiv" and getattr(source, "cooldown_active", False):
+                stop_reason = "source_cooldown"
+                break
             if estimated_eligible >= target:
                 stop_reason = "minimum_eligible_reached"
                 break

@@ -118,6 +118,40 @@ class ScoutDiagnosticsTests(unittest.TestCase):
         self.assertEqual(saved["curator_runs"], current["curator_runs"])
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM scout_diagnostic_reports").fetchone()[0], 1)
 
+    def test_arxiv_rate_limit_diagnostics_survive_source_failure(self):
+        import urllib.error
+        from paper_agents.scout import ArxivSource
+        source = ArxivSource(retries=0, verbose=False)
+        error = urllib.error.HTTPError("https://example.test", 429, "limited", {}, None)
+        with patch("paper_agents.scout.urllib.request.urlopen", side_effect=error) as fetch:
+            result = ScoutAgent(source).run(self.connection, workflow_cycle_id=self.cycle, attempt_number=1,
+                                           config=ScoutConfig(topics=["one", "two"]))
+        self.connection.commit()
+        report = load_report(self.path, result["scout_run_id"])
+        diagnostics = json.loads(report["run"]["diagnostics_json"])
+        self.assertTrue(diagnostics["source_diagnostics"]["cooldown_active"])
+        self.assertTrue(diagnostics["source_diagnostics"]["requests"])
+        self.assertTrue(result["errors"])
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_arxiv_partial_results_survive_cooldown_without_refill(self):
+        import urllib.error
+        from paper_agents.scout import ArxivSource
+        source = ArxivSource(retries=0, request_delay=0, verbose=False)
+        error = urllib.error.HTTPError("https://example.test", 429, "limited", {}, None)
+        with patch.object(source, "_fetch_topic", side_effect=[[object()], error]) as fetch, patch(
+            "paper_agents.scout.arxiv_entry_to_candidate", return_value=candidate("partial", "AIOps")
+        ):
+            result = ScoutAgent(source).run(self.connection, workflow_cycle_id=self.cycle, attempt_number=1,
+                                           config=ScoutConfig(topics=["one", "two", "three"]))
+        self.connection.commit()
+        report = load_report(self.path, result["scout_run_id"])
+        diagnostics = json.loads(report["run"]["diagnostics_json"])
+        self.assertEqual(result["stored_count"], 1)
+        self.assertEqual(diagnostics["refill"]["stop_reason"], "source_cooldown")
+        self.assertEqual(diagnostics["source_diagnostics"]["skipped_topics"], 1)
+        self.assertEqual(fetch.call_count, 2)
+
     def test_manual_source_does_not_save_report(self):
         run_id = self.scout("manual_backfill")
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM scout_diagnostic_reports").fetchone()[0], 0)
