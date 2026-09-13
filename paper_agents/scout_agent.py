@@ -262,7 +262,7 @@ class ScoutAgent:
                 }
             )
 
-            if source.name == "arxiv" and getattr(source, "cooldown_active", False):
+            if source.name in {"arxiv", "semantic_scholar"} and getattr(source, "cooldown_active", False):
                 stop_reason = "source_cooldown"
                 break
             if estimated_eligible >= target:

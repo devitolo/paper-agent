@@ -3612,6 +3612,18 @@ class BackendV2Tests(unittest.TestCase):
             )
         )
 
+    def test_health_omits_redundant_two_cycle_warning(self):
+        self._seed_scout_candidate(source="openalex", excluded=True, exclusion_reason="history")
+        db.create_workflow_cycle(self.connection, mode="test", max_scout_attempts=1)
+        self.connection.commit()
+        summary = db.health_summary(self.db_path)
+        self.assertEqual(len(summary["recent_cycle_recommendations"]), 2)
+        self.assertTrue(all(row["recommendation_count"] == 0 for row in summary["recent_cycle_recommendations"]))
+        messages = [warning["message"] for warning in summary["warnings"]]
+        self.assertFalse(any("two recent workflow cycles" in message for message in messages))
+        self.assertTrue(any("openalex" in message and "0 eligible" in message for message in messages))
+        self.assertNotIn("two recent workflow cycles", web.render_health_page(self.db_path))
+
     def test_health_summary_does_not_duplicate_failed_cycle_warning(self):
         db.update_workflow_state(self.connection, self.cycle_id, "failed")
         self.connection.commit()

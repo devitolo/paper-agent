@@ -1747,12 +1747,6 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, Any]]:
     if len(recent_scout_runs) >= 3 and low_ratio_runs >= 3:
         warnings.append({"level": "warning", "message": "Eligible/stored ratio is below 10% for the latest 3 scheduled Scout runs in the last 7 days."})
 
-    recent_cycle_recommendations = summary["recent_cycle_recommendations"]
-    if len(recent_cycle_recommendations) >= 2 and all(
-        int(row["recommendation_count"] or 0) == 0 for row in recent_cycle_recommendations
-    ):
-        warnings.append({"level": "warning", "message": "No recommendations were produced across two recent workflow cycles."})
-
     artifact_health = summary["artifact_health"]
     if artifact_health["backfillable_missing_triage_summary_count"] > 0:
         warnings.append(

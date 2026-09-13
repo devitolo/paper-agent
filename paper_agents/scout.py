@@ -287,9 +287,21 @@ class SemanticScholarSource:
         self.retries = retries
         self.timeout = timeout
         self.verbose = verbose
+        self.cooldown_active = False
+        self.last_diagnostics: dict[str, Any] = {}
         self.api_key = api_key if api_key is not None else os.getenv("SEMANTIC_SCHOLAR_API_KEY")
 
+    def _record(self, event: str, **details: Any) -> None:
+        record = {"at": datetime.now(timezone.utc).isoformat(), "event": event, **details}
+        self.last_diagnostics.setdefault("requests", []).append(record)
+        if self.verbose:
+            print(f"{record['at']} Semantic Scholar {event}: {details}", flush=True)
+
     def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
+        if self.cooldown_active:
+            raise RuntimeError("Semantic Scholar source cooldown: requests stopped for the remainder of this run after exhausted HTTP 429 retries")
+        self.last_diagnostics = {"requests": [], "successful_topics": 0, "failed_topics": 0,
+                                 "empty_topics": 0, "skipped_topics": 0}
         terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
         per_topic = max(1, min(10, (max_results + len(terms) - 1) // len(terms)))
         cutoff_year = (date.today() - timedelta(days=freshness_months * 31)).year
@@ -305,9 +317,18 @@ class SemanticScholarSource:
                 papers = self._fetch_topic(topic, per_topic)
             except OSError as error:
                 errors.append(f"{topic}: {error}")
+                self.last_diagnostics["failed_topics"] += 1
+                if isinstance(error, urllib.error.HTTPError) and error.code == 429:
+                    self.cooldown_active = True
+                    self.last_diagnostics.update(cooldown_active=True, cooldown_scope="remainder_of_run",
+                                                 skipped_topics=len(terms) - index - 1)
+                    self._record("cooldown", topic=topic, reason="HTTP 429 retries exhausted")
+                    break
                 if self.verbose:
                     print(f"Semantic Scholar topic failed: {topic}: {error}")
                 continue
+            self.last_diagnostics["successful_topics"] += 1
+            self.last_diagnostics["empty_topics"] += int(not papers)
             if self.verbose:
                 print(f"received {len(papers)} Semantic Scholar entries for topic: {topic}")
 
@@ -328,7 +349,10 @@ class SemanticScholarSource:
             print(f"Semantic Scholar partial failures: {len(errors)}/{len(terms)} topics failed")
         if not candidates and errors:
             raise RuntimeError(
-                "Semantic Scholar fetch returned 0 candidates because every topic failed: "
+                f"Semantic Scholar fetch returned 0 candidates: {self.last_diagnostics['failed_topics']} failed, "
+                f"{self.last_diagnostics['successful_topics']} successful "
+                f"({self.last_diagnostics['empty_topics']} empty), "
+                f"{self.last_diagnostics['skipped_topics']} skipped topics. "
                 + "; ".join(errors[:3])
             )
         return dedupe_candidates(candidates)[:max_results]
@@ -360,26 +384,34 @@ class SemanticScholarSource:
 
         last_error: OSError | None = None
         for attempt in range(self.retries + 1):
+            self._record("request", topic=topic, attempt=attempt + 1)
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 papers = payload.get("data") or []
-                return [paper for paper in papers if isinstance(paper, dict)]
+                papers = [paper for paper in papers if isinstance(paper, dict)]
+                self._record("success", topic=topic, attempt=attempt + 1, entries=len(papers))
+                return papers
             except urllib.error.HTTPError as error:
                 last_error = error
+                self._record("http_error", topic=topic, attempt=attempt + 1, status=error.code,
+                             retry_after=error.headers.get("Retry-After") if error.headers else None)
                 if error.code not in {429, 500, 502, 503, 504} or attempt >= self.retries:
                     raise
-                delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After"))
+                delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After") if error.headers else None)
                 if self.verbose:
                     print(f"Semantic Scholar request failed for topic '{topic}' ({error.code}), retrying in {delay:.0f}s")
+                self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
             except (urllib.error.URLError, TimeoutError, SocketTimeout, json.JSONDecodeError) as error:
+                self._record("request_error", topic=topic, attempt=attempt + 1, error=str(error))
                 last_error = error if isinstance(error, OSError) else OSError(str(error))
                 if attempt >= self.retries:
                     raise last_error
                 delay = self._retry_delay(attempt)
                 if self.verbose:
                     print(f"Semantic Scholar request failed for topic '{topic}' ({error}), retrying in {delay:.0f}s")
+                self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
 
         if last_error:
@@ -395,6 +427,11 @@ class SemanticScholarSource:
     def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.isdigit():
             return float(retry_after)
+        if retry_after:
+            try:
+                return max(0, parsedate_to_datetime(retry_after).timestamp() - time.time())
+            except (ValueError, TypeError, OverflowError):
+                pass
         return self.request_delay * (2 ** attempt)
 
 
