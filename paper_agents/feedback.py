@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 from datetime import datetime, timezone
 import sqlite3
 from typing import Any, Callable
 
 from paper_agents import db
+from paper_agents.gemini_process import run_gemini
 from paper_agents.openai_helpers import call_openai_json
 
 DETERMINISTIC_FEEDBACK_PARSER_NAME = "feedback-agent"
@@ -453,17 +453,7 @@ def call_gemini_json(payload: dict[str, Any], model: str | None = None) -> dict[
     if model:
         command.extend(["--model", model])
     command.extend(["-p", prompt])
-    timeout = gemini_timeout_seconds()
-    try:
-        result = subprocess.run(command, text=True, capture_output=True, check=True, timeout=timeout)
-    except FileNotFoundError as error:
-        raise RuntimeError("Gemini CLI was not found. Install and authenticate `gemini`, then retry.") from error
-    except subprocess.CalledProcessError as error:
-        details = error.stderr.strip() or error.stdout.strip()
-        raise RuntimeError(f"Gemini CLI failed: {details}") from error
-    except subprocess.TimeoutExpired as error:
-        raise RuntimeError(f"Gemini CLI timed out after {timeout} seconds while updating the feedback profile.") from error
-    return parse_json_object(result.stdout)
+    return parse_json_object(run_gemini(command, gemini_timeout_seconds()))
 
 
 def gemini_timeout_seconds() -> int:

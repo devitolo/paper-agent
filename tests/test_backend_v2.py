@@ -1866,16 +1866,16 @@ class BackendV2Tests(unittest.TestCase):
     def test_call_gemini_json_uses_configured_timeout(self):
         payload = {"current_profile": {}, "structured_feedback": []}
         with patch.dict("os.environ", {"PAPER_AGENT_GEMINI_TIMEOUT_SECONDS": "240"}):
-            with patch("paper_agents.feedback.subprocess.run") as run:
-                run.return_value.stdout = '{"profile":{"interests":[],"positive_signals":[],"negative_signals":[],"notes":""},"change_summary":"ok"}'
+            with patch("paper_agents.feedback.run_gemini") as run:
+                run.return_value = '{"profile":{"interests":[],"positive_signals":[],"negative_signals":[],"notes":""},"change_summary":"ok"}'
                 call_gemini_json(payload)
 
-        self.assertEqual(run.call_args.kwargs["timeout"], 240)
+        self.assertEqual(run.call_args.args[1], 240)
 
     def test_call_gemini_json_timeout_error_includes_timeout(self):
         payload = {"current_profile": {}, "structured_feedback": []}
         with patch.dict("os.environ", {"PAPER_AGENT_GEMINI_TIMEOUT_SECONDS": "240"}):
-            with patch("paper_agents.feedback.subprocess.run", side_effect=subprocess.TimeoutExpired(["gemini"], 240)):
+            with patch("paper_agents.feedback.run_gemini", side_effect=RuntimeError("Gemini CLI timed out after 240 seconds")):
                 with self.assertRaisesRegex(RuntimeError, "timed out after 240 seconds"):
                     call_gemini_json(payload)
 
