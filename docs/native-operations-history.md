@@ -324,7 +324,46 @@ Use an explicit model when you want to bypass the default model; explicit `--mod
 python3 -m paper_agents.cli feedback apply --provider gemini --model gemini-3.1-flash-lite
 ```
 
-Gemini profile updates use the Gemini CLI with a 180-second default timeout. If the CLI is slow on the Mac mini, raise it before retrying:
+Gemini profile updates use the Gemini CLI with a 180-second default timeout and
+`--output-format stream-json`. The wrapper requires an initialized stream,
+assistant answer chunks, and an explicit successful terminal `result` event.
+Text that looks like a complete answer without that event is never applied.
+After a terminal result, the wrapper drains output for up to one second to catch
+conflicting frames or a nonzero exit, then terminates/reaps the process group if
+CLI teardown has stalled. Cleanup must succeed before the answer is returned.
+Malformed/truncated framing, any error event (including warnings), tool events,
+and output beyond 8 MiB fail closed. There is no fallback to unframed text for
+older CLI versions. The model answer must be a complete JSON object (a complete
+Markdown fence is accepted); surrounding prose or partial JSON is rejected.
+
+This separates provider completion from CLI process exit; it does not establish
+why a particular installed CLI hangs. Protocol references:
+[headless output formats](https://geminicli.com/docs/cli/headless/) and
+[upstream event types](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/types.ts).
+
+For one bounded compatibility/completion check on the Mini, run:
+
+```bash
+python3 -m paper_agents.gemini_diagnostic --model gemini-3.1-flash-lite
+```
+
+This checks `gemini --version` (10-second limit) and sends one fixed test prompt
+(60-second default limit, no automatic retry). The Python probe does not read or
+update the Project Paper profile, feedback, or database. Gemini still loads its
+usual CLI configuration, including configured context, hooks, and extensions;
+the fixed prompt's request to avoid tools is not a tool sandbox. The report
+contains only the recognized CLI version, byte/event
+counts, completion/exit metadata, elapsed time, and sanitized status; provider
+output, prompts, credentials, and session identifiers are withheld. A null
+`exit_code_before_cleanup` with `completion_seen: true` means the terminal
+result arrived but process exit was not observed during the grace period.
+A successful probe validates the invocation, not a production profile update.
+Unsupported flags or missing completion require investigation, not repeated
+profile applies. Confirm CLI compatibility before one separately authorized
+profile apply.
+
+For a confirmed slow response (rather than a completion/teardown hang), the
+timeout can be raised:
 
 ```bash
 export PAPER_AGENT_GEMINI_TIMEOUT_SECONDS=240

@@ -452,8 +452,8 @@ def call_gemini_json(payload: dict[str, Any], model: str | None = None) -> dict[
     command = ["gemini"]
     if model:
         command.extend(["--model", model])
-    command.extend(["-p", prompt])
-    return parse_json_object(run_gemini(command, gemini_timeout_seconds()))
+    command.extend(["--output-format", "stream-json", "-p", prompt])
+    return parse_json_object(run_gemini(command, gemini_timeout_seconds(), stream_json=True))
 
 
 def gemini_timeout_seconds() -> int:
@@ -494,7 +494,7 @@ def build_profile_update_prompt(payload: dict[str, Any]) -> str:
 
 def parse_json_object(value: str) -> dict[str, Any]:
     text = value.strip()
-    if text.startswith("```"):
+    if text.startswith("```") and text.endswith("```"):
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):
             lines = lines[1:]
@@ -503,15 +503,8 @@ def parse_json_object(value: str) -> dict[str, Any]:
         text = "\n".join(lines).strip()
     try:
         parsed = json.loads(text)
-    except json.JSONDecodeError as error:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise RuntimeError("Provider did not return valid JSON.") from error
-        try:
-            parsed = json.loads(text[start : end + 1])
-        except json.JSONDecodeError as second_error:
-            raise RuntimeError("Provider did not return valid JSON.") from second_error
+    except (ValueError, RecursionError):
+        raise RuntimeError("Provider did not return valid JSON.") from None
     if not isinstance(parsed, dict):
         raise RuntimeError("Provider JSON response must be an object.")
     return parsed

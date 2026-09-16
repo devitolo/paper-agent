@@ -1871,6 +1871,8 @@ class BackendV2Tests(unittest.TestCase):
                 call_gemini_json(payload)
 
         self.assertEqual(run.call_args.args[1], 240)
+        self.assertTrue(run.call_args.kwargs["stream_json"])
+        self.assertEqual(run.call_args.args[0][1:3], ["--output-format", "stream-json"])
 
     def test_call_gemini_json_timeout_error_includes_timeout(self):
         payload = {"current_profile": {}, "structured_feedback": []}
