@@ -59,6 +59,52 @@ class UIQueueRegressionTests(unittest.TestCase):
                                  recommendation_order=1, rationale="Relevant")
         return paper
 
+    def test_queue_defaults_include_reviewed_papers_from_all_sources_newest_first(self):
+        older = self.seed(1)
+        newer = self.seed(2)
+        self.connection.execute("UPDATE papers SET first_discovered_at='2026-01-01 00:00:00' WHERE id=?", (older,))
+        self.connection.execute("UPDATE papers SET first_discovered_at='2026-02-01 00:00:00' WHERE id=?", (newer,))
+        self.connection.execute("UPDATE paper_sources SET source='openalex' WHERE paper_id=?", (older,))
+        self.connection.execute("INSERT INTO feedback (paper_id, status, notes) VALUES (?, 'reviewed', 'Score: 5')", (older,))
+        self.connection.commit()
+
+        for choices in ({}, {"filter_value": "invalid", "sort_value": "invalid", "source_value": "invalid"}):
+            with self.subTest(choices=choices):
+                html = web.render_review_queue(self.path, **choices)
+                self.assertIn('<option value="all" selected>All papers</option>', html)
+                self.assertIn('<option value="all" selected>All sources</option>', html)
+                self.assertIn('<option value="latest" selected>Newest</option>', html)
+                self.assertLess(html.index('Incident response 2'), html.index('Incident response 1'))
+
+    def test_get_queue_defaults_and_explicit_url_selections(self):
+        self.seed(1)
+        self.connection.commit()
+
+        class RequestSocket:
+            def __init__(self, query):
+                self.query = query
+                self.response = bytearray()
+
+            def makefile(self, *args, **kwargs):
+                return io.BytesIO(f"GET /{self.query} HTTP/1.0\r\n\r\n".encode())
+
+            def sendall(self, data):
+                self.response.extend(data)
+
+        for query, selections in (
+            ("", (("all", "All papers"), ("all", "All sources"), ("latest", "Newest"))),
+            ("?filter=needs_review&source=arxiv&sort=score", (("needs_review", "Needs review"), ("arxiv", "arXiv"), ("score", "Highest score"))),
+            ("?filter=has_feedback&source=all&sort=score", (("has_feedback", "Scored"), ("all", "All sources"), ("score", "Highest score"))),
+            ("?filter=reviewed&sort=invalid", (("all", "All papers"), ("all", "All sources"), ("latest", "Newest"))),
+        ):
+            with self.subTest(query=query):
+                request = RequestSocket(query)
+                web.make_handler(self.path)(request, ("127.0.0.1", 1), object())
+                self.assertIn(b"200 OK", request.response)
+                html = request.response.decode()
+                for value, label in selections:
+                    self.assertIn(f'<option value="{value}" selected>{label}</option>', html)
+
     def test_more_than_fifty_pending_papers_are_not_silently_inaccessible(self):
         expected = {self.seed(number) for number in range(121)}
         other = self.seed(122)

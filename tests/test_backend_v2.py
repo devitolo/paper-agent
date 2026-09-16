@@ -2164,11 +2164,11 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<span class="page-title">Review Queue</span>', html)
         self.assertIn('<div class="header-controls">', html)
         self.assertIn('<nav class="primary-nav" aria-label="Primary">', html)
-        self.assertIn('<option value="score" selected>Highest score</option>', html)
-        self.assertIn('<option value="latest">Newest</option>', html)
-        self.assertIn('<option value="all">All papers</option>', html)
+        self.assertIn('<option value="score">Highest score</option>', html)
+        self.assertIn('<option value="latest" selected>Newest</option>', html)
+        self.assertIn('<option value="all" selected>All papers</option>', html)
         self.assertIn('<option value="has_feedback">Scored</option>', html)
-        self.assertIn('<option value="needs_review" selected>Needs review</option>', html)
+        self.assertIn('<option value="needs_review">Needs review</option>', html)
         self.assertNotIn('<option value="not_interested"', html)
         self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
         self.assertIn('<div class="paper-meta">', html)
@@ -2405,7 +2405,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Dense Review Paper", html)
         self.assertIn('<div class="user-score"><span>Your score</span><strong>4.5/5</strong></div>', html)
 
-    def test_review_queue_legacy_reviewed_filter_falls_back_to_needs_review(self):
+    def test_review_queue_legacy_reviewed_filter_falls_back_to_all(self):
         paper_id, _ = self._seed_review_recommendation()
         self.connection.execute(
             "INSERT INTO feedback (paper_id, status, notes) VALUES (?, ?, ?)",
@@ -2416,8 +2416,8 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_review_queue(self.db_path, filter_value="reviewed")
 
         self.assertNotIn('<option value="reviewed"', html)
-        self.assertIn("Needs review | All sources", html)
-        self.assertNotIn("Dense Review Paper", html)
+        self.assertIn("All papers | All sources", html)
+        self.assertIn("Dense Review Paper", html)
 
 
     def test_source_badge_class_distinguishes_sources(self):

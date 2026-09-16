@@ -118,9 +118,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         scout_error=params.get("scout_error", [None])[0],
                         profile_apply_queued=params.get("profile_apply_queued", [None])[0] == "1",
                         profile_apply_failed=params.get("profile_apply_failed", [None])[0] == "1",
-                        filter_value=params.get("filter", ["needs_review"])[0],
+                        filter_value=params.get("filter", ["all"])[0],
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
-                        sort_value=params.get("sort", ["score"])[0],
+                        sort_value=params.get("sort", ["latest"])[0],
                         view_value=params.get("view", ["full"])[-1],
                         page_value=params.get("page", ["1"])[0],
                     )
@@ -401,16 +401,16 @@ def render_review_queue(
     scout_error: str | None = None,
     profile_apply_queued: bool = False,
     profile_apply_failed: bool = False,
-    filter_value: str = "needs_review",
+    filter_value: str = "all",
     source_value: str = SOURCE_FILTER_ALL,
-    sort_value: str = "score",
+    sort_value: str = "latest",
     view_value: str = "full",
     page_value: str | int = 1,
 ) -> str:
     filter_value = normalize_filter_value(filter_value)
     source_choices = load_source_filter_choices(db_path)
     source_value = normalize_choice(source_value, source_choices, SOURCE_FILTER_ALL)
-    sort_value = normalize_choice(sort_value, SORTS, "score")
+    sort_value = normalize_choice(sort_value, SORTS, "latest")
     view_value = normalize_choice(view_value, VIEWS, "full")
     result = load_review_page(db_path, filter_value=filter_value, source_value=source_value,
                               sort_value=sort_value, page=page_value)
@@ -2075,7 +2075,7 @@ def selected_label(choices: list[tuple[str, str]], value: str) -> str:
 
 def normalize_filter_value(value: str) -> str:
     allowed = {choice for choice, _ in FILTERS}
-    return value if value in allowed else "needs_review"
+    return value if value in allowed else "all"
 
 
 def filter_label(value: str) -> str:
