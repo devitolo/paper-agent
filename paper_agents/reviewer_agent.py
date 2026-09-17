@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from paper_agents import db
+from paper_agents import db, telemetry
 from paper_agents.local_extract import DEFAULT_EXTRACTION_DIR, DEFAULT_MODEL, DEFAULT_OLLAMA_URL, extract_paper, output_path_for
 from paper_agents.pdf_links import candidate_pdf_urls, extract_pdf_links_from_html
 from paper_agents.scout import DEFAULT_PDF_DIR, safe_filename
@@ -33,6 +33,7 @@ class ReviewerConfig:
 class ReviewerAgent:
     """Downloads recommended papers and creates local triage summary artifacts."""
 
+    @telemetry.traced("reviewer")
     def run(
         self,
         connection,
@@ -51,6 +52,7 @@ class ReviewerAgent:
         ]
         return {"cards": cards, "reviewed_count": len(cards)}
 
+    @telemetry.traced("reviewer.paper")
     def review_recommendation(
         self,
         connection,
@@ -59,6 +61,7 @@ class ReviewerAgent:
         index: int,
         config: ReviewerConfig,
     ) -> dict[str, Any]:
+        telemetry.attributes(paper_id=recommendation.get("paper_id"), recommendation_id=recommendation.get("recommendation_id"))
         pdf_path = download_pdf_for_recommendation(recommendation, config.pdf_dir)
         if pdf_path:
             db.insert_artifact(
@@ -70,6 +73,7 @@ class ReviewerAgent:
             )
             connection.commit()
         else:
+            telemetry.event("fallback", fallback="source_abstract")
             extraction, output_path, error = extract_source_abstract_summary(recommendation, index=index, config=config)
             if extraction and output_path:
                 db.insert_artifact(
@@ -335,6 +339,7 @@ def download_pdf_for_recommendation(recommendation: dict[str, Any], pdf_dir: Pat
     return None
 
 
+@telemetry.traced("reviewer.http", "TOOL")
 def fetch_pdf_bytes(url: str, *, timeout: int = 60) -> bytes | None:
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; paper-agent/0.1)"})
     try:
@@ -343,6 +348,7 @@ def fetch_pdf_bytes(url: str, *, timeout: int = 60) -> bytes | None:
             final_url = response.geturl()
             content_type = response.headers.get("content-type", "")
     except OSError:
+        telemetry.failure("network")
         return None
     if data.startswith(b"%PDF") or "application/pdf" in content_type.lower():
         return data
@@ -365,6 +371,8 @@ def card_from_recommendation(
     output_path: Path | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
+    if error:
+        telemetry.failure()
     merged = extraction.get("merged", {}) if extraction else {}
     return {
         "recommendation_order": index,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from paper_agents import db
+from paper_agents import db, telemetry
 from paper_agents.scout_diagnostics import capture_report
 from paper_agents.manual_scout import exclusive_pipeline
 from paper_agents.curator_agent import (
@@ -43,6 +43,7 @@ DEFAULT_MAX_SCOUT_ATTEMPTS = 3
 
 
 @exclusive_pipeline
+@telemetry.pipeline_trace
 def run_daily_pipeline(
     *,
     topics: list[str] | None = None,
@@ -81,6 +82,7 @@ def run_daily_pipeline(
         slot=topic_slot,
     )
     if not topics_for_run:
+        telemetry.attributes(outcome="skipped")
         return {
             "workflow_cycle_id": None,
             "cycle": None,
@@ -123,6 +125,7 @@ def run_daily_pipeline(
         )
         profile_version_id = db.ensure_profile_version(connection, profile)
         profile_version = db.current_profile_version(connection)
+        telemetry.attributes(workflow_cycle_id=cycle_id, profile_version_id=profile_version_id)
 
         for attempt in range(1, max_scout_attempts + 1):
             attempt_fetch_limit = fetch_limit * attempt
@@ -142,6 +145,7 @@ def run_daily_pipeline(
             )
             scout_results.append(scout_result)
             if scout_result["errors"] and not scout_result["eligible_count"]:
+                telemetry.failure()
                 db.update_workflow_state(connection, cycle_id, "failed")
                 break
 
@@ -166,6 +170,7 @@ def run_daily_pipeline(
             cycle_recommendations.extend(curator_result.get("recommendations") or [])
             if not curator_result["requested_rescout"]:
                 break
+            telemetry.event("rescout", attempt=attempt)
 
         if curator_result is not None:
             db.update_workflow_state(connection, cycle_id, "awaiting_manual_discussion")

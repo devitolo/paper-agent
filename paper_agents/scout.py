@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from paper_agents import telemetry
+
 from email.utils import parsedate_to_datetime
 import hashlib
 import html
@@ -215,7 +217,7 @@ class ArxivSource:
         for attempt in range(self.retries + 1):
             self._record("request", topic=topic, attempt=attempt + 1)
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                with telemetry.span("source.http", "TOOL", source=self.name, attempt=attempt + 1), urllib.request.urlopen(request, timeout=self.timeout) as response:
                     root = ET.fromstring(response.read())
                 entries = list(root.findall("atom:entry", ARXIV_NS))
                 self._record("success", topic=topic, attempt=attempt + 1, entries=len(entries))
@@ -234,6 +236,7 @@ class ArxivSource:
                 if self.verbose:
                     print(f"arXiv rate limited topic '{topic}', retrying in {delay:.0f}s")
                 self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
+                telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
             except (urllib.error.URLError, TimeoutError, SocketTimeout) as error:
                 self._record("network_error", topic=topic, attempt=attempt + 1, error=str(error))
@@ -244,6 +247,7 @@ class ArxivSource:
                 if self.verbose:
                     print(f"arXiv request failed for topic '{topic}' ({error}), retrying in {delay:.0f}s")
                 self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
+                telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
             except ET.ParseError as error:
                 self._record("parse_error", topic=topic, attempt=attempt + 1, error=str(error))
@@ -254,6 +258,7 @@ class ArxivSource:
                 if self.verbose:
                     print(f"arXiv returned malformed XML for topic '{topic}', retrying in {delay:.0f}s")
                 self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
+                telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
 
         if last_error:
@@ -386,7 +391,7 @@ class SemanticScholarSource:
         for attempt in range(self.retries + 1):
             self._record("request", topic=topic, attempt=attempt + 1)
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                with telemetry.span("source.http", "TOOL", source=self.name, attempt=attempt + 1), urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 papers = payload.get("data") or []
                 papers = [paper for paper in papers if isinstance(paper, dict)]
@@ -402,6 +407,7 @@ class SemanticScholarSource:
                 if self.verbose:
                     print(f"Semantic Scholar request failed for topic '{topic}' ({error.code}), retrying in {delay:.0f}s")
                 self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
+                telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
             except (urllib.error.URLError, TimeoutError, SocketTimeout, json.JSONDecodeError) as error:
                 self._record("request_error", topic=topic, attempt=attempt + 1, error=str(error))
@@ -412,6 +418,7 @@ class SemanticScholarSource:
                 if self.verbose:
                     print(f"Semantic Scholar request failed for topic '{topic}' ({error}), retrying in {delay:.0f}s")
                 self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
+                telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
 
         if last_error:
@@ -525,7 +532,7 @@ class OpenAlexSource:
         last_error: OSError | None = None
         for attempt in range(self.retries + 1):
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                with telemetry.span("source.http", "TOOL", source=self.name, attempt=attempt + 1), urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 works = payload.get("results") or []
                 return [work for work in works if isinstance(work, dict)]
@@ -536,6 +543,7 @@ class OpenAlexSource:
                 delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After"))
                 if self.verbose:
                     print(f"OpenAlex request failed for topic '{topic}' ({last_error}), retrying in {delay:.0f}s")
+                telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
             except (urllib.error.URLError, TimeoutError, SocketTimeout, json.JSONDecodeError) as error:
                 last_error = error if isinstance(error, OSError) else OSError(str(error))
@@ -544,6 +552,7 @@ class OpenAlexSource:
                 delay = self._retry_delay(attempt)
                 if self.verbose:
                     print(f"OpenAlex request failed for topic '{topic}' ({error}), retrying in {delay:.0f}s")
+                telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
 
         if last_error:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from paper_agents import db
+from paper_agents import db, telemetry
 from paper_agents.curator_evidence import assess_evidence
 from paper_agents.curator_scoring import SCORING_VERSION, evaluate_candidate
 from paper_agents.runtime_config import ollama_url
@@ -28,6 +28,7 @@ class CuratorConfig:
 class CuratorAgent:
     """Scores a Scout candidate pool and stores evaluations/recommendations."""
 
+    @telemetry.traced("curator", scoring_version=SCORING_VERSION)
     def run(
         self,
         connection,
@@ -38,6 +39,8 @@ class CuratorAgent:
         scout_attempt_count: int,
         config: CuratorConfig,
     ) -> dict[str, Any]:
+        telemetry.attributes(workflow_cycle_id=workflow_cycle_id, attempt=scout_attempt_count,
+                             profile_version_id=profile_version["id"] if profile_version else None)
         max_recommendations = min(config.max_recommendations, DEFAULT_MAX_RECOMMENDATIONS)
         prior_ids = db.recommended_ids_for_cycle(connection, workflow_cycle_id)
         remaining = max(0, max_recommendations - len(prior_ids))
@@ -48,13 +51,15 @@ class CuratorAgent:
         connection.commit()
         evaluations = []
         for candidate in unique_candidates.values():
-            enriched = {**candidate, "evidence": db.paper_evidence_context(connection, candidate["paper_id"])}
-            if config.evidence_enabled:
-                enriched["evidence_assessment"] = assess_evidence(
-                    enriched, model=config.evidence_model, ollama_url=config.evidence_ollama_url,
-                    timeout=config.evidence_timeout, max_chars=config.evidence_max_chars,
-                )
-            evaluations.append(evaluate_candidate(enriched, profile_version["profile"] if profile_version else {}))
+            with telemetry.span("curator.evaluate", paper_id=candidate["paper_id"],
+                                scout_candidate_id=candidate.get("scout_candidate_id"), scoring_version=SCORING_VERSION):
+                enriched = {**candidate, "evidence": db.paper_evidence_context(connection, candidate["paper_id"])}
+                if config.evidence_enabled:
+                    enriched["evidence_assessment"] = assess_evidence(
+                        enriched, model=config.evidence_model, ollama_url=config.evidence_ollama_url,
+                        timeout=config.evidence_timeout, max_chars=config.evidence_max_chars,
+                    )
+                evaluations.append(evaluate_candidate(enriched, profile_version["profile"] if profile_version else {}))
         evaluations.sort(key=lambda item: (item["score"], item.get("published") or ""), reverse=True)
 
         db.update_workflow_state(connection, workflow_cycle_id, "curating")
@@ -85,15 +90,19 @@ class CuratorAgent:
             evaluation for evaluation in evaluations if evaluation["score"] >= config.min_quality_score
         ][:remaining]
         for index, recommendation in enumerate(recommendations, 1):
-            db.insert_recommendation(
+            recommendation_id = db.insert_recommendation(
                 connection,
                 curator_run_id=curator_run_id,
                 paper_id=recommendation["paper_id"],
                 recommendation_order=index,
                 rationale=recommendation["rationale"],
             )
+            telemetry.event("recommendation", recommendation_id=recommendation_id,
+                            paper_id=recommendation["paper_id"], curator_run_id=curator_run_id)
 
         total_recommendations = len(prior_ids) + len(recommendations)
+        telemetry.attributes(candidate_count=len(evaluations), recommendation_count=len(recommendations),
+                             curator_run_id=curator_run_id)
         requested_rescout = total_recommendations < max_recommendations and scout_attempt_count < config.max_scout_attempts
         rescout_reason = None
         if requested_rescout:

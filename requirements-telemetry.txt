@@ -1,0 +1,3 @@
+# Optional; the native pipeline remains dependency-free when tracing is disabled.
+opentelemetry-sdk==1.37.0
+opentelemetry-exporter-otlp-proto-common==1.37.0

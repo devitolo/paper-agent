@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from contextvars import copy_context
 import json
 import re
 import subprocess
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents.runtime_config import ollama_url as configured_ollama_url
+from paper_agents import telemetry
 
 
 DEFAULT_MODEL = "qwen2.5:1.5b-instruct"
@@ -27,6 +29,7 @@ REQUIRED_KEYS = [
 ]
 
 
+@telemetry.traced("reviewer.extract")
 def extract_paper(
     source_path: Path,
     *,
@@ -57,6 +60,7 @@ def extract_paper(
         merged = synthesis["extraction"]
         merge_strategy = "synthesis"
         if populated_field_count(merged) < populated_field_count(fallback):
+            telemetry.event("fallback", fallback="deterministic_merge")
             merged = fallback
             merge_strategy = "deterministic_fallback"
 
@@ -80,6 +84,7 @@ def extract_paper(
             cleanup_dir.cleanup()
 
 
+@telemetry.traced("reviewer.prepare_text", "TOOL")
 def prepare_text_source(source_path: Path) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
     if source_path.suffix.lower() != ".pdf":
         return source_path, None
@@ -166,7 +171,9 @@ def schema_text() -> str:
     return json.dumps(schema, separators=(",", ":"))
 
 
+@telemetry.traced("ollama.generate", "LLM")
 def call_ollama(url: str, model: str, prompt: str, timeout: int) -> dict[str, Any]:
+    telemetry.attributes(model=model, provider="ollama")
     payload = {
         "model": model,
         "prompt": prompt,
@@ -179,7 +186,10 @@ def call_ollama(url: str, model: str, prompt: str, timeout: int) -> dict[str, An
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.load(response)
+        result = json.load(response)
+    if isinstance(result, dict):
+        telemetry.attributes(prompt_tokens=result.get("prompt_eval_count"), completion_tokens=result.get("eval_count"))
+    return result
 
 
 def normalize_extraction(value: Any) -> dict[str, str | None]:
@@ -228,7 +238,7 @@ def extract_chunks(
         futures = {}
         for index, chunk in enumerate(chunks):
             print(f"queueing chunk {index + 1}/{len(chunks)} ({len(chunk)} chars)")
-            future = executor.submit(extract_chunk, url, model, chunk, index, timeout)
+            future = executor.submit(copy_context().run, extract_chunk, url, model, chunk, index, timeout)
             futures[future] = index
 
         for future in concurrent.futures.as_completed(futures):
@@ -239,6 +249,7 @@ def extract_chunks(
     return [result for result in results if result is not None]
 
 
+@telemetry.traced("reviewer.chunk")
 def extract_chunk(
     url: str,
     model: str,
@@ -246,6 +257,7 @@ def extract_chunk(
     index: int,
     timeout: int,
 ) -> dict[str, Any]:
+    telemetry.attributes(chunk_index=index)
     return run_extraction_call(
         url,
         model,
@@ -255,6 +267,7 @@ def extract_chunk(
     )
 
 
+@telemetry.traced("reviewer.synthesis")
 def synthesize_extractions(
     url: str,
     model: str,
@@ -306,6 +319,7 @@ def run_extraction_call(
         extraction = parse_model_json(response_text)
         error = None
     except (json.JSONDecodeError, ValueError) as exc:
+        telemetry.failure("invalid_response")
         extraction = {key: None for key in REQUIRED_KEYS}
         error = str(exc)
 
@@ -334,6 +348,7 @@ def lookup_source_metadata(source_path: Path) -> dict[str, Any]:
     return metadata
 
 
+@telemetry.traced("source.http", "TOOL", source="arxiv")
 def fetch_arxiv_metadata(arxiv_id: str, timeout: int = 30) -> dict[str, Any]:
     clean_id = arxiv_id.replace("_", "/")
     params = urllib.parse.urlencode({"id_list": clean_id})

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents.local_extract import DEFAULT_MODEL, DEFAULT_OLLAMA_URL, call_ollama
+from paper_agents import telemetry
 
 EVIDENCE_VERSION = "qwen-evidence-v1"
 RESEARCH_TYPES = {"empirical", "systems", "theoretical", "survey", "position", "framework", "unknown"}
@@ -111,12 +112,14 @@ def _validate_response(value: Any) -> dict[str, Any]:
     return value
 
 
+@telemetry.traced("curator.evidence", prompt_version=EVIDENCE_VERSION)
 def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_MODEL,
                     ollama_url: str = DEFAULT_OLLAMA_URL, timeout: int = 45,
                     max_chars: int = 7000) -> dict[str, Any]:
     started = time.monotonic()
     text, provenance = evidence_input(candidate, max_chars)
     if not text:
+        telemetry.attributes(outcome="unavailable")
         assessment = _normalize({}, provenance, status="unavailable", error="no paper text available")
         assessment["wall_clock_sec"] = round(time.monotonic() - started, 2)
         assessment["model"] = model
@@ -131,6 +134,7 @@ def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_MODEL,
         parsed = json.loads(response)
         assessment = _normalize(_validate_response(parsed), provenance)
     except (OSError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        telemetry.failure("invalid_response" if isinstance(exc, ValueError) else "network")
         assessment = _normalize({}, provenance, status="unavailable", error=str(exc))
     assessment["wall_clock_sec"] = round(time.monotonic() - started, 2)
     assessment["model"] = model

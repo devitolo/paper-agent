@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from paper_agents import db
+from paper_agents import db, telemetry
 from paper_agents.scout_diagnostics import capture_report
 from paper_agents.scout import (
     DEFAULT_ARXIV_REQUEST_DELAY,
@@ -48,6 +48,7 @@ class ScoutAgent:
     def __init__(self, source: PaperSource | None = None):
         self.source = source
 
+    @telemetry.traced("scout")
     def run(
         self,
         connection,
@@ -61,6 +62,7 @@ class ScoutAgent:
             retries=config.retries,
             timeout=config.timeout,
         )
+        telemetry.attributes(workflow_cycle_id=workflow_cycle_id, attempt=attempt_number, source=source.name)
         active_guidance = db.active_scouting_guidance(connection)
         scout_guidance = load_scout_guidance(connection)
         guided_topics = topics_with_guidance(config.topics, scout_guidance)
@@ -98,6 +100,7 @@ class ScoutAgent:
         )
 
         # Source requests may spend minutes retrying rate limits. Persist the run
+        telemetry.attributes(scout_run_id=scout_run_id, guidance_id=guidance_id)
         # setup first so another scheduled pipeline is not blocked meanwhile.
         connection.commit()
 
@@ -182,6 +185,9 @@ class ScoutAgent:
         )
         db.update_workflow_state(connection, workflow_cycle_id, "scout_complete")
         capture_report(connection, scout_run_id, phase="scout_complete")
+        telemetry.attributes(error_count=len(errors), warning_count=len(warnings))
+        if errors:
+            telemetry.failure()
         return {
             "scout_run_id": scout_run_id,
             "source": source.name,
