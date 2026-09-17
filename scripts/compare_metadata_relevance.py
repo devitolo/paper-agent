@@ -22,6 +22,8 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
     parser.add_argument("--timeout", type=int, default=45)
+    parser.add_argument("--paper-id", action="append", default=[],
+                        help="Assess only this paper id; repeat for multiple ids")
     args = parser.parse_args()
     if paths_collide(args.fixture, args.output) or args.output.exists():
         parser.error("--output must be a new file distinct from the fixture")
@@ -47,7 +49,8 @@ def main() -> None:
             temporary.unlink(missing_ok=True)
 
     report = run_experiment(fixture, model=args.model, url=args.ollama_url,
-                            timeout=args.timeout, checkpoint=checkpoint)
+                            timeout=args.timeout, target_ids=set(args.paper_id) or None,
+                            checkpoint=checkpoint)
     checkpoint(report)
     print(json.dumps({"status": report["status"], "papers": len(report["results"]),
                       "calls": report["calls"], "output": str(args.output)}))

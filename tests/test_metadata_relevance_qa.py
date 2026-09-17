@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from paper_agents.metadata_relevance import run_experiment, call_qwen
+from paper_agents.metadata_relevance import allowed_profile, build_prompt, run_experiment, call_qwen
 
 
 def fixture(count=1):
@@ -29,6 +29,44 @@ def envelope():
 
 
 class MetadataRelevanceIndependentTests(unittest.TestCase):
+    def test_single_target_rejects_ambiguous_duplicate_ids_before_provider(self):
+        data = fixture(2)
+        data["candidates"][1]["id"] = data["candidates"][0]["id"]
+        with self.assertRaisesRegex(ValueError, "paper ids must be unique"):
+            run_experiment(data, target_ids={"0"}, timeout=120,
+                           provider=lambda *args: self.fail("provider called"))
+
+    def test_reduced_prompt_caps_preserve_label_isolation(self):
+        data = fixture()
+        data["profile"] = {
+            "interests": [f"interest-{index}-" + "x" * 400 for index in range(15)],
+            "positive_signals": ["positive"] * 15,
+            "negative_signals": ["negative"] * 15,
+            "notes": "PRIVATE_HISTORY",
+        }
+        data["candidates"][0]["abstract"] = "a" * 5000 + "PRIVATE_TAIL"
+        profile = allowed_profile(data["profile"])
+        self.assertEqual(len(profile["interests"]), 12)
+        self.assertTrue(all(len(value) <= 300 for values in profile.values() for value in values))
+        prompt = build_prompt(data["candidates"][0], data["profile"])
+        self.assertNotIn("PRIVATE_HISTORY", prompt)
+        self.assertNotIn("PRIVATE_TAIL", prompt)
+
+    def test_local_request_uses_reduced_output_budget_without_live_call(self):
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def read(self, limit):
+                return json.dumps(envelope()).encode()
+        with patch("paper_agents.metadata_relevance.urllib.request.build_opener") as factory:
+            factory.return_value.open.return_value = Response()
+            call_qwen("http://127.0.0.1:11434/api/generate", "fixture-model", "prompt", 1)
+            request = factory.return_value.open.call_args.args[0]
+            body = json.loads(request.data)
+            self.assertEqual(body["options"]["num_predict"], 250)
+
     def test_provider_body_read_cannot_exceed_total_call_deadline(self):
         class SlowResponse:
             def __enter__(self):
@@ -74,6 +112,25 @@ class MetadataRelevanceIndependentTests(unittest.TestCase):
                     pass
             self.assertEqual(source.read_bytes(), before,
                              "checkpoint scratch aliases must not overwrite original corpus")
+
+    def test_cli_forwards_single_paper_feasibility_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "fixture.json", root / "report.json"
+            source.write_text(json.dumps(fixture()))
+            captured = {}
+            def fake_run(data, **kwargs):
+                captured.update(kwargs)
+                return {"status": "complete", "results": [], "calls": 0}
+            script = Path(__file__).resolve().parents[1] / "scripts" / "compare_metadata_relevance.py"
+            argv = [str(script), str(source), "--output", str(output),
+                    "--paper-id", "0", "--timeout", "120"]
+            with patch.object(sys, "argv", argv), patch(
+                "paper_agents.metadata_relevance.run_experiment", side_effect=fake_run
+            ):
+                runpy.run_path(str(script), run_name="__main__")
+            self.assertEqual(captured["target_ids"], {"0"})
+            self.assertEqual(captured["timeout"], 120)
 
     def test_fifteen_paper_end_to_end_preserves_inputs_and_isolates_labels(self):
         data = fixture(15)

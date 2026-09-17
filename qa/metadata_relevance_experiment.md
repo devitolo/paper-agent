@@ -14,7 +14,9 @@ Acceptance checks:
 - Direct labels, ratings, reviews, old scores and paper-specific profile notes never
   enter judge requests. Labels may join only after judgment for comparison.
 - Maximum 15 serial local calls, 45-second hard maximum per call, zero retries;
-  runner also has a finite overall deadline. First pass only; repeats deferred.
+  runner also has a finite overall deadline. A named single-paper feasibility probe
+  may use up to 120 seconds after the 45-second comparison timed out on every paper.
+  Extended timeouts cannot be used for a multi-paper run.
 - Invalid score types/ranges, booleans, nonfinite numbers, missing metadata, malformed
   output and timeouts are explicit unknown/failures, not zero relevance by default.
 - Actual latency/usage reported; unavailable usage unknown. Private exception bodies

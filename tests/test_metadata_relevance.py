@@ -56,6 +56,40 @@ class MetadataRelevanceTests(unittest.TestCase):
         changed["candidates"][0].update(decision="reject", user_score=1, review="OTHER")
         self.assertEqual(before, build_prompt(changed["candidates"][0], changed["profile"]))
 
+    def test_targeted_feasibility_run_calls_only_requested_paper(self):
+        fixture = self.fixture()
+        other = copy.deepcopy(fixture["candidates"][0])
+        other["id"] = "618"
+        fixture["candidates"].append(other)
+        prompts = []
+
+        report = run_experiment(
+            fixture, target_ids={"618"}, timeout=120,
+            provider=lambda u, m, p, t: prompts.append((p, t)) or self.envelope(),
+        )
+
+        self.assertEqual([row["id"] for row in report["results"]], ["618"])
+        self.assertEqual(report["calls"], 1)
+        self.assertEqual(prompts[0][1], 120)
+
+    def test_unknown_target_is_rejected_before_provider_call(self):
+        with self.assertRaisesRegex(ValueError, "target paper id"):
+            run_experiment(self.fixture(), target_ids={"missing"},
+                           provider=lambda *args: self.fail("provider called"))
+
+    def test_extended_timeout_requires_one_target_paper(self):
+        with self.assertRaisesRegex(ValueError, "exactly one target paper"):
+            run_experiment(self.fixture(), timeout=120,
+                           provider=lambda *args: self.fail("provider called"))
+
+        fixture = self.fixture()
+        other = copy.deepcopy(fixture["candidates"][0])
+        other["id"] = "618"
+        fixture["candidates"].append(other)
+        with self.assertRaisesRegex(ValueError, "exactly one target paper"):
+            run_experiment(fixture, target_ids={"1", "618"}, timeout=120,
+                           provider=lambda *args: self.fail("provider called"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -45,7 +45,7 @@ def _hard_deadline(seconds: float):
 
 
 def allowed_profile(profile: dict[str, Any]) -> dict[str, list[str]]:
-    return {key: [str(v)[:500] for v in (profile.get(key) or []) if isinstance(v, str)][:20]
+    return {key: [str(v)[:300] for v in (profile.get(key) or []) if isinstance(v, str)][:12]
             for key in ("interests", "positive_signals", "negative_signals")}
 
 
@@ -53,7 +53,7 @@ def judge_input(candidate: dict[str, Any], profile: dict[str, Any]) -> dict[str,
     return {
         "paper_id": str(candidate.get("id") or ""),
         "title": str(candidate.get("title") or "")[:1000],
-        "abstract": str(candidate.get("abstract") or "")[:8000],
+        "abstract": str(candidate.get("abstract") or "")[:5000],
         "discovery_query": str(candidate.get("discovery_query") or "")[:1000] or None,
         "profile": allowed_profile(profile),
     }
@@ -84,7 +84,7 @@ def call_qwen(url: str, model: str, prompt: str, timeout: int) -> dict[str, Any]
         raise ValueError("Ollama endpoint must be local HTTP")
     request = urllib.request.Request(url, data=json.dumps({
         "model": model, "prompt": prompt, "format": "json", "stream": False,
-        "options": {"temperature": 0, "num_predict": 500},
+        "options": {"temperature": 0, "num_predict": 250},
     }).encode(), headers={"Content-Type": "application/json"})
     class NoRedirects(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -139,18 +139,34 @@ def keyword_baseline(candidate: dict[str, Any], profile: dict[str, Any]) -> dict
 def run_experiment(fixture: dict[str, Any], *, provider: Callable = call_qwen,
                    model: str = DEFAULT_MODEL, url: str = DEFAULT_OLLAMA_URL,
                    timeout: int = 45, deadline_seconds: int = 750,
+                   target_ids: set[str] | None = None,
                    checkpoint: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     candidates = fixture.get("candidates")
     profile = fixture.get("profile")
     if not isinstance(candidates, list) or not isinstance(profile, dict) or not candidates:
         raise ValueError("fixture requires candidates and profile")
-    if len(candidates) > MAX_PAPERS or not 1 <= timeout <= 45:
+    if len(candidates) > MAX_PAPERS or not 1 <= timeout <= 120:
         raise ValueError("experiment limits exceeded")
+    target_ids = {str(value) for value in target_ids} if target_ids else None
+    if timeout > 45 and (target_ids is None or len(target_ids) != 1):
+        raise ValueError("timeouts above 45 seconds require exactly one target paper")
+    candidate_id_list = [str(candidate.get("id")) for candidate in candidates]
+    candidate_ids = set(candidate_id_list)
+    if len(candidate_ids) != len(candidate_id_list):
+        raise ValueError("candidate paper ids must be unique")
+    if target_ids and not target_ids.issubset(candidate_ids):
+        raise ValueError("every target paper id must exist in the fixture")
+    mode = ("single_paper_feasibility" if target_ids and timeout > 45
+            else "targeted_comparison" if target_ids else "comparison")
     output = {"version": VERSION, "status": "running", "model": model,
+              "mode": mode,
+              "target_ids": sorted(target_ids) if target_ids else None,
               "fixture_candidates_sha256": canonical_hash(candidates),
               "profile_sha256": canonical_hash(profile), "calls": 0, "results": []}
     started = time.monotonic()
     for candidate in candidates:
+        if target_ids and str(candidate.get("id")) not in target_ids:
+            continue
         row = {"id": str(candidate.get("id")), "title": candidate.get("title"),
                "keyword": keyword_baseline(candidate, profile),
                "qwen": {"status": "unknown", "score": None, "rationale": "not assessed"}}
