@@ -141,6 +141,12 @@ class OfflineReplayTests(unittest.TestCase):
         profile = {"interests": ["enterprise AI platform architecture", "production operations"]}
         selection = select_targeted_passages(DOCUMENT)
         reasoning = "The control plane requires explicit policy ownership because shared services otherwise hide accountability."
+        claims = {kind: {"state": "unknown", "citations": []} for kind in (
+            "measurements", "baselines", "reasoning", "tradeoffs", "actionable_insight", "limitations"
+        )}
+        claims["reasoning"] = {
+            "state": "present", "citations": [citation(selection, "method", reasoning)]
+        }
         fixture = {
             "schema_version": 1, "corpus_id": "contract-only-not-quality-evidence",
             "profile_id": "sanitized-test", "profile": profile,
@@ -152,9 +158,11 @@ class OfflineReplayTests(unittest.TestCase):
             "candidates": [
                 {"id": "architecture", **self.candidate, "document_text": DOCUMENT,
                  "decision": "keep", "user_score": 3,
-                 "proposed_assessment": {"contribution_type": "architecture", "claims": {
-                     "reasoning": {"state": "present", "citations": [citation(selection, "method", reasoning)]}
-                 }}},
+                 "proposed_assessment": {
+                     "schema_version": 1, "status": "complete",
+                     "contribution_type": "architecture", "experimental_claims_made": False,
+                     "overclaim_risk": "low", "claims": claims,
+                 }},
                 {"id": "unrelated", "title": "Abstract algebra", "abstract": "Group theory.",
                  "document_text": "", "decision": "reject", "user_score": 1,
                  "proposed_assessment": {}},
@@ -182,6 +190,18 @@ class OfflineReplayTests(unittest.TestCase):
         self.assertIn("profile_interpretation_audit", first)
         self.assertIn("score_without_grounded_rigor",
                       first["results"][0]["proposed_components"])
+
+    def test_replay_marks_missing_assessments_incomplete(self):
+        fixture = self.fixture()
+        report = replay_fixture(fixture)
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertFalse(report["quality_claim_ready"])
+        self.assertIn("missing_proposed_assessments", report["quality_claim_blockers"])
+        self.assertEqual(report["assessment_coverage"]["valid_count"], 1)
+        self.assertEqual(report["assessment_coverage"]["missing_ids"], ["unrelated"])
+        rows = {row["id"]: row for row in report["results"]}
+        self.assertEqual(rows["architecture"]["proposed_assessment_status"], "valid")
+        self.assertEqual(rows["unrelated"]["proposed_assessment_status"], "missing")
 
     def test_replay_rejects_changed_profile_and_partition_leakage(self):
         fixture = self.fixture()

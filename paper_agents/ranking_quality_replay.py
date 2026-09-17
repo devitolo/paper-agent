@@ -11,12 +11,16 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents.curator_quality_v4 import (
-    PASSAGE_VERSION, SCORING_VERSION, evaluate_candidate_v4, select_targeted_passages,
+    CLAIM_KINDS, CLAIM_STATES, CONTRIBUTION_TYPES, PASSAGE_VERSION, SCORING_VERSION,
+    evaluate_candidate_v4, select_targeted_passages, validate_grounding,
 )
 from paper_agents.curator_scoring import SCORING_VERSION as BASELINE_VERSION, evaluate_candidate
 
 
 REPLAY_VERSION = "ranking-quality-replay-v1"
+ASSESSMENT_SCHEMA_VERSION = 1
+ASSESSMENT_STATUSES = {"complete"}
+OVERCLAIM_RISKS = {"low", "medium", "high", "unknown"}
 
 
 def paths_collide(first: Path, second: Path) -> bool:
@@ -30,6 +34,58 @@ def paths_collide(first: Path, second: Path) -> bool:
 def canonical_hash(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _assessment_contract(
+    value: Any, selection: dict[str, Any],
+) -> tuple[str, list[str], int]:
+    """Classify stored assessor output without treating arbitrary JSON as a judgment."""
+    if not value:
+        return "missing", ["assessment is absent"], 0
+    if not isinstance(value, dict):
+        return "invalid", ["assessment must be an object"], 0
+    errors = []
+    if value.get("schema_version") != ASSESSMENT_SCHEMA_VERSION:
+        errors.append(f"schema_version must be {ASSESSMENT_SCHEMA_VERSION}")
+    if not isinstance(value.get("status"), str) or value.get("status") not in ASSESSMENT_STATUSES:
+        errors.append("status must be complete")
+    if (not isinstance(value.get("contribution_type"), str)
+            or value.get("contribution_type") not in CONTRIBUTION_TYPES - {"unknown"}):
+        errors.append("contribution_type must be a known contribution type")
+    if not isinstance(value.get("experimental_claims_made"), bool):
+        errors.append("experimental_claims_made must be boolean")
+    if (not isinstance(value.get("overclaim_risk"), str)
+            or value.get("overclaim_risk") not in OVERCLAIM_RISKS):
+        errors.append("overclaim_risk must be low, medium, high, or unknown")
+    claims = value.get("claims")
+    if not isinstance(claims, dict):
+        errors.append("claims must be an object")
+        claims = {}
+    passages = {str(item.get("id")): item for item in selection.get("passages", [])}
+    usable_citations = 0
+    for kind in CLAIM_KINDS:
+        claim = claims.get(kind)
+        if not isinstance(claim, dict):
+            errors.append(f"claims.{kind} must be an object")
+            continue
+        if not isinstance(claim.get("state"), str) or claim.get("state") not in CLAIM_STATES:
+            errors.append(f"claims.{kind}.state is invalid")
+        citations = claim.get("citations")
+        if not isinstance(citations, list):
+            errors.append(f"claims.{kind}.citations must be a list")
+            continue
+        exact_count = 0
+        for citation in citations:
+            if not isinstance(citation, dict):
+                continue
+            passage = passages.get(str(citation.get("passage_id") or ""))
+            quote = citation.get("quote")
+            if passage and isinstance(quote, str) and quote.strip() and quote in passage.get("text", ""):
+                exact_count += 1
+        usable_citations += exact_count
+        if claim.get("state") == "present" and exact_count == 0:
+            errors.append(f"claims.{kind} is present without an exact selected-passage citation")
+    return ("valid" if not errors else "invalid"), errors, usable_citations
 
 
 def _validate_fixture(fixture: dict[str, Any]) -> None:
@@ -68,6 +124,7 @@ def replay_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
     started = time.monotonic()
     profile = fixture["profile"]
     budgets = fixture["budgets"]
+    assessment_records = []
     results = []
     for item in fixture["candidates"]:
         candidate_started = time.monotonic()
@@ -83,8 +140,25 @@ def replay_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
             max_section_chars=budgets["max_section_chars"],
             max_passages=budgets["max_passages"],
         )
+        assessment_status, assessment_errors, exact_citations = _assessment_contract(
+            item.get("proposed_assessment"), selection,
+        )
+        grounded_assessment = validate_grounding(item.get("proposed_assessment") or {}, selection)
+        grounded_citations = sum(
+            len(claim.get("valid_citations", []))
+            for claim in grounded_assessment.get("claims", {}).values()
+            if claim.get("grounded")
+        ) if assessment_status == "valid" else 0
+        assessment_records.append({
+            "id": str(item["id"]), "status": assessment_status,
+            "errors": assessment_errors, "exact_reference_count": exact_citations,
+            "grounded_usable_citations": grounded_citations,
+            "evidence_scope": item.get("evidence_scope", "unavailable"),
+        })
         proposed = evaluate_candidate_v4(
-            candidate, profile, item.get("proposed_assessment") or {}, selection,
+            candidate, profile,
+            item.get("proposed_assessment") if assessment_status == "valid" else {},
+            selection,
         )
         results.append({
             "id": str(item["id"]), "partition": next(
@@ -93,6 +167,7 @@ def replay_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
             "title": item.get("title"), "decision": item.get("decision"),
             "user_score": item.get("user_score"),
             "evidence_scope": item.get("evidence_scope", "unavailable"),
+            "proposed_assessment_status": assessment_status,
             "baseline_score": baseline["score"], "proposed_score": proposed["score"],
             "delta": round(proposed["score"] - baseline["score"], 2),
             "baseline_components": baseline["score_components"],
@@ -137,7 +212,46 @@ def replay_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
          "negative_penalty": row["baseline_components"]["negative_penalty"]}
         for row in results if row["baseline_components"]["negative_matches"]
     ]
+    valid_ids = [row["id"] for row in assessment_records if row["status"] == "valid"]
+    missing_ids = [row["id"] for row in assessment_records if row["status"] == "missing"]
+    invalid_ids = [row["id"] for row in assessment_records if row["status"] == "invalid"]
+    exact_reference_count = sum(row["exact_reference_count"] for row in assessment_records)
+    usable_citation_count = sum(row["grounded_usable_citations"] for row in assessment_records)
+    heldout_count = len(fixture["partitions"].get("heldout", []))
+    evaluation_blockers = []
+    if missing_ids:
+        evaluation_blockers.append("missing_proposed_assessments")
+    if invalid_ids:
+        evaluation_blockers.append("invalid_proposed_assessments")
+    if usable_citation_count == 0:
+        evaluation_blockers.append("no_usable_assessment_citations")
+    quality_claim_blockers = list(evaluation_blockers)
+    if heldout_count == 0:
+        quality_claim_blockers.append("no_heldout_candidates")
+    quality_claim_blockers.append("external_quality_review_required")
     return {
+        "status": "INCOMPLETE" if evaluation_blockers else "COMPLETE",
+        "evaluation_complete": not evaluation_blockers,
+        "quality_claim_ready": False,
+        "quality_claim_blockers": quality_claim_blockers,
+        "assessment_coverage": {
+            "candidate_count": len(fixture["candidates"]),
+            "supplied_count": len(fixture["candidates"]) - len(missing_ids),
+            "valid_count": len(valid_ids),
+            "invalid_count": len(invalid_ids),
+            "missing_count": len(missing_ids),
+            "valid_ids": valid_ids,
+            "invalid_ids": invalid_ids,
+            "missing_ids": missing_ids,
+            "exact_reference_count": exact_reference_count,
+            "usable_citation_count": usable_citation_count,
+            "records": assessment_records,
+            "note": (
+                "Missing or invalid proposed assessments use a deterministic zero-rigor fallback. "
+                "Their proposed scores are diagnostics, not a completed V4 comparison. Structural "
+                "completion is separate from external quality approval."
+            ),
+        },
         "replay_version": REPLAY_VERSION,
         "corpus_id": fixture.get("corpus_id"),
         "corpus_sha256": canonical_hash(fixture["candidates"]),
@@ -161,6 +275,7 @@ def replay_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
         "limitations": [
             "Stored judgments are replayed; this does not validate model judgment quality.",
             "Small or previously seen samples cannot establish broad ranking improvement.",
+            "An INCOMPLETE report must not be used to claim proposed-ranking quality.",
         ],
     }
 

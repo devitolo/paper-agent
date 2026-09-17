@@ -100,3 +100,68 @@ profile and paper/assessment text and should be inspected before sharing; omissi
 of dedicated raw-feedback fields is not universal free-text redaction. No live
 Mini/provider/source request, production mutation, commit, push or deployment was
 performed by QA. CORE discovery acceptance is a separate task.
+
+## Completeness-report guard follow-up
+
+Final guard engineering retest PASS: 27 focused tests, including 13 independent
+regressions. Replay SHA-256 now
+`533105c938053403865def26a46ef09daf1ea373c215e7bc19c810f88cf07050`.
+Invalid/missing assessments use neutral zero-rigor fallback. Exact references and
+grounded usable citations are separate; wrong-type enums are invalid rather than
+crashing. Quality-claim readiness remains false pending external review. Developer
+reports a separate full run of 350 tests, 333 passed and 17 skipped; that run is
+developer evidence, not independently rerun here.
+
+Earlier independent real-corpus checks used profile 19, 15 development papers,
+zero held-out examples, generated summaries only, and no proposed assessments.
+The report correctly became INCOMPLETE after guard fixes. Corpus SHA-256:
+`9e48a353a2bb0a1387f3774c4a22babf4bc6db5c23268a6ae7d8eb883b15f7fb`.
+Label perturbation left deterministic scores unchanged; this does not validate a
+future assessor's input isolation. Kept papers 88 and 144 each had 12-point
+component-word negative-profile penalties requiring separate semantic review.
+The original Downloads file was unavailable at final retest, so this final guard
+hash was tested with synthetic regressions, not a fresh real-corpus run. This
+updates the earlier no-real-replay statement without establishing completed V4
+evaluation or ranking improvement. No production changes or publication by QA.
+
+Restored-corpus verification: the user restored the original JSON and its hash
+matches `9e48a353a2bb0a1387f3774c4a22babf4bc6db5c23268a6ae7d8eb883b15f7fb`
+exactly. The final replay hash `533105c938053403865def26a46ef09daf1ea373c215e7bc19c810f88cf07050`
+was independently rerun on it: profile 19, 15 development / 0 held-out / 0
+unassigned papers, all stored triage summaries, 15 missing assessments, zero exact
+references and zero usable citations. Result: INCOMPLETE, evaluation_complete=false,
+quality_claim_ready=false, all fallback rigor zero. Input bytes unchanged; zero
+network/model calls. This resolves the missing-file validation limitation, not
+the missing assessments/evidence/held-out evaluation.
+
+## Substantive assessment stage acceptance
+
+User authorization covers proceeding with development-corpus assessment, not
+production ranking activation. Developer owns implementation. Before execution,
+record primary-text availability per paper, originating artifact/source and hash,
+extraction method, coverage and offsets; generated summaries cannot stand in for
+primary text. Summary-only/missing text remains unknown or explicitly limited.
+
+The assessor input builder must allowlist necessary paper passages/provenance and
+any explicitly intended frozen-profile context. Test the complete outgoing request
+using distinct sentinels in decision, user_score, raw review, expected rank, and
+baseline/proposed scores; none may reach the model. Changing those labels while
+holding passages/profile fixed must leave requests identical. Profile 19 already
+reflects historical learning; disclose that separately from direct label leakage.
+
+Freeze and record model identity, prompt/config versions, per-paper and total
+call/token/text/time/retry budgets before running. Record actual usage and unknown
+usage accurately. No automatic external provider fallback. Verify invalid outputs,
+timeouts and budget exhaustion cannot create usable evidence or modify production
+state. Persist judgments and input hashes for deterministic replay; citations must
+resolve to supplied primary passages, with model assertions distinguished from
+independently established support.
+
+Review any missing-text export for read-only snapshot handling, input/output alias
+protection, explicit text scope and private-path/credential exclusion before giving
+the user a command. Actual execution environment availability is a dependency;
+unavailable Mini access or external/paid execution requires user input. QA does not
+initiate those actions from the handoff. Report development-only results and
+regressions; 15 previously seen papers and zero held-out examples cannot establish
+held-out improvement. Commit, push, deployment and production profile/ranking
+changes remain separately gated.

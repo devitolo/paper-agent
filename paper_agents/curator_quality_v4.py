@@ -40,7 +40,13 @@ def _paragraphs(text: str) -> list[tuple[int, int, str]]:
 
 
 def _heading_kind(paragraph: str) -> str | None:
-    first = paragraph.splitlines()[0].strip().lower().strip("0123456789.:- ")
+    raw_first = paragraph.splitlines()[0].strip().strip("0123456789.:- ")
+    # Lowercase prose such as "recommendation is ..." is evidence text, not a
+    # section heading. It remains eligible for keyword fallback.
+    if raw_first and raw_first[0].islower():
+        return None
+    first = raw_first.lower()
+    first = re.sub(r"^(?:[ivxlcdm]+|[a-z])\s*[.):-]\s*", "", first).strip()
     if len(first) > 100:
         return None
     for kind, terms in _SECTION_TERMS.items():
@@ -97,7 +103,7 @@ def select_targeted_passages(
             heading_has_body = len(paragraphs[heading_index][2].splitlines()) > 1
             first_index = heading_index if heading_has_body else heading_index + 1
             for index in range(first_index, min(len(paragraphs), heading_index + 4)):
-                if _heading_kind(paragraphs[index][2]):
+                if index != heading_index and _heading_kind(paragraphs[index][2]):
                     break
                 candidates.append((*paragraphs[index], "heading"))
         if not candidates:

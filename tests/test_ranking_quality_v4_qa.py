@@ -9,6 +9,7 @@ import unittest
 
 from paper_agents import db
 from paper_agents.curator_quality_v4 import evaluate_candidate_v4, select_targeted_passages, validate_grounding
+from paper_agents.curator_quality_v4 import CLAIM_KINDS
 from paper_agents.curator_scoring import evaluate_candidate
 from paper_agents.ranking_quality_replay import canonical_hash, replay_fixture
 
@@ -27,6 +28,51 @@ def fixture_for(candidate):
 
 
 class RankingQualityIndependentTests(unittest.TestCase):
+    def test_empty_proposed_assessments_are_explicitly_incomplete_evaluation(self):
+        candidate = {"id": "fixture", **CANDIDATE, "document_text": "",
+                     "proposed_assessment": {}}
+        report = replay_fixture(fixture_for(candidate))
+        self.assertIs(report.get("evaluation_complete"), False,
+                      "fallback-only scores must be explicitly marked incomplete, not complete V4 evaluation")
+
+    def test_nonempty_invalid_assessment_cannot_make_quality_claim_ready(self):
+        fixture = fixture_for({"id": "fixture", **CANDIDATE, "document_text": "",
+                               "proposed_assessment": {"junk": True}})
+        fixture["partitions"] = {"development": [], "heldout": ["fixture"]}
+        report = replay_fixture(fixture)
+        self.assertIs(report.get("evaluation_complete"), False)
+        self.assertIs(report.get("quality_claim_ready"), False)
+
+    def test_exact_but_unsupported_quote_does_not_complete_evidence_evaluation(self):
+        text = "Approach\n\nThe architecture requires ownership because shared services create ambiguity."
+        passage = select_targeted_passages(text)["passages"][0]
+        assessment = {"schema_version": 1, "status": "complete", "contribution_type": "architecture",
+                      "experimental_claims_made": False, "overclaim_risk": "unknown",
+                      "claims": {kind: {"state": "unknown", "citations": []} for kind in CLAIM_KINDS}}
+        assessment["claims"]["measurements"] = {"state": "present", "citations": [
+            {"passage_id": passage["id"], "quote": "ownership"}]}
+        report = replay_fixture(fixture_for({"id": "fixture", **CANDIDATE,
+            "document_text": text, "proposed_assessment": assessment}))
+        self.assertIs(report["evaluation_complete"], False)
+
+    def test_wrong_type_assessment_enum_is_invalid_not_an_uncaught_error(self):
+        report = replay_fixture(fixture_for({"id": "fixture", **CANDIDATE,
+            "document_text": "", "proposed_assessment": {"schema_version": 1, "status": []}}))
+        self.assertIs(report["evaluation_complete"], False)
+        self.assertEqual(report["assessment_coverage"]["invalid_count"], 1)
+
+    def test_invalid_assessment_uses_declared_zero_rigor_fallback(self):
+        quote = "The architecture requires ownership because shared services create ambiguity."
+        text = "Approach\n\n" + quote
+        passage = select_targeted_passages(text)["passages"][0]
+        assessment = {"contribution_type": "architecture", "claims": {"reasoning": {
+            "state": "present", "citations": [{"passage_id": passage["id"], "quote": quote}]}}}
+        report = replay_fixture(fixture_for({"id": "fixture", **CANDIDATE,
+            "document_text": text, "proposed_assessment": assessment}))
+        row = report["results"][0]
+        self.assertEqual(row["proposed_assessment_status"], "invalid")
+        self.assertEqual(row["proposed_components"]["grounded_rigor"], 0)
+
     def test_unavailable_text_does_not_become_negative_empirical_evidence(self):
         result = evaluate_candidate_v4(CANDIDATE, {}, {
             "contribution_type": "empirical", "experimental_claims_made": True,
