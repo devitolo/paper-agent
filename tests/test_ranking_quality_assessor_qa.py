@@ -250,3 +250,28 @@ class AssessorIndependentTests(unittest.TestCase):
             text, truncated = _read_primary_text(pdf, 10000)
         self.assertTrue("LEFT_PAGE_TWO" in text or truncated,
                         "unequal crop page streams must preserve unmatched text or flag incomplete extraction")
+
+    def test_a4_column_crops_include_explicit_vertical_bounds(self):
+        pdf = self.root / "primary.pdf"
+        pdf.write_bytes(b"%PDF-fixture")
+        commands = []
+
+        def convert(command, **kwargs):
+            commands.append(command)
+            if command[0] == "pdfinfo":
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="Page size: 595 x 842 pts (A4)\n", stderr="",
+                )
+            Path(command[-1]).write_text("Method\n\nSubstantive evidence.")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with patch("paper_agents.ranking_quality_assessor.subprocess.run", side_effect=convert):
+            text, truncated = _read_primary_text(pdf, 10000)
+
+        crop_commands = [command for command in commands if command[0] == "pdftotext"]
+        self.assertEqual(len(crop_commands), 2)
+        for command in crop_commands:
+            self.assertEqual(command[command.index("-y") + 1], "0")
+            self.assertEqual(command[command.index("-H") + 1], "842")
+        self.assertIn("Substantive evidence.", text)
+        self.assertFalse(truncated)

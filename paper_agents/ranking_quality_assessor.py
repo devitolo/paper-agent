@@ -119,7 +119,8 @@ def _read_primary_text(
         right_path = Path(directory) / "right.txt"
         for start, width, destination in ((0, 298, left_path), (298, 298, right_path)):
             subprocess.run(
-                ["pdftotext", "-layout", "-r", "72", "-x", str(start), "-W", str(width),
+                ["pdftotext", "-layout", "-r", "72", "-x", str(start), "-y", "0",
+                 "-W", str(width), "-H", "842",
                  str(source), str(destination)],
                 check=True, capture_output=True, text=True, timeout=30,
             )
