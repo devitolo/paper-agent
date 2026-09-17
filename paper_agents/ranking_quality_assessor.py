@@ -163,10 +163,9 @@ def _mark_section_headings(text: str) -> str:
 
 
 def _strip_front_matter(text: str) -> str:
-    """Exclude front matter only when an early, named body heading is detectable."""
+    """Exclude front matter only when an early numbered body heading is detectable."""
     body = re.search(
-        r"(?im)^[ \t]*(?:(?:[IVXLCDM]+|\d+)\.)[ \t]+"
-        r"(?:introduction|background|overview)\b",
+        r"(?m)^[ \t]*(?:(?:[IVXLCDM]+|\d+)\.)[ \t]+[A-Z]",
         text,
     )
     # A late Roman-numbered disclosure or appendix is not a body boundary. If

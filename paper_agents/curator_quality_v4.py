@@ -26,10 +26,16 @@ CLAIM_KINDS = (
 CLAIM_STATES = {"present", "absent", "unknown"}
 
 _SECTION_TERMS = {
-    "method": ("method", "approach", "design", "architecture", "implementation", "system"),
-    "evaluation": ("evaluation", "experiment", "results", "benchmark", "measurement", "study"),
-    "limitations": ("limitation", "limitations", "threat", "caveat", "constraint", "future work"),
-    "conclusion": ("conclusion", "discussion", "implication", "recommendation", "lessons"),
+    "method": ("method", "methods", "approach", "approaches", "design", "designs",
+               "architecture", "architectures", "implementation", "implementations",
+               "system", "systems"),
+    "evaluation": ("evaluation", "evaluations", "experiment", "experiments", "result",
+                   "results", "benchmark", "benchmarks", "measurement", "measurements",
+                   "study", "studies"),
+    "limitations": ("limitation", "limitations", "threat", "threats", "caveat", "caveats",
+                    "constraint", "constraints", "future work"),
+    "conclusion": ("conclusion", "conclusions", "discussion", "discussions", "implication",
+                   "implications", "recommendation", "recommendations", "lesson", "lessons"),
 }
 
 
@@ -53,6 +59,12 @@ def _heading_kind(paragraph: str) -> str | None:
         if any(first == term or first.startswith(term + " ") for term in terms):
             return kind
     return None
+
+
+def _keyword_fallback_matches(kind: str, paragraph: str) -> bool:
+    """Find an unconventional section lead without matching incidental body mentions."""
+    lead = paragraph[:180].lower()
+    return any(re.search(rf"\b{re.escape(term)}\b", lead) for term in _SECTION_TERMS[kind])
 
 
 def select_targeted_passages(
@@ -85,9 +97,8 @@ def select_targeted_passages(
         kind = _heading_kind(paragraph)
         if kind:
             headings[kind].append(index)
-        lowered = paragraph.lower()
-        for section_kind, terms in _SECTION_TERMS.items():
-            if any(term in lowered for term in terms):
+        for section_kind in _SECTION_TERMS:
+            if _keyword_fallback_matches(section_kind, paragraph):
                 keyword_candidates[section_kind].append(paragraphs[index])
 
     selected: list[dict[str, Any]] = []

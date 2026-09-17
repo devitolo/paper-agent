@@ -77,6 +77,34 @@ class PassageSelectionTests(unittest.TestCase):
         method = next(item for item in result["passages"] if item["section"] == "method")
         self.assertEqual(method["selection_reason"], "keyword_fallback")
 
+    def test_keyword_fallback_ignores_incidental_late_section_term(self):
+        result = select_targeted_passages(
+            "Applications produced third-party statistics across many organizations. "
+            + ("Operational context without section evidence. " * 8)
+            + "A cited study reported external results."
+        )
+
+        self.assertFalse(any(item["section"] == "evaluation" for item in result["passages"]))
+
+    def test_keyword_fallback_supports_explicit_plural_section_terms(self):
+        cases = {
+            "method": "Methods describe explicit ownership boundaries.",
+            "evaluation": "Experiments measured latency across 24 services.",
+            "limitations": "Constraints include one participating organization.",
+            "conclusion": "Recommendations prioritize staged policy checks.",
+        }
+        for kind, text in cases.items():
+            with self.subTest(kind=kind):
+                result = select_targeted_passages(text)
+                self.assertTrue(any(item["section"] == kind for item in result["passages"]))
+
+    def test_keyword_fallback_preserves_word_boundaries_for_plural_terms(self):
+        result = select_targeted_passages(
+            "Systematicity and experimentalism are words, not section evidence."
+        )
+
+        self.assertEqual(result["passages"], [])
+
 
 class ContributionAwareScoringTests(unittest.TestCase):
     candidate = {

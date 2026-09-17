@@ -55,6 +55,14 @@ class RankingQualityAssessorTests(unittest.TestCase):
             "1. Introduction\nBody\nConclusion\n",
         )
 
+    def test_front_matter_strip_accepts_early_numbered_nonstandard_heading(self):
+        text = "Title\nAuthors\nAbstract\n\nI. THE SCALING PARADOX\nBody\n"
+
+        self.assertEqual(
+            _strip_front_matter(text),
+            "I. THE SCALING PARADOX\nBody\n",
+        )
+
     def test_conversion_failure_codes_are_actionable_without_error_text(self):
         self.assertEqual(
             _safe_failure_code(

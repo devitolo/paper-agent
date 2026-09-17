@@ -19,6 +19,13 @@ QUOTE = "The architecture requires explicit ownership because shared services hi
 
 
 class AssessorIndependentTests(unittest.TestCase):
+    def test_fallback_retains_explicit_plural_empirical_evidence(self):
+        text = "We ran experiments on 24 production services; measurements showed 180 ms latency against a 260 ms baseline."
+        selection = select_targeted_passages(text)
+        self.assertTrue(any(item["section"] == "evaluation" and item["text"] == text
+                            for item in selection["passages"]),
+                        "plural experiments and measurements must remain eligible evidence")
+
     def test_late_named_heading_does_not_remove_substantive_method_evidence(self):
         body = "Method\n\n" + QUOTE + "\n\n" + ("Supporting discussion.\n" * 500)
         for heading in ("I. Conflict of Interest", "IV. Background", "9. Overview"):
