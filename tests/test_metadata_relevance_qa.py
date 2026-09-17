@@ -9,7 +9,9 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from paper_agents.metadata_relevance import allowed_profile, build_prompt, run_experiment, call_qwen
+from paper_agents.metadata_relevance import (
+    JUDGMENT_SCHEMA, allowed_profile, build_prompt, run_experiment, call_qwen,
+)
 
 
 def fixture(count=1):
@@ -66,6 +68,14 @@ class MetadataRelevanceIndependentTests(unittest.TestCase):
             request = factory.return_value.open.call_args.args[0]
             body = json.loads(request.data)
             self.assertEqual(body["options"]["num_predict"], 250)
+            self.assertEqual(body["format"], JUDGMENT_SCHEMA)
+            self.assertEqual(body["format"]["properties"]["score"]["type"], ["integer", "null"])
+
+    def test_prompt_requires_unquoted_score_and_evidence_for_negative_applicability(self):
+        prompt = build_prompt(fixture()["candidates"][0], fixture()["profile"])
+        self.assertIn("JSON integer, not a quoted string", prompt)
+        self.assertIn("clearly matches a supplied negative_signals entry", prompt)
+        self.assertIn("a positive match alone means does_not_apply", prompt)
 
     def test_provider_body_read_cannot_exceed_total_call_deadline(self):
         class SlowResponse:

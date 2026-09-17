@@ -21,6 +21,21 @@ VERSION = "metadata-relevance-v1"
 MAX_PAPERS = 15
 MAX_PROMPT_CHARS = 14_000
 MAX_RESPONSE_BYTES = 65_536
+JUDGMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "score": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+        "status": {"type": "string", "enum": ["complete", "unknown"]},
+        "rationale": {"type": "string"},
+        "query_match": {"type": "string", "enum": ["strong", "partial", "weak", "unknown"]},
+        "negative_preference_applicability": {
+            "type": "string", "enum": ["applies", "does_not_apply", "unknown"]
+        },
+    },
+    "required": ["score", "status", "rationale", "query_match",
+                 "negative_preference_applicability"],
+    "additionalProperties": False,
+}
 
 
 @contextmanager
@@ -60,16 +75,15 @@ def judge_input(candidate: dict[str, Any], profile: dict[str, Any]) -> dict[str,
 
 
 def build_prompt(candidate: dict[str, Any], profile: dict[str, Any]) -> str:
-    schema = {"score": "integer 0-100", "status": "complete|unknown",
-              "rationale": "brief explanation grounded only in supplied metadata",
-              "query_match": "strong|partial|weak|unknown",
-              "negative_preference_applicability": "applies|does_not_apply|unknown"}
     prompt = (
         "Judge current personal topical relevance using only title, abstract, discovery query, and "
         "the supplied preference profile. Relevance is not rigor, evidence quality, or usefulness. "
         "Treat discovery query as context, not proof. Apply negative preferences only when the "
-        "metadata supports them; otherwise use unknown. Missing or insufficient metadata requires "
-        "status unknown. Return one JSON object matching: " + json.dumps(schema) + "\nInput:\n" +
+        "paper metadata clearly matches a supplied negative_signals entry; a positive match alone "
+        "means does_not_apply. Use unknown only when applicability cannot be determined. Missing or "
+        "insufficient metadata requires status unknown and score null. For complete judgments, score "
+        "must be a JSON integer, not a quoted string. Return one JSON object matching this JSON "
+        "Schema: " + json.dumps(JUDGMENT_SCHEMA) + "\nInput:\n" +
         json.dumps(judge_input(candidate, profile), ensure_ascii=False)
     )
     if len(prompt) > MAX_PROMPT_CHARS:
@@ -83,7 +97,7 @@ def call_qwen(url: str, model: str, prompt: str, timeout: int) -> dict[str, Any]
             or parsed.username is not None or parsed.password is not None):
         raise ValueError("Ollama endpoint must be local HTTP")
     request = urllib.request.Request(url, data=json.dumps({
-        "model": model, "prompt": prompt, "format": "json", "stream": False,
+        "model": model, "prompt": prompt, "format": JUDGMENT_SCHEMA, "stream": False,
         "options": {"temperature": 0, "num_predict": 250},
     }).encode(), headers={"Content-Type": "application/json"})
     class NoRedirects(urllib.request.HTTPRedirectHandler):
