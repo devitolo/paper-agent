@@ -11,7 +11,7 @@ import sys
 from paper_agents import db
 from paper_agents.curator_quality_v4 import CLAIM_KINDS
 from paper_agents.curator_quality_v4 import select_targeted_passages
-from paper_agents.ranking_quality_assessor import assess_fixture, build_assessment_prompt, _read_primary_text
+from paper_agents.ranking_quality_assessor import assess_fixture, build_assessment_prompt, _read_primary_text, _strip_front_matter
 from paper_agents.ranking_quality_replay import canonical_hash
 
 
@@ -19,6 +19,36 @@ QUOTE = "The architecture requires explicit ownership because shared services hi
 
 
 class AssessorIndependentTests(unittest.TestCase):
+    def test_late_named_heading_does_not_remove_substantive_method_evidence(self):
+        body = "Method\n\n" + QUOTE + "\n\n" + ("Supporting discussion.\n" * 500)
+        for heading in ("I. Conflict of Interest", "IV. Background", "9. Overview"):
+            with self.subTest(heading=heading):
+                text = body + heading + "\nDisclosure."
+                preserved = _strip_front_matter(text)
+                self.assertEqual(preserved, text)
+                self.assertTrue(any(QUOTE in item["text"]
+                    for item in select_targeted_passages(preserved)["passages"]))
+
+    def test_conversion_failure_report_is_actionable_and_never_calls_provider(self):
+        cases = {
+            "no targeted primary-text passages selected": "no_targeted_passages",
+            "unsupported or unverified PDF layout": "unsupported_pdf_layout",
+            "declared two-column-a4 PDF does not have an A4 portrait page size": "pdf_layout_mismatch",
+            "PRIVATE_SECRET /private/source.pdf": "conversion_validation_failed",
+        }
+        for message, code in cases.items():
+            with self.subTest(code=code), patch(
+                "paper_agents.ranking_quality_assessor._read_primary_text",
+                side_effect=ValueError(message),
+            ), patch("paper_agents.ranking_quality_assessor.call_assessor_ollama") as provider:
+                output, report = assess_fixture(self.fixture, self.path,
+                    conversion_only=True, provider=provider)
+                provider.assert_not_called()
+                self.assertEqual(report["model_calls"], 0)
+                self.assertEqual(report["failures"], [{"id": self.fixture["candidates"][0]["id"], "error_code": code}])
+                self.assertEqual(output["candidates"][0]["proposed_assessment"], {})
+                self.assertNotIn("PRIVATE_SECRET", json.dumps(report))
+
     def test_target_618_is_processed_before_budget_despite_earlier_artifact(self):
         target = copy.deepcopy(self.fixture["candidates"][0])
         target["id"] = "618"

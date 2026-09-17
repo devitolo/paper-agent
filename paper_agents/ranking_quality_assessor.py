@@ -162,9 +162,36 @@ def _mark_section_headings(text: str) -> str:
 
 
 def _strip_front_matter(text: str) -> str:
-    """Exclude title/abstract/disclosures when a numbered paper body is detectable."""
-    body = re.search(r"(?m)^\s*I\.\s+[A-Z]", text)
-    return text[body.start():] if body else text
+    """Exclude front matter only when an early, named body heading is detectable."""
+    body = re.search(
+        r"(?im)^[ \t]*(?:(?:[IVXLCDM]+|\d+)\.)[ \t]+"
+        r"(?:introduction|background|overview)\b",
+        text,
+    )
+    # A late Roman-numbered disclosure or appendix is not a body boundary. If
+    # the document has no recognizable opening heading, retaining front matter
+    # is safer than silently discarding most of the primary source.
+    boundary = min(20_000, max(2_000, len(text) // 4))
+    return text[body.start():] if body and body.start() <= boundary else text
+
+
+def _safe_failure_code(exc: BaseException, *, conversion_only: bool) -> str:
+    if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)):
+        return "timeout"
+    if isinstance(exc, subprocess.SubprocessError):
+        return "text_extraction_failed"
+    if conversion_only and isinstance(exc, ValueError):
+        message = str(exc)
+        if message == "no targeted primary-text passages selected":
+            return "no_targeted_passages"
+        if message == "unsupported or unverified PDF layout":
+            return "unsupported_pdf_layout"
+        if message == "declared two-column-a4 PDF does not have an A4 portrait page size":
+            return "pdf_layout_mismatch"
+        return "conversion_validation_failed"
+    if isinstance(exc, (json.JSONDecodeError, ValueError)):
+        return "invalid_assessment"
+    return "provider_or_source_error"
 
 
 def _usage_count(value: Any) -> int | None:
@@ -293,14 +320,7 @@ def assess_fixture(
             })
         except (OSError, RuntimeError, TimeoutError, subprocess.SubprocessError,
                 ValueError, json.JSONDecodeError) as exc:
-            if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)):
-                code = "timeout"
-            elif isinstance(exc, (json.JSONDecodeError, ValueError)):
-                code = "invalid_assessment"
-            elif isinstance(exc, subprocess.SubprocessError):
-                code = "text_extraction_failed"
-            else:
-                code = "provider_or_source_error"
+            code = _safe_failure_code(exc, conversion_only=conversion_only)
             report["failures"].append({"id": paper_id, "error_code": code})
     output["candidates_sha256"] = canonical_hash(output["candidates"])
     output["model_config"] = {

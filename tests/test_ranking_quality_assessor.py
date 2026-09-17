@@ -8,7 +8,12 @@ from pathlib import Path
 
 from paper_agents import db
 from paper_agents.curator_quality_v4 import CLAIM_KINDS
-from paper_agents.ranking_quality_assessor import assess_fixture, build_assessment_prompt
+from paper_agents.ranking_quality_assessor import (
+    _safe_failure_code,
+    _strip_front_matter,
+    assess_fixture,
+    build_assessment_prompt,
+)
 from paper_agents.ranking_quality_replay import canonical_hash, replay_fixture
 
 
@@ -36,6 +41,33 @@ def valid_response():
 
 
 class RankingQualityAssessorTests(unittest.TestCase):
+    def test_front_matter_strip_ignores_late_roman_numbered_disclosure(self):
+        prefix = "Title and abstract\n" + ("substantive body text\n" * 400)
+        text = prefix + "I. Conflict of Interest\nNone declared\n"
+
+        self.assertEqual(_strip_front_matter(text), text)
+
+    def test_front_matter_strip_accepts_early_named_body_heading(self):
+        text = "Title\nAbstract\nSummary\n\n1. Introduction\nBody\nConclusion\n"
+
+        self.assertEqual(
+            _strip_front_matter(text),
+            "1. Introduction\nBody\nConclusion\n",
+        )
+
+    def test_conversion_failure_codes_are_actionable_without_error_text(self):
+        self.assertEqual(
+            _safe_failure_code(
+                ValueError("no targeted primary-text passages selected"),
+                conversion_only=True,
+            ),
+            "no_targeted_passages",
+        )
+        self.assertEqual(
+            _safe_failure_code(ValueError("private path or content"), conversion_only=True),
+            "conversion_validation_failed",
+        )
+
     def test_prompt_allowlist_excludes_labels_scores_and_profile_notes(self):
         candidate = {"id": "1", "title": "Platform architecture", "decision": "SECRET_REJECT",
                      "user_score": 1, "raw_review": "PRIVATE REVIEW"}
