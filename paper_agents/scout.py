@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from paper_agents import telemetry
 
+from email import message_from_bytes
 from email.utils import parsedate_to_datetime
 import hashlib
 import html
@@ -10,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -64,6 +66,16 @@ DEFAULT_ARXIV_REQUEST_DELAY = 3.0
 DEFAULT_ARXIV_RETRIES = 3
 DEFAULT_ARXIV_TIMEOUT = 60
 SCOUT_SOURCES = ("arxiv", "semantic_scholar", "openalex")
+
+
+def _final_curl_headers(raw: bytes):
+    """Return final response headers from curl's possibly multi-response dump."""
+    normalized = raw.replace(b"\r\n", b"\n")
+    blocks = [block for block in normalized.split(b"\n\n") if block.startswith(b"HTTP/")]
+    if not blocks:
+        return message_from_bytes(b"")
+    lines = blocks[-1].split(b"\n")[1:]
+    return message_from_bytes(b"\n".join(lines) + b"\n\n")
 
 
 @dataclass
@@ -291,44 +303,54 @@ class ArxivSource:
                 return response.read()
 
         marker = b"\n__PROJECT_PAPER_HTTP_STATUS__="
+        header_file = tempfile.NamedTemporaryFile(prefix="paper-arxiv-", suffix=".headers", delete=False)
+        header_path = header_file.name
+        header_file.close()
         try:
-            result = subprocess.run(
-                [
-                    self.curl_path,
-                    "--silent",
-                    "--show-error",
-                    "--max-time",
-                    str(self.timeout),
-                    "--user-agent",
-                    "paper-agent/0.1",
-                    "--write-out",
-                    "\n__PROJECT_PAPER_HTTP_STATUS__=%{http_code}",
-                    "--url",
-                    url,
-                ],
-                capture_output=True,
-                timeout=self.timeout + 1,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as error:
-            raise TimeoutError(f"arXiv request timed out after {self.timeout}s") from error
+            try:
+                result = subprocess.run(
+                    [
+                        self.curl_path,
+                        "--disable",
+                        "--silent",
+                        "--show-error",
+                        "--max-time",
+                        str(self.timeout),
+                        "--user-agent",
+                        "paper-agent/0.1",
+                        "--dump-header",
+                        header_path,
+                        "--write-out",
+                        "\n__PROJECT_PAPER_HTTP_STATUS__=%{http_code}",
+                        "--url",
+                        url,
+                    ],
+                    capture_output=True,
+                    timeout=self.timeout + 1,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as error:
+                raise TimeoutError(f"arXiv request timed out after {self.timeout}s") from error
 
-        if result.returncode == 28:
-            raise TimeoutError(f"arXiv request timed out after {self.timeout}s")
-        if result.returncode != 0:
-            raise OSError(f"arXiv curl transport failed with exit code {result.returncode}")
+            if result.returncode == 28:
+                raise TimeoutError(f"arXiv request timed out after {self.timeout}s")
+            if result.returncode != 0:
+                raise OSError(f"arXiv curl transport failed with exit code {result.returncode}")
 
-        try:
-            body, status_text = result.stdout.rsplit(marker, 1)
-            status = int(status_text.strip())
-        except (ValueError, TypeError) as error:
-            raise OSError("arXiv curl transport returned no HTTP status") from error
+            try:
+                body, status_text = result.stdout.rsplit(marker, 1)
+                status = int(status_text.strip())
+            except (ValueError, TypeError) as error:
+                raise OSError("arXiv curl transport returned no HTTP status") from error
 
-        if status >= 400:
-            raise urllib.error.HTTPError(url, status, f"HTTP {status}", {}, None)
-        if not 200 <= status < 300:
-            raise OSError(f"arXiv curl transport returned HTTP {status}")
-        return body
+            headers = _final_curl_headers(Path(header_path).read_bytes())
+            if status >= 400:
+                raise urllib.error.HTTPError(url, status, f"HTTP {status}", headers, None)
+            if not 200 <= status < 300:
+                raise OSError(f"arXiv curl transport returned HTTP {status}")
+            return body
+        finally:
+            Path(header_path).unlink(missing_ok=True)
 
     def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.isdigit():

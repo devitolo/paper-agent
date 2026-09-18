@@ -5,7 +5,7 @@ import urllib.error
 import urllib.parse
 from unittest.mock import patch
 
-from paper_agents.scout import ArxivSource
+from paper_agents.scout import ArxivSource, _final_curl_headers
 
 
 class ArxivCooldownTests(unittest.TestCase):
@@ -101,6 +101,15 @@ class ArxivCooldownTests(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as caught:
                 source._request('https://example.test/query')
         self.assertEqual(caught.exception.code, 429)
+
+    def test_final_curl_headers_ignores_intermediary_responses(self):
+        headers = _final_curl_headers(
+            b'HTTP/1.1 200 Connection established\r\nProxy: private\r\n\r\n'
+            b'HTTP/2 429\r\nRetry-After: 23\r\nX-Final: yes\r\n\r\n'
+        )
+        self.assertEqual(headers.get('Retry-After'), '23')
+        self.assertEqual(headers.get('X-Final'), 'yes')
+        self.assertIsNone(headers.get('Proxy'))
 
     def test_curl_transport_maps_timeout_without_exposing_stderr(self):
         source = ArxivSource(timeout=4, verbose=False)
