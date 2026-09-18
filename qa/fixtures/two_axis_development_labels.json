@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "scale": {"minimum": 0, "maximum": 4},
+  "disclosure": "Development-only ratings derived from the user's existing reviews. They are evaluation labels, not assessor inputs or held-out evidence.",
+  "dimensions": ["relevance", "novelty", "technical_depth", "evidence", "baseline_quality", "operational_realism"],
+  "papers": [
+    {"id": "1", "relevance": 4, "novelty": 3, "technical_depth": 3, "evidence": 4, "baseline_quality": 3, "operational_realism": 4},
+    {"id": "2", "relevance": 4, "novelty": 1, "technical_depth": 2, "evidence": 3, "baseline_quality": 2, "operational_realism": 1},
+    {"id": "4", "relevance": 4, "novelty": 1, "technical_depth": 2, "evidence": 2, "baseline_quality": 0, "operational_realism": 2},
+    {"id": "23", "relevance": 3, "novelty": 4, "technical_depth": 3, "evidence": 4, "baseline_quality": 4, "operational_realism": 3},
+    {"id": "28", "relevance": 4, "novelty": 4, "technical_depth": 4, "evidence": 4, "baseline_quality": 4, "operational_realism": 4},
+    {"id": "38", "relevance": 4, "novelty": 3, "technical_depth": 3, "evidence": 4, "baseline_quality": 4, "operational_realism": 3},
+    {"id": "58", "relevance": 4, "novelty": 1, "technical_depth": 2, "evidence": 2, "baseline_quality": 1, "operational_realism": 3},
+    {"id": "88", "relevance": 4, "novelty": 4, "technical_depth": 3, "evidence": 2, "baseline_quality": 2, "operational_realism": 4},
+    {"id": "97", "relevance": 4, "novelty": 1, "technical_depth": 1, "evidence": 0, "baseline_quality": 1, "operational_realism": 1},
+    {"id": "144", "relevance": 3, "novelty": 3, "technical_depth": 4, "evidence": 4, "baseline_quality": 3, "operational_realism": 3},
+    {"id": "201", "relevance": 4, "novelty": 2, "technical_depth": 3, "evidence": 4, "baseline_quality": 4, "operational_realism": 2},
+    {"id": "357", "relevance": 4, "novelty": 0, "technical_depth": 0, "evidence": 0, "baseline_quality": 0, "operational_realism": 0},
+    {"id": "364", "relevance": 4, "novelty": 2, "technical_depth": 4, "evidence": 4, "baseline_quality": 3, "operational_realism": 2},
+    {"id": "601", "relevance": 4, "novelty": 4, "technical_depth": 4, "evidence": 4, "baseline_quality": 4, "operational_realism": 4},
+    {"id": "618", "relevance": 3, "novelty": 1, "technical_depth": 2, "evidence": 0, "baseline_quality": 1, "operational_realism": 2}
+  ]
+}
