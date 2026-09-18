@@ -170,6 +170,15 @@ def run_daily_pipeline(
             cycle_recommendations.extend(curator_result.get("recommendations") or [])
             if not curator_result["requested_rescout"]:
                 break
+            if scout_result.get("source_degraded"):
+                reason = "Rescout suppressed because arXiv entered reduced-coverage HTTP 406 fallback mode."
+                db.update_curator_rescout(
+                    connection, curator_result["curator_run_id"], requested=False, reason=reason,
+                )
+                db.update_workflow_state(connection, cycle_id, "recommendations_ready")
+                curator_result = {**curator_result, "requested_rescout": False,
+                                  "rescout_reason": reason}
+                break
             telemetry.event("rescout", attempt=attempt)
 
         if curator_result is not None:

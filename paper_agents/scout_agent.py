@@ -203,6 +203,7 @@ class ScoutAgent:
             "eligible_count": len([candidate for candidate in stored if not candidate["excluded"]]),
             "warnings": warnings,
             "errors": errors,
+            "source_degraded": source_diagnostics.get("coverage_mode") == "single_result_406_fallback",
             "candidates": stored,
         }
 
@@ -268,6 +269,9 @@ class ScoutAgent:
                 }
             )
 
+            if source_diagnostics.get("coverage_mode") == "single_result_406_fallback":
+                stop_reason = "source_degraded"
+                break
             if source.name in {"arxiv", "semantic_scholar"} and getattr(source, "cooldown_active", False):
                 stop_reason = "source_cooldown"
                 break

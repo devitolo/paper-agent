@@ -82,6 +82,22 @@ class RecordingSource(FakeSource):
         return super().fetch(topics, max_results, freshness_months)
 
 
+class DegradedArxivSource(RecordingSource):
+    name = "arxiv"
+
+    def __init__(self, candidates):
+        super().__init__(candidates)
+        self.last_diagnostics = {}
+
+    def fetch(self, topics, max_results, freshness_months):
+        result = super().fetch(topics, max_results, freshness_months)
+        self.last_diagnostics = {
+            "coverage_mode": "single_result_406_fallback",
+            "coverage_reduced": True,
+        }
+        return result
+
+
 class FakeHttpResponse:
     def __init__(self, payload):
         self.payload = payload
@@ -842,6 +858,27 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()[0])
         self.assertEqual(refill["refill"]["stop_reason"], "minimum_eligible_reached")
 
+    def test_degraded_arxiv_stops_internal_refill_after_one_pass(self):
+        source = DegradedArxivSource(
+            [candidate(f"2601.degraded{i}v1", f"Incident RCA {i}") for i in range(2)]
+        )
+        result = ScoutAgent(source=source).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(
+                topics=["AIOps"], max_candidates=5,
+                min_eligible_candidates=3, max_refill_fetch_rounds=3,
+            ),
+        )
+
+        self.assertEqual(source.max_results_calls, [5])
+        self.assertTrue(result["source_degraded"])
+        diagnostics = json.loads(self.connection.execute(
+            "SELECT diagnostics_json FROM scout_runs WHERE id = ?", (result["scout_run_id"],)
+        ).fetchone()[0])
+        self.assertEqual(diagnostics["refill"]["stop_reason"], "source_degraded")
+
     def test_semantic_scholar_uses_one_conservative_fetch_round(self):
         source = RecordingSource([candidate(f"semantic-{index}", f"Semantic candidate {index}", source="semantic_scholar") for index in range(30)])
         source.name = "semantic_scholar"
@@ -1102,6 +1139,28 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(len(result["scout_results"]), 3)
         self.assertTrue(all(scout_result["eligible_count"] > 0 for scout_result in result["scout_results"]))
         self.assertEqual(result["curator"]["recommendations"], [])
+
+    def test_pipeline_suppresses_outer_rescout_for_degraded_arxiv(self):
+        db_path = Path(self.tmp.name) / "pipeline_degraded.db"
+        db.init_db(db_path)
+        source = DegradedArxivSource([candidate("2601.degradedv1", "Unrelated math")])
+
+        with (
+            patch("paper_agents.pipeline.create_scout_source", return_value=source),
+            patch("paper_agents.pipeline.load_profile", return_value={
+                "interests": ["AIOps"], "positive_signals": [], "negative_signals": []
+            }),
+        ):
+            result = run_daily_pipeline(
+                topics=["AIOps"], fetch_limit=2, keep_limit=3,
+                max_scout_attempts=3, min_quality_score=100,
+                db_path=db_path, mode="test", source_name="arxiv",
+            )
+
+        self.assertEqual(source.max_results_calls, [2])
+        self.assertEqual(len(result["scout_results"]), 1)
+        self.assertFalse(result["curator"]["requested_rescout"])
+        self.assertIn("reduced-coverage", result["curator"]["rescout_reason"])
 
     def test_pipeline_does_not_hold_write_lock_during_source_fetch(self):
         db_path = Path(self.tmp.name) / "pipeline_concurrency.db"
