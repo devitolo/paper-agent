@@ -6,6 +6,7 @@ import os
 import logging
 import json
 import selectors
+import re
 import sys
 import signal
 import subprocess
@@ -24,6 +25,17 @@ def _quota_hint(output: bytes) -> str:
                                          b"free_tier_requests", b"exhausted")):
         return "; provider_category=quota"
     return ""
+
+
+def _provider_failure(stderr: bytes) -> dict:
+    """Allowlisted operational hints only; never persist arbitrary stderr."""
+    text = stderr.decode("utf-8", errors="replace").lower()
+    codes = re.findall(r'(?:status|code)[\s\\"\':=]+(429|500|502|503|504)\b', text)
+    category = ("unavailable" if "503" in codes or "high demand" in text
+                else "quota" if "429" in codes or "quota" in text
+                else "server_error" if codes else None)
+    return {"provider_category": category, "http_status": int(codes[-1]) if codes else None,
+            "internal_retry_observed": "retrying" in text or "retry with backoff" in text}
 
 
 class _CompletionStream:
@@ -66,7 +78,7 @@ class _CompletionStream:
             raise RuntimeError("Gemini CLI returned unsupported or incomplete stream framing; output withheld.")
 
 
-def _read_completion(process, timeout: int, metadata: dict | None) -> str:
+def _read_completion(process, timeout: int, metadata: dict | None, fail_fast_provider_errors: bool = False) -> str:
     """Drain both pipes with a deadline, then allow a bounded terminal-exit grace.
 
     The documented terminal result can precede CLI teardown. Once it is verified,
@@ -104,6 +116,10 @@ def _read_completion(process, timeout: int, metadata: dict | None) -> str:
                     target.extend(chunk)
                     if len(stdout) + len(stderr) > MAX_STREAM_BYTES:
                         raise RuntimeError("Gemini CLI exceeded the output limit; output withheld.")
+                    if key.data == "stderr" and fail_fast_provider_errors:
+                        hint = _provider_failure(stderr)
+                        if hint["provider_category"]:
+                            raise RuntimeError("Gemini provider failure: " + str(hint["provider_category"]) + "; output withheld.")
                     if key.data == "stdout":
                         pending.extend(chunk)
                         while b"\n" in pending:
@@ -122,6 +138,7 @@ def _read_completion(process, timeout: int, metadata: dict | None) -> str:
             return "".join(stream.chunks)
         finally:
             if metadata is not None:
+                metadata.update(_provider_failure(stderr))
                 metadata.update(stdout_bytes=len(stdout), stderr_bytes=len(stderr),
                                 events=stream.events, completion_seen=stream.complete,
                                 exit_code_before_cleanup=process.poll())
@@ -216,7 +233,7 @@ def _diagnostics(stdout: bytes | None, stderr: bytes | None, *, classify: bool =
 
 
 def run_gemini(command: list[str], timeout: int, *, stream_json: bool = False,
-               metadata: dict | None = None) -> str:
+               metadata: dict | None = None, fail_fast_provider_errors: bool = False) -> str:
     process = None
     with _termination_as_exception():
         try:
@@ -224,7 +241,7 @@ def run_gemini(command: list[str], timeout: int, *, stream_json: bool = False,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        start_new_session=os.name == "posix")
             if stream_json:
-                return _read_completion(process, timeout, metadata)
+                return _read_completion(process, timeout, metadata, fail_fast_provider_errors)
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
             except subprocess.TimeoutExpired as error:
