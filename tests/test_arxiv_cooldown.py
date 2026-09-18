@@ -1,12 +1,42 @@
 import json
 import unittest
 import urllib.error
+import urllib.parse
 from unittest.mock import patch
 
 from paper_agents.scout import ArxivSource
 
 
 class ArxivCooldownTests(unittest.TestCase):
+    def test_406_switches_once_to_single_result_mode_for_remaining_topics(self):
+        from io import BytesIO
+        source = ArxivSource(retries=0, request_delay=0, verbose=False)
+        error = urllib.error.HTTPError('https://example.test', 406, 'not acceptable', {}, None)
+        feed = BytesIO(b'<feed xmlns="http://www.w3.org/2005/Atom"/>')
+        later_feed = BytesIO(b'<feed xmlns="http://www.w3.org/2005/Atom"/>')
+
+        with patch('paper_agents.scout.urllib.request.urlopen',
+                   side_effect=[error, feed, later_feed]) as fetch:
+            self.assertEqual(source.fetch(['one', 'two'], 8, 24), [])
+
+        self.assertEqual(fetch.call_count, 3)
+        requested = [urllib.parse.parse_qs(call.args[0].full_url.split('?', 1)[1])['max_results'][0]
+                     for call in fetch.call_args_list]
+        self.assertEqual(requested, ['4', '1', '1'])
+        self.assertTrue(source.single_result_mode)
+        self.assertTrue(source.last_diagnostics['coverage_reduced'])
+        self.assertEqual(source.last_diagnostics['coverage_mode'], 'single_result_406_fallback')
+        self.assertEqual([event['event'] for event in source.last_diagnostics['requests']].count('degraded_mode'), 1)
+
+    def test_406_on_single_result_request_fails_without_recursion(self):
+        source = ArxivSource(retries=0, verbose=False)
+        source.single_result_mode = True
+        error = urllib.error.HTTPError('https://example.test', 406, 'not acceptable', {}, None)
+        with patch('paper_agents.scout.urllib.request.urlopen', side_effect=error) as fetch:
+            with self.assertRaises(urllib.error.HTTPError):
+                source._fetch_topic('one', 4)
+        self.assertEqual(fetch.call_count, 1)
+
     def test_exhausted_429_stops_all_topics_and_later_fetches(self):
         source = ArxivSource(retries=1, verbose=False)
         error = urllib.error.HTTPError('https://example.test', 429, 'limited', {'Retry-After': '17'}, None)

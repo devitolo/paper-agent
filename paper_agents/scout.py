@@ -132,6 +132,7 @@ class ArxivSource:
         self.timeout = timeout
         self.verbose = verbose
         self.cooldown_active = False
+        self.single_result_mode = False
         self.last_diagnostics: dict[str, Any] = {}
 
     def _record(self, event: str, **details: Any) -> None:
@@ -144,7 +145,9 @@ class ArxivSource:
         if self.cooldown_active:
             raise RuntimeError("arXiv source cooldown: requests stopped for the remainder of this run after exhausted HTTP 429 retries")
         self.last_diagnostics = {"requests": [], "successful_topics": 0, "failed_topics": 0,
-                                 "empty_topics": 0, "skipped_topics": 0}
+                                 "empty_topics": 0, "skipped_topics": 0,
+                                 "coverage_mode": ("single_result_406_fallback"
+                                                   if self.single_result_mode else "normal")}
         terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
         per_topic = max(1, min(10, (max_results + len(terms) - 1) // len(terms)))
         cutoff = date.today() - timedelta(days=freshness_months * 31)
@@ -201,11 +204,12 @@ class ArxivSource:
         return dedupe_candidates(candidates)[:max_results]
 
     def _fetch_topic(self, topic: str, max_results: int) -> list[ET.Element]:
+        requested_results = 1 if self.single_result_mode else max_results
         params = urllib.parse.urlencode(
             {
                 "search_query": f'all:"{topic}"',
                 "start": 0,
-                "max_results": max_results,
+                "max_results": requested_results,
                 "sortBy": "submittedDate",
                 "sortOrder": "descending",
             }
@@ -215,7 +219,8 @@ class ArxivSource:
 
         last_error: OSError | ET.ParseError | None = None
         for attempt in range(self.retries + 1):
-            self._record("request", topic=topic, attempt=attempt + 1)
+            self._record("request", topic=topic, attempt=attempt + 1,
+                         max_results=requested_results)
             try:
                 with telemetry.span("source.http", "TOOL", source=self.name, attempt=attempt + 1), urllib.request.urlopen(request, timeout=self.timeout) as response:
                     root = ET.fromstring(response.read())
@@ -226,6 +231,16 @@ class ArxivSource:
                 last_error = error
                 self._record("http_error", topic=topic, attempt=attempt + 1, status=error.code,
                              retry_after=error.headers.get("Retry-After") if error.headers else None)
+                if error.code == 406 and requested_results > 1:
+                    self.single_result_mode = True
+                    self.last_diagnostics.update(
+                        coverage_mode="single_result_406_fallback",
+                        coverage_reduced=True,
+                        fallback_reason="HTTP 406 on multi-result arXiv request",
+                    )
+                    self._record("degraded_mode", topic=topic, from_max_results=requested_results,
+                                 to_max_results=1, reason="HTTP 406")
+                    return self._fetch_topic(topic, 1)
                 if error.code != 429 or attempt >= self.retries:
                     raise
                 delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After") if error.headers else None)
