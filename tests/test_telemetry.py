@@ -115,7 +115,9 @@ class TelemetryTests(unittest.TestCase):
         @t.pipeline_trace
         def run():
             with t.span('scout'):
-                return ArxivSource(retries=1, request_delay=0, verbose=False)._fetch_topic('PRIVATE', 1)
+                source = ArxivSource(retries=1, request_delay=0, verbose=False)
+                source.curl_path = None
+                return source._fetch_topic('PRIVATE', 1)
         error = urllib.error.HTTPError('http://PRIVATE',429,'PRIVATE',{},None)
         with patch('urllib.request.urlopen', side_effect=[error, io.BytesIO(b'<feed xmlns="http://www.w3.org/2005/Atom"/>')]), patch('paper_agents.scout.time.sleep'):
             self.assertEqual(run(), [])

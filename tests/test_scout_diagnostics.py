@@ -122,6 +122,7 @@ class ScoutDiagnosticsTests(unittest.TestCase):
         import urllib.error
         from paper_agents.scout import ArxivSource
         source = ArxivSource(retries=0, verbose=False)
+        source.curl_path = None
         error = urllib.error.HTTPError("https://example.test", 429, "limited", {}, None)
         with patch("paper_agents.scout.urllib.request.urlopen", side_effect=error) as fetch:
             result = ScoutAgent(source).run(self.connection, workflow_cycle_id=self.cycle, attempt_number=1,

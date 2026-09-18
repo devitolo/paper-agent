@@ -8,6 +8,8 @@ import html
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -133,6 +135,7 @@ class ArxivSource:
         self.verbose = verbose
         self.cooldown_active = False
         self.single_result_mode = False
+        self.curl_path = shutil.which("curl")
         self.last_diagnostics: dict[str, Any] = {}
 
     def _record(self, event: str, **details: Any) -> None:
@@ -215,15 +218,16 @@ class ArxivSource:
             }
         )
         url = f"https://export.arxiv.org/api/query?{params}"
-        request = urllib.request.Request(url, headers={"User-Agent": "paper-agent/0.1"})
 
         last_error: OSError | ET.ParseError | None = None
         for attempt in range(self.retries + 1):
             self._record("request", topic=topic, attempt=attempt + 1,
-                         max_results=requested_results)
+                         max_results=requested_results,
+                         transport="curl" if self.curl_path else "urllib")
             try:
-                with telemetry.span("source.http", "TOOL", source=self.name, attempt=attempt + 1), urllib.request.urlopen(request, timeout=self.timeout) as response:
-                    root = ET.fromstring(response.read())
+                with telemetry.span("source.http", "TOOL", source=self.name, attempt=attempt + 1):
+                    body = self._request(url)
+                root = ET.fromstring(body)
                 entries = list(root.findall("atom:entry", ARXIV_NS))
                 self._record("success", topic=topic, attempt=attempt + 1, entries=len(entries))
                 return entries
@@ -253,7 +257,7 @@ class ArxivSource:
                 self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
                 telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
-            except (urllib.error.URLError, TimeoutError, SocketTimeout) as error:
+            except (OSError, TimeoutError, SocketTimeout) as error:
                 self._record("network_error", topic=topic, attempt=attempt + 1, error=str(error))
                 last_error = error
                 if attempt >= self.retries:
@@ -279,6 +283,52 @@ class ArxivSource:
         if last_error:
             raise last_error
         return []
+
+    def _request(self, url: str) -> bytes:
+        if not self.curl_path:
+            request = urllib.request.Request(url, headers={"User-Agent": "paper-agent/0.1"})
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return response.read()
+
+        marker = b"\n__PROJECT_PAPER_HTTP_STATUS__="
+        try:
+            result = subprocess.run(
+                [
+                    self.curl_path,
+                    "--silent",
+                    "--show-error",
+                    "--max-time",
+                    str(self.timeout),
+                    "--user-agent",
+                    "paper-agent/0.1",
+                    "--write-out",
+                    "\n__PROJECT_PAPER_HTTP_STATUS__=%{http_code}",
+                    "--url",
+                    url,
+                ],
+                capture_output=True,
+                timeout=self.timeout + 1,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise TimeoutError(f"arXiv request timed out after {self.timeout}s") from error
+
+        if result.returncode == 28:
+            raise TimeoutError(f"arXiv request timed out after {self.timeout}s")
+        if result.returncode != 0:
+            raise OSError(f"arXiv curl transport failed with exit code {result.returncode}")
+
+        try:
+            body, status_text = result.stdout.rsplit(marker, 1)
+            status = int(status_text.strip())
+        except (ValueError, TypeError) as error:
+            raise OSError("arXiv curl transport returned no HTTP status") from error
+
+        if status >= 400:
+            raise urllib.error.HTTPError(url, status, f"HTTP {status}", {}, None)
+        if not 200 <= status < 300:
+            raise OSError(f"arXiv curl transport returned HTTP {status}")
+        return body
 
     def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.isdigit():
