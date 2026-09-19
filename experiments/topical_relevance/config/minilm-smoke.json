@@ -1,0 +1,34 @@
+{
+  "interests": [
+    "enterprise AI platform/architecture/governance/organizational tradeoffs",
+    "AIOps/observability/incident response/diagnosis/RCA/logs-metrics-traces/system relationships",
+    "agent reliability/tool-agent coordination/context/failure handling/recovery/human oversight"
+  ],
+  "aggregation": "max",
+  "adapter": {
+    "kind": "minilm_onnx",
+    "revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "model_sha256": "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a",
+    "model_dir": "/models/minilm"
+  },
+  "limits": {
+    "load_seconds": 120,
+    "pair_seconds": 60,
+    "run_seconds": 900,
+    "max_rss_bytes": 3221225472,
+    "response_bytes": 262144,
+    "require_memory_measurement": true
+  },
+  "tie_seed": "synthetic-minilm-integration-v1",
+  "metrics": {
+    "k": [
+      3,
+      5
+    ],
+    "gains": {
+      "relevant": 1,
+      "partial": 0.5,
+      "unrelated": 0
+    }
+  }
+}

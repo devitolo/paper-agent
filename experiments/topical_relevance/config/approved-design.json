@@ -1,0 +1,22 @@
+{
+  "gate": "synthetic_minilm_integration_smoke",
+  "interests": [
+    "enterprise AI platform/architecture/governance/organizational tradeoffs",
+    "AIOps/observability/incident response/diagnosis/RCA/logs-metrics-traces/system relationships",
+    "agent reliability/tool-agent coordination/context/failure handling/recovery/human oversight"
+  ],
+  "aggregation": "max",
+  "scope": "topical relevance only",
+  "input": "one shared selected title and valid abstract for all methods",
+  "missing_abstract": "insufficient_metadata; zero inference",
+  "approved_live_execution": "SDLC only: exactly three synthetic papers, nine pairs, pinned offline CPU ONNX MiniLM",
+  "approved_model_revisions": {
+    "cross-encoder/ms-marco-MiniLM-L6-v2": "233902d25c440f23af6f7d6e94d2946bac0bee0a"
+  },
+  "approved_runtime": {
+    "python": "3.11",
+    "onnxruntime": "1.23.2",
+    "transformers": "4.57.6",
+    "image_id": "sha256:7d8b960220e3c6f60292e6d40a8f300ff19c5ee05cd97cf5f725a76673e2d5c2"
+  }
+}

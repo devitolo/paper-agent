@@ -1,0 +1,23 @@
+[
+  {
+    "id": "synthetic-platform",
+    "synthetic": true,
+    "title": "Governance choices for a shared enterprise AI platform",
+    "abstract": "This synthetic paper compares centralized model governance with delegated team ownership. It describes architectural choices, approval responsibilities, and organizational tradeoffs when multiple business units share an enterprise AI platform.",
+    "abstract_kind": "synthetic_source_abstract"
+  },
+  {
+    "id": "synthetic-incidents",
+    "synthetic": true,
+    "title": "Tracing service dependencies during incident diagnosis",
+    "abstract": "This synthetic paper describes correlating application logs, metrics, and distributed traces to identify the cause of service incidents. It uses dependency relationships between services to organize diagnosis and guide incident responders.",
+    "abstract_kind": "synthetic_source_abstract"
+  },
+  {
+    "id": "synthetic-agents",
+    "synthetic": true,
+    "title": "Recovery and oversight for cooperating tool agents",
+    "abstract": "This synthetic paper studies coordination between agents that invoke tools and share task context. It describes detecting failed tool calls, recovering interrupted tasks, and asking a human to review uncertain actions before execution resumes.",
+    "abstract_kind": "synthetic_source_abstract"
+  }
+]

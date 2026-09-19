@@ -14,3 +14,9 @@ data/*.db
 data/*.db-*
 logs/
 backups/
+
+# V2 private evaluation artifacts and model weights (must live outside Git).
+.v2-private/
+v2-evaluation-artifacts/
+*.gguf
+*.safetensors
