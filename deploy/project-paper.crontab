@@ -1,6 +1,7 @@
 # BEGIN PROJECT PAPER MANAGED JOBS
 
 SHELL=/bin/bash
+PAPER_AGENT_TELEMETRY=1
 
 # Installed by scripts/install_project_paper_cron.sh.
 
@@ -8,21 +9,21 @@ SHELL=/bin/bash
 
 # Twice-daily OpenAlex Scout/Curator/Reviewer pipeline with rotating configured topics.
 
-0 4 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+0 4 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
 
-0 16 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+# Paused afternoon: 0 16 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
 
 # Twice-daily arXiv Scout/Curator/Reviewer pipeline.
 
-0 5 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+0 5 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
 
-0 17 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+# Paused afternoon: 0 17 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
 
 # Twice-daily Semantic Scholar Scout/Curator/Reviewer pipeline; sources API key from bashrc.
 
-0 6 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
+0 6 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
 
-0 18 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
+# Paused afternoon: 0 18 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
 
 #
 
