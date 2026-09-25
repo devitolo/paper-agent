@@ -31,6 +31,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("- project-paper-mini", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("bash scripts/mini_production_update.sh", workflow)
+        self.assertIn('PAPER_MINI_OPENALEX_CURSOR: "1"', workflow)
 
     def test_dockerfile_keeps_public_and_mini_targets_explicit(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -94,6 +95,14 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('--volumes-from paper-mini-production-app-1 --user 10001:10001', script)
         self.assertIn('scripts/backup_db.sh /app/data/paper_agent.db /backups', script)
         self.assertNotIn('\u201d', script)
+
+    def test_production_update_can_persist_openalex_cursor_flag(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn('OPENALEX_CURSOR=${PAPER_MINI_OPENALEX_CURSOR:-}', script)
+        self.assertIn('PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set', script)
+        self.assertIn('openalex_cursor = sys.argv[5]', script)
+        self.assertIn('PAPER_OPENALEX_CURSOR={openalex_cursor}', script)
+        self.assertIn('if openalex_cursor and not found_openalex_cursor:', script)
 
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")

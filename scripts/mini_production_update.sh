@@ -17,6 +17,7 @@ Optional:
   PAPER_MINI_DEPLOY_LOCK_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock
   PAPER_MINI_DRAIN_TIMEOUT=1800
   PAPER_MINI_DEPLOY_BRANCH=mini-production
+  PAPER_MINI_OPENALEX_CURSOR=0|1   # optional persistent production flag update
 EOF
 }
 
@@ -33,6 +34,7 @@ CANDIDATE_DIR=${PAPER_MINI_CANDIDATE_DIR:-$MINI_ROOT/candidate}
 DEPLOY_LOCK_FILE=${PAPER_MINI_DEPLOY_LOCK_FILE:-$MINI_ROOT/production-cutover/deploy.lock}
 DRAIN_TIMEOUT=${PAPER_MINI_DRAIN_TIMEOUT:-1800}
 DEPLOY_BRANCH=${PAPER_MINI_DEPLOY_BRANCH:-mini-production}
+OPENALEX_CURSOR=${PAPER_MINI_OPENALEX_CURSOR:-}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 RELEASE_DIR=$MINI_ROOT/production-releases/$STAMP
 DEPLOYED_MARKER=$MINI_ROOT/production-current/app-image.ref
@@ -42,6 +44,7 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 [[ -f "$ENV_FILE" ]] || { echo "Missing production env file: $ENV_FILE" >&2; exit 1; }
 [[ -f "$OVERLAY" ]] || { echo "Missing production overlay: $OVERLAY" >&2; exit 1; }
 [[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ && "$DRAIN_TIMEOUT" -gt 0 ]] || { echo "PAPER_MINI_DRAIN_TIMEOUT must be a positive integer" >&2; exit 64; }
+[[ -z "$OPENALEX_CURSOR" || "$OPENALEX_CURSOR" =~ ^[01]$ ]] || { echo "PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set" >&2; exit 64; }
 
 cd "$CANDIDATE_DIR"
 
@@ -85,6 +88,7 @@ install -m 0755 "$SOURCE_DIR/scripts/mini_production_update.sh" "$CANDIDATE_DIR/
   printf 'new_app_image=%s\n' "$APP_IMAGE"
   printf 'deploy_lock_file=%s\n' "$DEPLOY_LOCK_FILE"
   printf 'drain_timeout=%s\n' "$DRAIN_TIMEOUT"
+  printf 'openalex_cursor=%s\n' "${OPENALEX_CURSOR:-preserve}"
 } > "$RELEASE_DIR/update.env"
 
 "${compose[@]}" ps > "$RELEASE_DIR/before-ps.txt"
@@ -151,7 +155,7 @@ fi
 printf 'next_ollama_image=%s\n' "$ollama_image" >> "$RELEASE_DIR/update.env"
 
 tmp_env=$RELEASE_DIR/production.env.next
-python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" <<'PY'
+python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" "$OPENALEX_CURSOR" <<'PY'
 from __future__ import annotations
 
 import sys
@@ -161,9 +165,11 @@ source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
 image = sys.argv[3]
 ollama_image = sys.argv[4]
+openalex_cursor = sys.argv[5]
 lines = source.read_text(encoding="utf-8").splitlines()
 found = False
 found_ollama = False
+found_openalex_cursor = False
 out: list[str] = []
 drop_prefixes = ("PAPER_REHEARSAL_SOURCE_SHA256=", "PAPER_REHEARSAL_IDENTITY_FILE=")
 for line in lines:
@@ -175,12 +181,17 @@ for line in lines:
     elif line.startswith("PAPER_MIGRATION_OLLAMA_IMAGE="):
         out.append(f"PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}")
         found_ollama = True
+    elif line.startswith("PAPER_OPENALEX_CURSOR=") and openalex_cursor:
+        out.append(f"PAPER_OPENALEX_CURSOR={openalex_cursor}")
+        found_openalex_cursor = True
     else:
         out.append(line)
 if not found:
     out.append(f"PAPER_MIGRATION_APP_IMAGE={image}")
 if not found_ollama:
     out.append(f"PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}")
+if openalex_cursor and not found_openalex_cursor:
+    out.append(f"PAPER_OPENALEX_CURSOR={openalex_cursor}")
 destination.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 
