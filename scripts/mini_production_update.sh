@@ -215,8 +215,9 @@ fi
 "${compose[@]}" config --quiet
 
 echo "Waiting for active app jobs to finish before deployment."
-deadline=$((SECONDS + DRAIN_TIMEOUT))
-until "${compose[@]}" exec -T app python - <<'PY'
+if "${compose[@]}" exec -T app true >/dev/null 2>&1; then
+  deadline=$((SECONDS + DRAIN_TIMEOUT))
+  until "${compose[@]}" exec -T app python - <<'PY'
 from pathlib import Path
 
 lock = Path("/runtime-control/.runtime.lock")
@@ -241,17 +242,27 @@ if holders:
     print("\n".join(holders))
     raise SystemExit(75)
 PY
-do
-  [[ "$SECONDS" -lt "$deadline" ]] || {
-    echo "Timed out waiting for active Project Paper jobs to finish. No container replacement attempted." >&2
-    exit 75
-  }
-  echo "Runtime worker lease is busy; waiting before deployment."
-  sleep 10
-done
+  do
+    [[ "$SECONDS" -lt "$deadline" ]] || {
+      echo "Timed out waiting for active Project Paper jobs to finish. No container replacement attempted." >&2
+      exit 75
+    }
+    echo "Runtime worker lease is busy; waiting before deployment."
+    sleep 10
+  done
+else
+  echo "Existing app container is unavailable; skipping in-container runtime lease drain." \
+    | tee "$RELEASE_DIR/drain-skipped.log"
+fi
 
-"${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent.db /backups \
-  > "$RELEASE_DIR/pre-update-db-backup.log"
+if ! "${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent.db /backups \
+  > "$RELEASE_DIR/pre-update-db-backup.log" 2>&1; then
+  echo "Existing app container backup command unavailable; using one-shot image backup." \
+    | tee -a "$RELEASE_DIR/pre-update-db-backup.log"
+  docker run --rm --volumes-from paper-mini-production-app-1 --user 10001:10001 \
+    --entrypoint bash "$APP_IMAGE" scripts/backup_db.sh /app/data/paper_agent.db /backups \
+    >> "$RELEASE_DIR/pre-update-db-backup.log" 2>&1
+fi
 
 "${compose[@]}" stop app
 docker run --rm --volumes-from paper-mini-production-app-1 --user 10001:10001 --entrypoint python "$APP_IMAGE" - <<'PY'

@@ -86,6 +86,15 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("docker image inspect \"$ollama_image\" --format '{{index .RepoDigests 0}}'", script)
         self.assertIn('PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}', script)
 
+    def test_production_update_can_replace_unavailable_app_container(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn('if "${compose[@]}" exec -T app true', script)
+        self.assertIn('Existing app container is unavailable; skipping in-container runtime lease drain.', script)
+        self.assertIn('Existing app container backup command unavailable; using one-shot image backup.', script)
+        self.assertIn('--volumes-from paper-mini-production-app-1 --user 10001:10001', script)
+        self.assertIn('scripts/backup_db.sh /app/data/paper_agent.db /backups', script)
+        self.assertNotIn('\u201d', script)
+
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")
         self.assertIn("Do not deploy application code by `git pull`", runbook)
