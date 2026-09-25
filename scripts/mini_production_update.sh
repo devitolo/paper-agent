@@ -58,6 +58,22 @@ docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/before-app-inspect.js
 crontab -l > "$RELEASE_DIR/crontab.before" 2>/dev/null || true
 cp "$ENV_FILE" "$RELEASE_DIR/production.env.before"
 
+cat > "$RELEASE_DIR/rollback.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$CANDIDATE_DIR"
+cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"
+crontab "$RELEASE_DIR/crontab.before"
+compose=(docker compose --env-file "$ENV_FILE" -f docker-compose.mini-migration.yml)
+if grep -q '^PAPER_REHEARSAL_SOURCE_SHA256=' "$ENV_FILE"; then
+  compose+=(-f docker-compose.mini-rehearsal.yml)
+fi
+compose+=(-f "$OVERLAY")
+"\${compose[@]}" up -d --no-deps --pull never --force-recreate app
+"\${compose[@]}" exec -T app python -m paper_agents.package_runtime check-app
+EOF
+chmod 700 "$RELEASE_DIR/rollback.sh"
+
 old_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1 2>/dev/null || true)
 old_config_id=$(docker inspect --format '{{.Image}}' paper-mini-production-app-1 2>/dev/null || true)
 {
@@ -157,22 +173,6 @@ curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.ht
   > "$RELEASE_DIR/qwen-check.json"
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
-
-cat > "$RELEASE_DIR/rollback.sh" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$CANDIDATE_DIR"
-cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"
-crontab "$RELEASE_DIR/crontab.before"
-compose=(docker compose --env-file "$ENV_FILE" -f docker-compose.mini-migration.yml)
-if grep -q '^PAPER_REHEARSAL_SOURCE_SHA256=' "$ENV_FILE"; then
-  compose+=(-f docker-compose.mini-rehearsal.yml)
-fi
-compose+=(-f "$OVERLAY")
-"\${compose[@]}" up -d --no-deps --pull never --force-recreate app
-"\${compose[@]}" exec -T app python -m paper_agents.package_runtime check-app
-EOF
-chmod 700 "$RELEASE_DIR/rollback.sh"
 
 {
   printf 'completed_at=%s\n' "$(date -u +%FT%TZ)"

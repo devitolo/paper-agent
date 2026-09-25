@@ -49,6 +49,16 @@ class MiniReleasePipelineTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-n", str(ROOT / name)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_production_update_writes_rollback_before_mutation(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        rollback = script.index('cat > "$RELEASE_DIR/rollback.sh"')
+        env_mutation = script.index('cp "$tmp_env" "$ENV_FILE"')
+        cron_mutation = script.index('crontab "$RELEASE_DIR/crontab.next"')
+        app_recreate = script.index('"${compose[@]}" up -d --no-deps --pull never --force-recreate app')
+        self.assertLess(rollback, env_mutation)
+        self.assertLess(rollback, cron_mutation)
+        self.assertLess(rollback, app_recreate)
+
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")
         self.assertIn("Do not deploy application code by `git pull`", runbook)
