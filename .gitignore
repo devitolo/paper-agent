@@ -14,3 +14,4 @@ data/*.db
 data/*.db-*
 logs/
 backups/
+tmp/
