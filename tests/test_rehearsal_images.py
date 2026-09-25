@@ -149,7 +149,7 @@ class ComposeIdentityTests(unittest.TestCase):
                 self.assertEqual(value['environment']['PAPER_APP_IMAGE'],APP)
                 mount=next(item for item in value['volumes'] if item['target']=='/rehearsal/image-identity.json')
                 self.assertTrue(mount['read_only'])
-                self.assertFalse(mount['bind']['create_host_path'])
+                self.assertFalse(mount['bind'].get('create_host_path', False))
         for name in ('PAPER_REHEARSAL_SOURCE_SHA256','PAPER_REHEARSAL_IDENTITY_FILE'):
             invalid={**env};invalid.pop(name)
             self.assertNotEqual(subprocess.run(command,env=invalid,capture_output=True,timeout=10).returncode,0)

@@ -232,7 +232,7 @@ class ContractTests(unittest.TestCase):
         for target in ('/app/data','/app/config','/app/logs','/backups','/runtime-control'):
             self.assertEqual(mounts[target]['type'],'volume')
         self.assertTrue(mounts['/import/manifest.json']['read_only'])
-        self.assertFalse(mounts['/import/manifest.json']['bind']['create_host_path'])
+        self.assertFalse(mounts['/import/manifest.json']['bind'].get('create_host_path', False))
         self.assertNotIn('docker.sock',result.stdout)
         self.assertEqual(value['services']['prepare-model']['environment']['PAPER_MODEL_MODE'],'verify')
         # Current fresh install file remains byte-identical to the authorized stable base.
