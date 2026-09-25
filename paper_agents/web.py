@@ -343,6 +343,8 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
 def manual_scout_snapshot(db_path: Path, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> dict[str, Any]:
     from paper_agents.manual_scout import inference_readiness, selected_topics, status
     state = status(db_path)
+    if state.get("origin") == "cli" and state.get("status") in {"completed", "empty"}:
+        state = {**state, "status": "idle", "message": "Manual Scout is ready. Scheduled source results and warnings are shown on Health."}
     try:
         count = len(selected_topics(config_path))
         setup_message = "" if count else "Add at least one enabled arXiv topic in Topics to run Scout."
