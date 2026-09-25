@@ -41,3 +41,14 @@ Allow space for the compressed archive, its uncompressed verification staging in
 ## Verification boundary
 
 See [backup drill evidence](package-backup-qa.md). The same-image archive round trip is separate from fresh-install acceptance. Cross-version migration, rollback, automatic retention, disaster recovery without the saved configuration, and a native Mini restore are not covered by this helper.
+
+### Pending Mini scheduler migration
+
+For the unqualified standalone Mini migration contract, offline full-state backup
+must quiesce **all** writers: scheduler and its watchdog/job descendants, app and
+manual worker, plus any separately authorized writers. Stopping app alone is not
+sufficient. Preserve the existing shared-volume running-container rejection.
+The weekly SQLite job is not a full-state backup. The current package backup script
+selects fresh Compose and must not be used as a migration-stack procedure until
+explicit stack-file/project selection and all-writer shutdown are implemented and
+reviewed. See [the pending scheduler contract](mini-migration-scheduler.md).

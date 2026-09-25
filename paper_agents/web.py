@@ -2254,6 +2254,11 @@ def save_feedback(
     if ingest_output is None or not gemini_enabled():
         return result
 
+    from paper_agents.gemini_runtime import readiness_error
+    if profile_provider_fn is None and (error := readiness_error()):
+        result["profile_apply_error"] = error
+        return result
+
     structured_feedback_id = ingest_output["structured_feedback_id"]
     if profile_apply_mode == "background":
         start_profile_apply_worker(

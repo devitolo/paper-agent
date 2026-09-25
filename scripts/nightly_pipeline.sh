@@ -11,7 +11,7 @@ mkdir -p "$LOCK_DIR"
 exec 9>"$LOCK_PATH"
 if ! flock -n 9; then
   echo "Skipping arXiv pipeline: another run holds $LOCK_PATH."
-  exit 0
+  exit "${PAPER_AGENT_BUSY_EXIT_CODE:-0}"
 fi
 
 if [[ "${PAPER_AGENT_SELF_UPDATE:-0}" == "1" ]]; then
