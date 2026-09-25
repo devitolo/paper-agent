@@ -21,6 +21,28 @@ TEMPLATES = Path(__file__).with_name("package_templates")
 
 def initialize(root: Path = Path("."), templates: Path = TEMPLATES) -> None:
     """Seed missing files only; reject broken existing state without reseeding."""
+    from paper_agents.runtime_config import migration_settings
+    settings = migration_settings()
+    if settings is not None:
+        # Optional provider readiness must not prevent browsing imported state.
+        from paper_agents.gemini_runtime import readiness_error
+        if error := readiness_error():
+            print(error, file=sys.stderr)
+        if settings["PAPER_AGENT_TELEMETRY"]:
+            import importlib.metadata
+            for name in ("opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp-proto-common"):
+                if importlib.metadata.version(name) != "1.37.0":
+                    raise RuntimeError("Migration telemetry runtime version mismatch")
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+            from paper_agents.telemetry import HTTPExporter
+            endpoint = os.environ.get("PAPER_AGENT_OTLP_ENDPOINT")
+            if not endpoint:
+                raise RuntimeError("Explicit migration OTLP endpoint required")
+            HTTPExporter(endpoint)  # Config validation only; no request or trace.
+        from paper_agents.import_state import initialize as initialize_import
+        initialize_import(root, os.environ["PAPER_AGENT_IMPORT_MANIFEST"])
+        return
     for name in ("data", "config"):
         directory = root / name
         directory.mkdir(parents=True, exist_ok=True)
@@ -74,7 +96,11 @@ def request_json(path: str, payload: dict | None = None, timeout: float = 5) -> 
 
 def model_status() -> dict:
     try:
-        names = {item.get("name") for item in request_json("/api/tags").get("models", [])}
+        payload = request_json("/api/tags")
+        if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
+            from paper_agents.prepare_model import verify_model_listing
+            verify_model_listing(payload, DEFAULT_MODEL, os.environ.get("PAPER_AGENT_EXPECTED_MODEL_DIGEST", ""))
+        names = {item.get("name") for item in payload.get("models", [])}
         present = DEFAULT_MODEL in names
         return {"api": "ready", "model": DEFAULT_MODEL, "present": present,
                 "inference": "unchecked", "detail": "Run bounded inference check before discovery" if present
@@ -98,6 +124,13 @@ def check_model(timeout: float = 120) -> dict:
 def main() -> int:
     try:
         command = sys.argv[1] if len(sys.argv) > 1 else "start"
+        if command == "check-gemini":
+            from paper_agents.gemini_runtime import enabled, check_ready
+            if not enabled():
+                raise RuntimeError("Gemini migration parity requires explicit enablement")
+            check_ready()  # Files/settings only: no login, provider call or CLI launch.
+            print('Gemini local runtime/configuration ready; provider access unchecked')
+            return 0
         if command == "check-app":
             with urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=5) as response:
                 return 0 if json.load(response)["ready"] else 1
@@ -105,15 +138,25 @@ def main() -> int:
             print(json.dumps(check_model(float(os.environ.get("PAPER_MODEL_CHECK_TIMEOUT", "120")))))
             return 0
         if command == "manual-scout":
-            if len(sys.argv) != 4:
+            if len(sys.argv) not in (4,5):
                 raise RuntimeError("Expected manual-scout DB_PATH LOCK_FD")
             from paper_agents.manual_scout import worker_main
-            return worker_main(Path(sys.argv[2]), int(sys.argv[3]))
+            return worker_main(Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]) if len(sys.argv) == 5 else None)
         if command != "start":
-            raise RuntimeError("Expected start, check-app, check-model or manual-scout")
-        initialize()
+            raise RuntimeError("Expected start, check-app, check-model, check-gemini or manual-scout")
         from paper_agents.web import run_review_ui
-        run_review_ui(host="0.0.0.0", port=8000)
+        if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
+            from paper_agents.migration_lifecycle import lease, downgrade, validate_container_contract
+            validate_container_contract()
+            # First-slice validation must not treat the lifecycle lock as snapshot input.
+            # The lock lives in a separate persistent shared mount, outside authoritative data.
+            with lease(Path(os.environ["PAPER_AGENT_LIFECYCLE_DIR"]), exclusive=True) as descriptor:
+                initialize()
+                downgrade(descriptor)
+                run_review_ui(host="0.0.0.0", port=8000)
+        else:
+            initialize()
+            run_review_ui(host="0.0.0.0", port=8000)
         return 0
     except Exception as error:
         print(f"Project Paper startup/readiness failed: {error}", file=sys.stderr)

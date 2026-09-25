@@ -750,4 +750,8 @@ def load_dotenv(path: Path) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from paper_agents.manual_scout import ScoutBusy
+    try:
+        main()
+    except ScoutBusy:
+        raise SystemExit(75)  # Scheduler records a raced pipeline lock as skipped, never retries.

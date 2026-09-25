@@ -1,0 +1,143 @@
+# UNQUALIFIED standalone contract; never implicitly merged with docker-compose.yml.
+# Select explicitly with -f and an approved fixed project name. No builds or pulls here.
+name: ${PAPER_MIGRATION_PROJECT:?Set a fixed isolated migration project identity}
+x-app-image: &app-image ${PAPER_MIGRATION_APP_IMAGE:?Set immutable migration-target app image digest}
+x-environment: &environment
+  PAPER_APP_IMAGE: ${PAPER_MIGRATION_APP_IMAGE:?Set immutable migration-target app image digest}
+  PAPER_MIGRATION_OLLAMA_IMAGE: ${PAPER_MIGRATION_OLLAMA_IMAGE:?Set immutable Ollama image digest}
+  PAPER_AGENT_PACKAGED: "1"
+  PAPER_AGENT_STARTUP_MODE: imported
+  PAPER_AGENT_IMPORT_MANIFEST: /import/manifest.json
+  PAPER_AGENT_LIFECYCLE_DIR: /runtime-control
+  PAPER_AGENT_DEFAULT_SOURCES: arxiv,semantic_scholar,openalex
+  PAPER_AGENT_GEMINI_ENABLED: ${PAPER_AGENT_GEMINI_ENABLED:?Explicit Gemini parity decision required}
+  PAPER_AGENT_GEMINI_DEFAULT_MODEL: ${PAPER_AGENT_GEMINI_DEFAULT_MODEL:-}
+  PAPER_AGENT_TELEMETRY: ${PAPER_AGENT_TELEMETRY:?Explicit telemetry decision required}
+  PAPER_AGENT_OTLP_ENDPOINT: http://${PAPER_PHOENIX_DNS:?Set independently verified stable Phoenix network DNS}:6006/v1/traces
+  PAPER_AGENT_OLLAMA_URL: http://ollama:11434/api/generate
+  PAPER_AGENT_MODEL: qwen2.5:1.5b-instruct
+  PAPER_AGENT_EXPECTED_MODEL_DIGEST: 65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b
+  PAPER_MODEL_MODE: verify
+  PAPER_MODEL_VERIFY_TIMEOUT: "30"
+  PAPER_AGENT_JOB_TIMEOUT: ${PAPER_AGENT_JOB_TIMEOUT:-1800}
+  PAPER_AGENT_REPO: /app
+  PAPER_AGENT_LOCK_DIR: /runtime-control
+  TZ: America/Los_Angeles
+  SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:?Provision source credential privately}
+x-volumes: &state-mounts
+  - paper-data:/app/data
+  - paper-config:/app/config
+  - runtime-control:/runtime-control
+  - logs:/app/logs
+  - backups:/backups
+  - type: bind
+    source: ${PAPER_IMPORT_MANIFEST_FILE:?Set absolute approved copied-state manifest path}
+    target: /import/manifest.json
+    read_only: true
+    bind:
+      create_host_path: false
+services:
+  app:
+    image: *app-image
+    pull_policy: never
+    restart: "no"
+    user: "10001:10001"
+    environment: *environment
+    volumes: *state-mounts
+    secrets: [paper_gemini_api_key]
+    tmpfs:
+      - /tmp:mode=1777
+    ports:
+      - "127.0.0.1:${PAPER_MIGRATION_PORT:?Choose isolated rehearsal loopback port}:8000"
+    networks: [default, phoenix]
+    healthcheck:
+      test: [CMD, python, -m, paper_agents.package_runtime, check-app]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+    stop_grace_period: 40s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+  scheduler:
+    profiles: [scheduler]
+    image: *app-image
+    pull_policy: never
+    restart: "no"
+    user: "10001:10001"
+    entrypoint: [python, -m, paper_agents.scheduler]
+    environment:
+      <<: *environment
+      PAPER_AGENT_SCHEDULER_ENABLED: ${PAPER_AGENT_SCHEDULER_ENABLED:-0}
+      PAPER_AGENT_JOB_TIMEOUT: ${PAPER_AGENT_JOB_TIMEOUT:-1800}
+      PAPER_AGENT_JOB_STOP_GRACE: ${PAPER_AGENT_JOB_STOP_GRACE:-8}
+    volumes: *state-mounts
+    secrets: [paper_gemini_api_key]
+    tmpfs:
+      - /tmp:mode=1777
+    networks: [default, phoenix]
+    depends_on:
+      app:
+        condition: service_healthy
+    stop_grace_period: 40s
+    logging: *logging
+  ollama:
+    image: ${PAPER_MIGRATION_OLLAMA_IMAGE:?Set independently qualified immutable Ollama image digest}
+    pull_policy: never
+    restart: "no"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks: [default]
+    logging: *logging
+  prepare-model:
+    profiles: [model-verification]
+    image: *app-image
+    pull_policy: never
+    restart: "no"
+    user: "10001:10001"
+    entrypoint: [python, -m, paper_agents.prepare_model]
+    environment:
+      PAPER_MIGRATION_CONTRACT: "1"
+      PAPER_APP_IMAGE: ${PAPER_MIGRATION_APP_IMAGE:?Set immutable application image digest}
+      PAPER_MIGRATION_OLLAMA_IMAGE: ${PAPER_MIGRATION_OLLAMA_IMAGE:?Set immutable Ollama image digest}
+      PAPER_AGENT_STARTUP_MODE: imported
+      PAPER_AGENT_OLLAMA_URL: http://ollama:11434/api/generate
+      PAPER_AGENT_MODEL: qwen2.5:1.5b-instruct
+      PAPER_AGENT_EXPECTED_MODEL_DIGEST: 65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b
+      PAPER_MODEL_MODE: verify
+      PAPER_MODEL_VERIFY_TIMEOUT: "30"
+    depends_on:
+      ollama:
+        condition: service_started
+    networks: [default]
+    logging: *logging
+networks:
+  phoenix:
+    external: true
+    name: paper-observability_default
+volumes:
+  paper-data:
+    external: true
+    name: ${PAPER_MIGRATION_DATA_VOLUME:?Set preprovisioned isolated copied-data volume}
+  paper-config:
+    external: true
+    name: ${PAPER_MIGRATION_CONFIG_VOLUME:?Set preprovisioned isolated copied-config volume}
+  runtime-control:
+    external: true
+    name: ${PAPER_MIGRATION_CONTROL_VOLUME:?Set preprovisioned UID10001 control volume}
+  logs:
+    external: true
+    name: ${PAPER_MIGRATION_LOG_VOLUME:?Set preprovisioned UID10001 persistent log volume}
+  backups:
+    external: true
+    name: ${PAPER_MIGRATION_BACKUP_VOLUME:?Set preprovisioned UID10001 private backup volume}
+  ollama-data:
+    external: true
+    name: ${PAPER_MIGRATION_MODEL_VOLUME:?Set separate copied verified model volume}
+
+# Only app and the parked opt-in scheduler receive this dedicated read-only file.
+secrets:
+  paper_gemini_api_key:
+    file: ${PAPER_GEMINI_KEY_FILE:?Set absolute dedicated private key-file path}

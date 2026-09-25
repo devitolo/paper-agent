@@ -1,0 +1,27 @@
+# Explicit opt-in overlay for isolated local save/load rehearsal only.
+# Base image variables must be full sha256:<config-ID>, never repo@sha256:<ID>.
+x-local-identity: &local-identity
+  PAPER_MIGRATION_IDENTITY_MODE: local-rehearsal
+  PAPER_REHEARSAL_SOURCE_SHA256: ${PAPER_REHEARSAL_SOURCE_SHA256:?Set refreshed source bundle SHA256}
+x-identity-receipt: &identity-receipt
+  type: bind
+  source: ${PAPER_REHEARSAL_IDENTITY_FILE:?Set inspected local-image receipt path}
+  target: /rehearsal/image-identity.json
+  read_only: true
+  bind:
+    create_host_path: false
+services:
+  app:
+    pull_policy: never
+    environment: *local-identity
+    volumes: [*identity-receipt]
+  scheduler:
+    pull_policy: never
+    environment: *local-identity
+    volumes: [*identity-receipt]
+  prepare-model:
+    pull_policy: never
+    environment: *local-identity
+    volumes: [*identity-receipt]
+  ollama:
+    pull_policy: never

@@ -7,7 +7,7 @@ mkdir -p "$LOCK_DIR"
 exec 9>"$LOCK_PATH"
 if ! flock -n 9; then
   echo "Skipping database backup: another run holds $LOCK_PATH."
-  exit 0
+  exit "${PAPER_AGENT_BUSY_EXIT_CODE:-0}"
 fi
 
 SOURCE_DB="${1:-data/paper_agent.db}"
