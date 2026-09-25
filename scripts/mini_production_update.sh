@@ -201,21 +201,49 @@ echo "Waiting for active app jobs to finish before deployment."
 deadline=$((SECONDS + DRAIN_TIMEOUT))
 until "${compose[@]}" exec -T app python - <<'PY'
 from pathlib import Path
-from paper_agents.migration_lifecycle import lease
-import os
-with lease(Path(os.environ["PAPER_AGENT_LIFECYCLE_DIR"]), exclusive=True):
-    pass
+
+lock = Path("/runtime-control/.runtime.lock")
+target = lock.stat()
+holders = []
+for proc in Path("/proc").iterdir():
+    if not proc.name.isdigit() or proc.name == "1":
+        continue
+    try:
+        for fd in (proc / "fd").iterdir():
+            try:
+                st = fd.stat()
+            except FileNotFoundError:
+                continue
+            if (st.st_dev, st.st_ino) == (target.st_dev, target.st_ino):
+                cmdline = (proc / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+                holders.append(f"pid={proc.name} fd={fd.name} {cmdline}")
+    except Exception:
+        pass
+if holders:
+    print("Runtime worker leases still active:")
+    print("\n".join(holders))
+    raise SystemExit(75)
 PY
 do
   [[ "$SECONDS" -lt "$deadline" ]] || {
     echo "Timed out waiting for active Project Paper jobs to finish. No container replacement attempted." >&2
     exit 75
   }
+  echo "Runtime worker lease is busy; waiting before deployment."
   sleep 10
 done
 
 "${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent.db /backups \
   > "$RELEASE_DIR/pre-update-db-backup.log"
+
+"${compose[@]}" stop app
+docker run --rm --volumes-from paper-mini-production-app-1 --user 10001:10001 --entrypoint python "$APP_IMAGE" - <<'PY'
+from pathlib import Path
+from paper_agents.migration_lifecycle import lease
+
+with lease(Path("/runtime-control"), exclusive=True):
+    pass
+PY
 
 "${compose[@]}" up -d --no-deps --pull never --force-recreate app
 
