@@ -14,6 +14,8 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("MINI_TARGET: mini-production", workflow)
         self.assertIn("target: ${{ env.MINI_TARGET }}", workflow)
         self.assertIn("publish_candidate", workflow)
+        self.assertIn('"mini-candidate-*"', workflow)
+        self.assertIn("^mini-candidate-[0-9a-f]{7,40}$", workflow)
         self.assertIn("scripts/mini_release_acceptance.sh", workflow)
         self.assertIn("SOURCE_BUNDLE_SHA256=", workflow)
         self.assertIn("image_ref=${REGISTRY}/${IMAGE_NAME}@", workflow)

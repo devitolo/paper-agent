@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "mini-candidate-*"
   pull_request:
     branches:
       - main
@@ -45,11 +46,16 @@ jobs:
           if [[ "$RELEASE_EVENT_NAME" == push && "$RELEASE_REF_TYPE" == tag && "$RELEASE_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "release_tag=true" >> "$GITHUB_OUTPUT"
             echo "release_version=$RELEASE_REF_NAME" >> "$GITHUB_OUTPUT"
+          elif [[ "$RELEASE_EVENT_NAME" == push && "$RELEASE_REF_TYPE" == tag && "$RELEASE_REF_NAME" =~ ^mini-candidate-[0-9a-f]{7,40}$ ]]; then
+            echo "release_tag=false" >> "$GITHUB_OUTPUT"
+            echo "release_version=$RELEASE_REF_NAME" >> "$GITHUB_OUTPUT"
           else
             echo "release_tag=false" >> "$GITHUB_OUTPUT"
             echo "release_version=mini-candidate-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           fi
           if [[ "$RELEASE_EVENT_NAME" == workflow_dispatch && "${{ inputs.publish_candidate }}" == true ]]; then
+            echo "publish_candidate=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$RELEASE_EVENT_NAME" == push && "$RELEASE_REF_TYPE" == tag && "$RELEASE_REF_NAME" =~ ^mini-candidate-[0-9a-f]{7,40}$ ]]; then
             echo "publish_candidate=true" >> "$GITHUB_OUTPUT"
           else
             echo "publish_candidate=false" >> "$GITHUB_OUTPUT"
