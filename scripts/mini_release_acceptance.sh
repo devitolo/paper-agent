@@ -52,7 +52,7 @@ if len(bundle) != 64 or any(char not in "0123456789abcdef" for char in bundle):
     raise SystemExit("source bundle SHA label is missing or malformed")
 PY
 
-docker run --rm --network=none "$IMAGE" python - <<'PY' > "$REPORT_DIR/imports.txt"
+docker run --rm --network=none --entrypoint python "$IMAGE" - <<'PY' > "$REPORT_DIR/imports.txt"
 from __future__ import annotations
 
 import importlib.metadata
@@ -75,8 +75,8 @@ print("opentelemetry-api=" + importlib.metadata.version("opentelemetry-api"))
 print("opentelemetry-sdk=" + importlib.metadata.version("opentelemetry-sdk"))
 PY
 
-docker run --rm --network=none "$IMAGE" node --version >> "$REPORT_DIR/imports.txt"
-docker run --rm --network=none "$IMAGE" sh -c 'test -d /opt/paper-gemini/node_modules/@google/gemini-cli' \
+docker run --rm --network=none --entrypoint node "$IMAGE" --version >> "$REPORT_DIR/imports.txt"
+docker run --rm --network=none --entrypoint sh "$IMAGE" -c 'test -d /opt/paper-gemini/node_modules/@google/gemini-cli' \
   || fail "Gemini CLI runtime dependency missing"
 
 {

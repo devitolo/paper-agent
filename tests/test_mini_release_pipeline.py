@@ -51,6 +51,12 @@ class MiniReleasePipelineTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-n", str(ROOT / name)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_acceptance_overrides_package_entrypoint_for_tool_checks(self):
+        script = (ROOT / "scripts/mini_release_acceptance.sh").read_text(encoding="utf-8")
+        self.assertIn("--entrypoint python", script)
+        self.assertIn("--entrypoint node", script)
+        self.assertIn("--entrypoint sh", script)
+
     def test_production_update_writes_rollback_before_mutation(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         rollback = script.index('cat > "$RELEASE_DIR/rollback.sh"')
