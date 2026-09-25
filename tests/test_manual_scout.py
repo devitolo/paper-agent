@@ -169,6 +169,27 @@ class ManualScoutTests(unittest.TestCase):
         self.assertEqual(manual.status(self.path)["run_id"], "saved-id")
         self.assertTrue(web.manual_scout_snapshot(self.path, self.config)["status"] == "completed")
 
+    def test_review_queue_hides_terminal_scheduled_scout_status(self):
+        self.topics()
+        manual.write_status(self.path, {
+            "run_id": "scheduled-empty",
+            "status": "empty",
+            "origin": "cli",
+            "topics": [],
+            "message": "Scout finished without recommendations.",
+        })
+        with patch.object(manual, "inference_readiness", return_value={"status": "ready", "message": "ready"}):
+            snapshot = web.manual_scout_snapshot(self.path, self.config)
+            panel = web.render_manual_scout_panel(self.path, self.config)
+
+        self.assertEqual(snapshot["status"], "idle")
+        self.assertTrue(snapshot["can_run"])
+        self.assertIn("Manual Scout is ready", panel)
+        self.assertIn("shown on Health", panel)
+        self.assertIn(">Run Scout</button>", panel)
+        self.assertNotIn(">Retry Scout</button>", panel)
+        self.assertNotIn("Empty: Scout finished without recommendations", panel)
+
     def test_empty_source_failure_and_exception_are_distinct(self):
         self.run_worker({"curator": {"recommendations": []}, "scout_results": []})
         self.assertEqual(manual.status(self.path)["status"], "empty")
