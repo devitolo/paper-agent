@@ -25,6 +25,44 @@ tests only. Pushes to that branch build and publish a `linux/amd64`
 `mini-production` image, then deploy that exact immutable digest on the
 self-hosted Mini runner.
 
+## SSH access policy
+
+Treat the Mini like a production environment. Do not SSH into it for routine
+development, release verification, or normal deployment. The default production
+interface is GitHub Actions, the `mini-production` branch, committed runbooks,
+workflow logs, and deployment evidence under
+`/home/devitolo/paper-mini-rehearsal/production-releases`.
+
+Use SSH only when there is a bounded production reason that the workflow cannot
+handle:
+
+- incident response or service recovery;
+- one-time runner, Docker, cron, or host maintenance;
+- read-only evidence collection that is not available from Actions logs;
+- an approved manual fallback deploy or rollback;
+- explicitly requested operator diagnostics.
+
+SSH requires explicit operator approval before connecting. Approval can cover a
+bounded set of work, such as troubleshooting one production problem or carrying
+out one approved maintenance procedure, but it expires when that work ends. A
+new problem, a new maintenance task, or a move from read-only inspection to
+mutation requires fresh approval.
+
+Before requesting SSH approval, state the purpose, expected commands or
+evidence, whether the session is read-only or mutating, and the condition that
+ends the approval window. Keep the session short, avoid exploratory changes, and
+record any command that changes production state in the release or incident
+notes. Do not use SSH to bypass the `mini-production` branch, build images on
+the Mini, edit production files ad hoc, run live discovery experiments, or
+debug by poking at the host when repository tests, exact-image acceptance, or
+workflow evidence are sufficient.
+
+Use SSH requests as feedback about missing production visibility. When a request
+is for recurring observability, health, schedule, deployment, model, telemetry,
+or source-ingestion evidence, record the need and prefer adding it to the health
+dashboard, workflow summaries, or committed runbooks instead of making SSH the
+normal inspection path.
+
 ## One-time GitHub setup
 
 Create the deployment branch once:
@@ -113,6 +151,9 @@ reboot.
    - backs up SQLite;
    - recreates only the app service;
    - checks app readiness, UI reachability, and Qwen readiness;
+   - writes post-deploy verification for revision, container health, and the OpenAlex cursor flag to the workflow logs and release evidence;
+   - restores the previous env, crontab, and app container if deployment
+     validation fails after production mutation begins;
    - reports the evidence and rollback path in GitHub Actions.
 
 Overlapping deployments are serialized by GitHub Actions concurrency and a host
@@ -132,7 +173,12 @@ expires, no app replacement is attempted and the deployment job fails.
 
 ## SQLite and migrations
 
-The deployment script creates a SQLite backup before replacing the app container.
+The deployment script creates a SQLite backup before replacing the app
+container. If a deployment fails after production mutation begins, the script
+automatically restores the captured env and crontab. If app replacement has
+started, it also recreates the previous app image and checks readiness before
+exiting failed.
+
 For schema-changing releases, the release notes must explicitly state whether
 the previous image is compatible with the post-migration database. Automatic
 rollback is image-only and should be used only when the database/state remains

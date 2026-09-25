@@ -112,6 +112,73 @@ compose+=(-f "$OVERLAY")
 EOF
 chmod 700 "$RELEASE_DIR/rollback.sh"
 
+DEPLOYMENT_MUTATED=0
+APP_REPLACEMENT_STARTED=0
+DEPLOYMENT_SUCCESS=0
+RESTORE_IN_PROGRESS=0
+
+restore_previous_production() {
+  local status=$1
+  [[ "$DEPLOYMENT_SUCCESS" == 0 ]] || return 0
+  [[ "$DEPLOYMENT_MUTATED" == 1 ]] || return 0
+  [[ "$RESTORE_IN_PROGRESS" == 0 ]] || return 0
+  RESTORE_IN_PROGRESS=1
+
+  echo "Deployment failed; restoring previous production configuration." >&2
+  cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"
+  if [[ -f "$RELEASE_DIR/crontab.before" ]]; then
+    crontab "$RELEASE_DIR/crontab.before" || true
+  fi
+  {
+    printf 'failed_at=%s\n' "$(date -u +%FT%TZ)"
+    printf 'result=failed\n'
+    printf 'restore_attempted=true\n'
+    printf 'restore_reason=deployment exited %s\n' "$status"
+  } >> "$RELEASE_DIR/update.env"
+
+  if [[ "$APP_REPLACEMENT_STARTED" == 1 ]]; then
+    local restore_compose
+    restore_compose=(docker compose --env-file "$ENV_FILE" -f docker-compose.mini-migration.yml)
+    if grep -q '^PAPER_REHEARSAL_SOURCE_SHA256=' "$ENV_FILE"; then
+      restore_compose+=(-f docker-compose.mini-rehearsal.yml)
+    fi
+    restore_compose+=(-f "$OVERLAY")
+
+    if "${restore_compose[@]}" up -d --no-deps --pull never --force-recreate app \
+      > "$RELEASE_DIR/auto-restore-app.log" 2>&1; then
+      local deadline
+      deadline=$((SECONDS + 120))
+      until "${restore_compose[@]}" exec -T app python -m paper_agents.package_runtime check-app \
+        >> "$RELEASE_DIR/auto-restore-app.log" 2>&1; do
+        if [[ "$SECONDS" -ge "$deadline" ]]; then
+          "${restore_compose[@]}" logs --no-color --tail=200 app \
+            > "$RELEASE_DIR/auto-restore-readiness-failure.log" 2>&1 || true
+          echo "Automatic restore attempted but app readiness failed. Evidence: $RELEASE_DIR" >&2
+          printf 'restore_result=readiness_failed\n' >> "$RELEASE_DIR/update.env"
+          return 0
+        fi
+        sleep 3
+      done
+      echo "Previous production app restored after failed deployment." >&2
+      printf 'restore_result=pass\n' >> "$RELEASE_DIR/update.env"
+    else
+      echo "Automatic restore command failed. Evidence: $RELEASE_DIR" >&2
+      printf 'restore_result=compose_failed\n' >> "$RELEASE_DIR/update.env"
+    fi
+  else
+    echo "Previous production app was not replaced; restored env/crontab only." >&2
+    printf 'restore_result=config_only\n' >> "$RELEASE_DIR/update.env"
+  fi
+}
+
+on_exit() {
+  local status=$?
+  if [[ "$status" != 0 ]]; then
+    restore_previous_production "$status"
+  fi
+}
+trap on_exit EXIT
+
 old_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1 2>/dev/null || true)
 old_config_id=$(docker inspect --format '{{.Image}}' paper-mini-production-app-1 2>/dev/null || true)
 old_env_image=$(sed -n 's/^PAPER_MIGRATION_APP_IMAGE=//p' "$ENV_FILE" | tail -1)
@@ -197,6 +264,7 @@ PY
 
 chmod 600 "$tmp_env"
 cp "$tmp_env" "$ENV_FILE"
+DEPLOYMENT_MUTATED=1
 
 if crontab -l > "$RELEASE_DIR/crontab.current" 2>/dev/null; then
   python3 - "$RELEASE_DIR/crontab.current" "$RELEASE_DIR/crontab.next" "$OVERLAY" <<'PY'
@@ -276,6 +344,7 @@ if ! "${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent
 fi
 
 "${compose[@]}" stop app
+APP_REPLACEMENT_STARTED=1
 docker run --rm --volumes-from paper-mini-production-app-1 --user 10001:10001 --entrypoint python "$APP_IMAGE" - <<'PY'
 from pathlib import Path
 from paper_agents.migration_lifecycle import lease
@@ -301,14 +370,34 @@ curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.ht
   > "$RELEASE_DIR/qwen-check.json"
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
+
+verification_revision=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' paper-mini-production-app-1)
+verification_status=$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' paper-mini-production-app-1)
+verification_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1)
+verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_OPENALEX_CURSOR:-unset}"')
+{
+  printf 'revision=%s\n' "$verification_revision"
+  printf 'status=%s\n' "$verification_status"
+  printf 'PAPER_OPENALEX_CURSOR=%s\n' "$verification_openalex_cursor"
+  printf 'image=%s\n' "$verification_image"
+} | tee "$RELEASE_DIR/post-deploy-verification.txt"
+if [[ -n "$OPENALEX_CURSOR" && "$verification_openalex_cursor" != "$OPENALEX_CURSOR" ]]; then
+  echo "Post-deploy verification failed: PAPER_OPENALEX_CURSOR=$verification_openalex_cursor, expected $OPENALEX_CURSOR" >&2
+  exit 1
+fi
+
 mkdir -p "$(dirname "$DEPLOYED_MARKER")"
 printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
 
 {
   printf 'completed_at=%s\n' "$(date -u +%FT%TZ)"
   printf 'result=pass\n'
+  printf 'verified_revision=%s\n' "$verification_revision"
+  printf 'verified_status=%s\n' "$verification_status"
+  printf 'verified_openalex_cursor=%s\n' "$verification_openalex_cursor"
   printf 'rollback_script=%s\n' "$RELEASE_DIR/rollback.sh"
 } >> "$RELEASE_DIR/update.env"
+DEPLOYMENT_SUCCESS=1
 
 echo "Mini production app update complete."
 echo "Evidence: $RELEASE_DIR"
@@ -319,6 +408,9 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo
     echo "- Result: success"
     echo "- Image: \`$APP_IMAGE\`"
+    echo "- Revision: \`$verification_revision\`"
+    echo "- Status: \`$verification_status\`"
+    echo "- PAPER_OPENALEX_CURSOR: \`$verification_openalex_cursor\`"
     echo "- Evidence: \`$RELEASE_DIR\`"
     echo "- Rollback: \`$RELEASE_DIR/rollback.sh\`"
   } >> "$GITHUB_STEP_SUMMARY"

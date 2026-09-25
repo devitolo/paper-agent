@@ -121,19 +121,24 @@ The helper:
 - runs a database backup inside the existing app container;
 - recreates only the `app` service with Compose;
 - checks app readiness, UI reachability, and Qwen inference;
+- automatically restores the captured env, crontab, and previous app container
+  if validation fails after production mutation begins;
 - writes a rollback script in the release evidence directory.
 
 Keep the terminal output and evidence directory path with the release notes.
 
 ## Manual rollback shape
 
-If the update fails before readiness, inspect the release evidence directory
-printed by the helper. It includes:
+If the update fails after production mutation begins, the helper attempts to
+restore the captured env, crontab, and previous app container before exiting
+failed. Inspect the release evidence directory printed by the helper. It
+includes:
 
 - `production.env.before`
 - `before-ps.txt`
 - `before-app-inspect.json`
 - `pre-update-db-backup.log`
+- `auto-restore-app.log` when app replacement had already started
 - `rollback.sh`
 
 For compatible rollback, run:

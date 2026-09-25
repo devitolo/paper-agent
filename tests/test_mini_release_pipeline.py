@@ -80,6 +80,17 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertLess(rollback, cron_mutation)
         self.assertLess(rollback, app_recreate)
 
+    def test_production_update_restores_previous_app_after_failed_deploy(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn("trap on_exit EXIT", script)
+        self.assertIn("restore_previous_production()", script)
+        self.assertIn('cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"', script)
+        self.assertIn('crontab "$RELEASE_DIR/crontab.before" || true', script)
+        self.assertIn('APP_REPLACEMENT_STARTED=1', script)
+        self.assertIn('auto-restore-app.log', script)
+        self.assertIn('python -m paper_agents.package_runtime check-app', script)
+        self.assertIn('restore_result=pass', script)
+
     def test_production_update_canonicalizes_ollama_image_digest(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         self.assertIn('old_ollama_image=$(sed -n', script)
@@ -103,6 +114,16 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('openalex_cursor = sys.argv[5]', script)
         self.assertIn('PAPER_OPENALEX_CURSOR={openalex_cursor}', script)
         self.assertIn('if openalex_cursor and not found_openalex_cursor:', script)
+
+    def test_production_update_reports_post_deploy_verification(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn('post-deploy-verification.txt', script)
+        self.assertIn('verification_revision=$(docker inspect', script)
+        self.assertIn('verification_status=$(docker inspect', script)
+        self.assertIn('verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc', script)
+        self.assertIn('Post-deploy verification failed: PAPER_OPENALEX_CURSOR=', script)
+        self.assertIn('verified_openalex_cursor=%s', script)
+        self.assertIn('PAPER_OPENALEX_CURSOR: \\`', script)
 
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")

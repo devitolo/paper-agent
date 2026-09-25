@@ -76,6 +76,11 @@ for manual fallback. Both paths are image-based: build and accept a
 digest on the Mini and recreate the existing `app` service. Do not deploy
 application code by `git pull`, and do not rebuild on production.
 
+SSH is not the default operating path. Use the
+[Mini self-hosted CI/CD SSH access policy](mini-self-hosted-cicd.md#ssh-access-policy)
+and get explicit operator approval before opening a Mini shell for production
+work.
+
 ## Acceptance evidence
 
 Authoritative successful acceptance:
