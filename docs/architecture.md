@@ -1,6 +1,9 @@
 # Architecture
 
-This document describes the target Project Paper architecture and the current arXiv-to-SQLite MVP. Some target components, such as provider adapters beyond arXiv and scheduled systemd operation, are still planned.
+This document describes the target Project Paper architecture and the current
+SQLite-backed implementation. The production Mini was migrated to a
+containerized app and Ollama runtime on 2026-09-24; host cron remains the
+scheduling authority.
 
 ## Runtime Host
 
@@ -12,7 +15,11 @@ The complete runtime environment is planned to run on:
 - Ubuntu
 - Original system had a 1 TB spinning HDD
 
-The native deployment examples use `$HOME/workspace/paper-agent`. Set `PAPER_AGENT_REPO` when the checkout lives elsewhere. The packaged installer records its own installation directory and does not depend on this native path.
+The production Mini keeps its operator checkout at
+`$HOME/workspace/paper-agent`. The web/Python process and Ollama now run in
+separate containers with persistent mounted state. The app is published only on
+`127.0.0.1:8000`; the former native web and Ollama services are inactive. This
+operator deployment is distinct from the public first-user package.
 
 The Mac mini hosts:
 
@@ -31,10 +38,13 @@ The Mac mini hosts:
 ## High-Level Architecture
 
 ```text
-systemd timer
+host crontab
       |
       v
-Python workflow
+container job launcher
+      |
+      v
+app container / Python workflow
       |
       v
 Scout source adapters
@@ -67,7 +77,11 @@ SQLite history and guidance
 
 ## Component Responsibilities
 
-The scheduler starts runs and captures basic process status. The first scheduler should be a systemd service and timer on Ubuntu.
+The production scheduler is the host crontab. Each managed entry calls
+`scripts/mini_container_job.sh`, which executes the existing workflow wrapper
+inside the app container while participating in the runtime lifecycle lock. The
+container runtime owns the long-lived web and Ollama processes; systemd is no
+longer the active Project Paper web/model supervisor on the Mini.
 
 The Python workflow owns orchestration between deterministic steps and model-backed judgment steps. It should remain explicit and debuggable before any larger agent framework is considered. A future Go port is plausible, but should wait until workflow and schema boundaries stabilize; preserve SQLite compatibility first, then phase the port through web UI/server, operational CLI/runbooks, scheduled orchestration, and source adapters/agent logic where useful.
 

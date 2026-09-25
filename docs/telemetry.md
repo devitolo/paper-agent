@@ -1,10 +1,17 @@
 # Optional local Phoenix tracing — first experiment
 
-Tracing is disabled unless `PAPER_AGENT_TELEMETRY=1`. The native application
-does not require Docker or OpenTelemetry. Optional dependencies are pinned in
+Tracing is disabled unless `PAPER_AGENT_TELEMETRY=1`. The tracing library itself
+does not require Docker. Optional dependencies are pinned in
 `requirements-telemetry.txt`; install them into the Python environment that
 actually runs the pipeline only after approving enablement. Missing dependencies
 or malformed configuration disable tracing without preventing pipeline work.
+
+The production Mini now runs scheduled pipelines inside the app container and
+passed a Phoenix telemetry smoke during the 2026-09-24 cutover acceptance. This
+establishes connectivity for that deployed configuration, not a general uptime,
+retention, or completeness guarantee. See
+[Mini production operations](mini-production-operations.md) for the authoritative
+acceptance evidence.
 
 The implementation uses the OpenTelemetry Python API/SDK and its standard OTLP
 protobuf encoder, with a centralized OpenInference attribute mapping. No global

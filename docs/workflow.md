@@ -225,64 +225,52 @@ If older recommended papers have PDFs or usable source abstracts but no triage s
 python3 -m paper_agents.cli review-backfill --quick
 ```
 
-## Nightly Cron
+## Mini Production Schedule
 
-The current intended Mac mini pipeline crontab runs OpenAlex at 4:00 AM, arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, the dry-run Gemini profile comparison at 2:00 AM every Monday, and SQLite backup at 1:00 AM Sunday. The Semantic Scholar and profile comparison jobs source `$HOME/.bashrc` so API/provider environment is available to cron. Runtime wrappers take distinct non-blocking `flock` locks under `/tmp` (override with `PAPER_AGENT_LOCK_DIR`) and log a successful skip when another run is already active.
+Since the 2026-09-24 production cutover, the Mini keeps host cron as its
+scheduler while executing work inside the app container. OpenAlex runs at 4:00
+AM, arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, the dry-run Gemini profile
+comparison at 2:00 AM every Monday, and SQLite backup at 1:00 AM Sunday. Every
+entry calls `scripts/mini_container_job.sh`, whose job watcher participates in
+the shared container runtime lifecycle lock for the full job and cleanup.
 
-Cron jobs never self-update. Deploy deliberately with `git pull --ff-only`, then run `scripts/install_project_paper_cron.sh --apply` when the managed template changes.
+Inspect the live schedule with:
 
-Install or refresh the repo-owned Mac mini crontab after `git pull`:
-
-```bash
-scripts/install_project_paper_cron.sh --dry-run
-scripts/install_project_paper_cron.sh --apply
+```sh
+crontab -l
 ```
 
-The installer preserves unrelated cron entries, removes older Project Paper cron lines, and installs the managed block from `deploy/project-paper.crontab`.
+During the post-cutover soak, this live crontab is authoritative. The committed
+`deploy/project-paper.crontab` still contains the former direct `.venv` entries;
+do **not** run `scripts/install_project_paper_cron.sh --apply` until the migration
+launcher and template are integrated into the canonical repository.
 
-```cron
-# Daily OpenAlex Scout/Curator/Reviewer pipeline with rotating configured topics.
-0 4 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
-# Daily arXiv Scout/Curator/Reviewer pipeline.
-0 5 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
-# Biweekly Monday Gemini full feedback-profile rebuild comparison; dry-run only, never applies.
-0 2 * * 1 . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/biweekly_profile_rebuild_compare.sh >> logs/profile-rebuild-compare.log 2>&1
-# Daily Semantic Scholar Scout/Curator/Reviewer pipeline; sources API key from bashrc.
-0 6 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
-# Weekly SQLite backup with integrity check.
-0 1 * * 0 cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
-```
+The old direct `.venv` and one-off OpenAlex entries are no longer the production
+path. The launcher selects the existing wrapper inside the app container; it
+does not move scheduling authority into the container.
 
-The old one-off Sunday OpenAlex cron that called `pipeline-daily --source openalex` directly has been removed. Do not document or reinstall it; `scripts/openalex_pipeline.sh` is the supported OpenAlex cron entry.
+The source jobs continue to rotate across enabled topics in
+`config/topics.yaml`. Use only the deployed container launcher for operator
+runs during the soak; the native one-off commands below in historical documents
+are not the active production path.
 
-The source jobs rotate across enabled topics in `config/topics.yaml`. Override one OpenAlex run with:
-
-```bash
-PAPER_AGENT_OPENALEX_TOPIC="AIOps root cause analysis cloud incidents" scripts/openalex_pipeline.sh
-```
-
-Use `deploy/systemd/project-paper-web.service` to supervise the long-running web UI without moving batch cron jobs. Install it with:
-
-```bash
-mkdir -p ~/.config/systemd/user ~/.config/project-paper
-cp deploy/systemd/project-paper-web.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now project-paper-web.service
-loginctl enable-linger "$USER"  # optional after reboot/logout
-journalctl --user -u project-paper-web.service -f
-```
-
-The unit reads an optional `~/.config/project-paper/project-paper.env`, binds only to `127.0.0.1:8000`, logs to journald, and restarts on failure. After a deliberate `git pull --ff-only`, run `systemctl --user restart project-paper-web.service` to load code changes.
+The app and Ollama containers now own the long-lived services. Native
+`project-paper-web.service` and `ollama.service` are inactive; do not restart or
+re-enable them during the soak. See
+[Mini production operations](mini-production-operations.md) for container IDs,
+acceptance evidence, rollback retention, and cleanup timing.
 
 ## Backups And Logs
 
-Back up SQLite weekly with the online backup API and verify the backup with `PRAGMA integrity_check`:
+The Sunday host-cron entry invokes `scripts/mini_container_job.sh backup`, which
+runs the existing online SQLite backup inside the app container and verifies it
+with `PRAGMA integrity_check`. Inspect the complete deployed entry with
+`crontab -l`; do not reconstruct it from this prose during the soak.
 
-```bash
-0 1 * * 0 cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
-```
-
-Backups are written under `backups/` by default, named `paper_agent-YYYYmmdd-HHMMSS.db`, verified after creation, and intentionally ignored by git. For restore, copy a selected backup into place only after checking `PRAGMA integrity_check`; keep restore drills manual until operations mature.
+Production backups are written to the dedicated backup volume, named
+`paper_agent-YYYYmmdd-HHMMSS.db`, and verified after creation. Preserve the
+cutover and rollback assets during the soak; restoration and cleanup require a
+separately approved operator procedure.
 
 Install weekly compressed log rotation for `logs/*.log`:
 

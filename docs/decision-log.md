@@ -59,11 +59,18 @@ Revisit when:
 
 ## ADR-004: systemd timer for scheduling
 
-Status: Proposed
+Status: Superseded for the production Mini on 2026-09-24
 
 Decision:
 
 Use a systemd service and timer instead of cron for scheduled runs.
+
+Superseding decision:
+
+Keep host cron as the production scheduling authority and execute each job
+inside the containerized app through `scripts/mini_container_job.sh`. The app
+and Ollama services are container-managed; the former native systemd services
+are inactive. Revisit only if scheduling ownership is intentionally redesigned.
 
 Rationale:
 

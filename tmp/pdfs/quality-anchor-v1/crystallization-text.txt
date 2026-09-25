@@ -1,0 +1,299 @@
+PAGE 1
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+             Progressive      Crystallization:     Turning     Agent                
+                                                                                    
+                               Exploration      into                                
+                                                                                    
+       Deterministic,      Lower-Cost       Workflows      in  Production           
+                                                                                    
+                                                                                    
+                                                                                    
+                                       Arun Malik                                   
+                                  Microsoft Azure Networking                        
+                        Email: arunma@microsoft.com ORCID: 0009-0005-6650-6711      
+                                                                                    
+        Abstract—AI agents deployed for IT operations are typically ingsprintpernewautomation.Unconstrainedagentsneverget
+       permanent cost centers: every execution re-invokes full LLM cheaper.Fine-tuningyieldsasmallerprobabilisticmodelrather
+       inference, even for problems the agent has already solved many               
+                                           thanadeterministicworkflow,andrecorded-macroorrobotic-
+       times.Wepresentprogressivecrystallization,alifecyclethattreats               
+                                           process-automation approaches capture surface actions, not
+       agent exploration as a discovery mechanism rather than a per-                
+       manent execution model. We define an execution-type taxonomy the reasoning or the data flow, and are brittle to environment
+       spanning three points, from fully agent-orchestrated (stochastic, change.    
+       expensive) through hybrid to fully deterministic (zero-token, We argue that agent exploration should be a discovery
+       reproducible),andanevidence-basedpromotionmechanismthat                      
+                                           mechanism, not a permanent execution model. Behavior that
+       converts an agent’s repeatedly validated behavior into progres-              
+                                           an agent discovers and validates through repeated successful
+       sivelycheaperandmoredeterministicworkflows,withautomatic                     
+       demotion when a promoted workflow regresses. This makes an execution can be systematically converted into deterministic
+       agentic platform cheaper, faster, and safer over time without workflows that require zero LLM tokens to run, while the
+       human rewriting of agent-discovered patterns. In a production agent layer remains available for genuinely novel problems.
+       agentic system for cloud network operations handling tens of                 
+                                           We call this lifecycle progressive crystallization. This paper
+       thousandsofincidentspermonth,theshareofexecutionsserved                      
+                                           makes four contributions:                
+       by deterministic workflows rose from zero to 45 percent over                 
+       eightmonths,per-incidentagentcostfellbymorethan70percent • an execution-type taxonomy that places operational
+       while incident volume doubled, and safety properties improved workflows on a spectrum from fully agent-orchestrated
+       monotonically across promotions because determinism increases                
+                                              to fully deterministic (Section III); 
+       reproducibility and auditability. We describe the taxonomy, the              
+       promotion and demotion criteria, the trace-extraction method, • apromotionanddemotionlifecyclethatadvanceswork-
+       an economic model, and the safety argument, and we discuss flowsdownthespectrumbasedonaccumulatedevidence,
+       limitations and threats to validity.   and reverts them on regression (Section IV);
+        Index Terms—agentic AI, AIOps, workflow automation, LLM • aneconomicmodelshowingthatplatforminferencecost
+       cost optimization, process mining, deterministic execution, pro-             
+                                              decreases over time even as automation volume grows
+       gressive autonomy, safety                                                    
+                                              (Section V); and                      
+                                            • a safety-monotonicity argument that each promotion
+                   I. INTRODUCTION                                                  
+                                              preserves or improves safety, supported by production
+        Large language model (LLM) agents are increasingly de- evidence from a cloud-network agentic system (Sec-
+       ployed for IT operations tasks such as incident triage, root- tions VI–VIII).
+       cause analysis, and automated remediation [1], [2]. An agent                 
+       observes system state through tool calls, reasons about the II. RELATEDWORK  
+       problem, and executes actions in a loop. This flexibility is LLM agents that reason and act through tools were popu-
+       exactly what lets an agent handle novel incidents, but it also larizedbyReAct[3]andToolformer[4],andthedesignspace
+       makes the agent a permanent cost center. Every execution re- is surveyed in [5], [6]. Applying these agents to operations is
+       invokes full model inference, so the same recurring incident the focus of AIOps [7] and its LLM-era successors [1], [2].
+       consumes thousands of tokens each time it recurs, the inves- Priorworklargelytreatstheagentasthepermanentexecution
+       tigation path is non-deterministic and hard to reproduce, and engine. Cost-reduction efforts such as FrugalGPT [8] lower
+       total cost scales linearly with incident volume. per-call cost through model cascades and routing, but the
+        The core waste is that a successful agent investigation is system remains probabilistic and never eliminates inference
+       discarded.Whenanagentresolvesanincidentthroughanovel for solved problems. Our contribution is orthogonal and com-
+       path, that knowledge is lost; the next occurrence of the same plementary: rather than making each inference cheaper, we
+       failure re-discovers the solution from scratch, at the same remove inference entirely for work that has been proven, by
+       token cost and with a possibly different and inferior result. extracting deterministic workflows from execution traces. The
+       Existing options do not close this gap. Traditional workflow extraction step draws on process mining [9], which recovers
+       enginescannothandlenovelscenariosandrequireanengineer- process models from event logs; here the event logs are agent
+   6202                                                                             
+   luJ                                                                              
+   8                                                                                
+   ]ES.sc[                                                                          
+   1v25070.7062:viXra                                                               
+
+PAGE 2
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                      TABLEI                              TABLEII                   
+                 EXECUTION-TYPETAXONOMY.    EVIDENCE-BASEDPROMOTIONCRITERIA(DEFAULTS;CONFIGURABLE).
+          Type   Execution Determ. Token cost Transition Requirements               
+          Type   Sub-agents ∼50% High (10k–  Type 3 → 2 ≥10 successful runs; zero safety violations;
+          3: Agent- reason within 50k)               ≥90% of runs produce the same action se-
+          orchestrated bounded                       quence; all auto-generated acceptance tests
+                 scope;                              pass;nohumanoverrideintherecentwindow
+                 deterministic               Type 2 → 1 ≥50 successful hybrid runs; LLM classifica-
+                 checkpoints                         tion consistency ≥99%; the deterministic rule
+                 and  HITL                           covers all observed input variation; full re-
+                 gates                               gressionsuitepasseswithouttheLLM;human
+          Type 2: Structured ∼90% Low (1k–           review of the deterministic logic
+          Hybrid steps; specific 5k)                                                
+                 stages call                                                        
+                 the LLM for                                                        
+                 interpretation             Stage 2: capture. On verified successful resolution, the
+                 or                        successful path is extracted into a reusable Type 3 template.
+                 classification                                                     
+                                           The extraction algorithm parses the trace into an ordered list
+                 only                                                               
+                                           of tool calls, detects the branch conditions the agent acted on,
+          Type 1: Pre-coded 100% Zero                                               
+          Determin- logic,                 infers input and output schemas per step, builds a directed
+          istic  conditionals,             acyclic graph of tool dependencies, parameterizes instance-
+                 and typed API             specific values such as device identifiers and timestamps, and
+                 calls; no LLM                                                      
+                                           marks human-approval points as explicit gates.
+                 at runtime                                                         
+                                            Stage 3: promotion to hybrid. After repeated successful
+                                           runs of the template, trace analysis identifies steps where the
+                                           LLM consistently produces the same classification (replaced
+       execution traces and the recovered models are executable                     
+                                           by a deterministic rule) and steps where reasoning varies but
+       playbooks.                                                                   
+                                           the outcome is stable (replaced by a scoped, single-purpose
+                                           prompt). Acceptance tests are generated automatically from
+              III. EXECUTION-TYPETAXONOMY                                           
+                                           thesuccessfultraces,andthecandidateType2playbookmust
+        We define three execution types for operational playbooks, pass them.       
+       formingaspectrumfromfullystochastictofullydeterministic                      
+                                            Stage 4: promotion to deterministic. After further suc-
+       (Fig. 1, Table I).                                                           
+                                           cessful hybrid runs without LLM disagreement, remaining
+        AType3(agent-orchestrated)playbookletstheagentinves-                        
+                                           LLM steps whose output is drawn from a finite set, or whose
+       tigate freely within a bounded scope, combining autonomous                   
+                                           decisionboundarycanbeexpressedasarule,arereplacedwith
+       read operations with deterministic checkpoints and human-in-                 
+                                           deterministic equivalents. The final Type 1 playbook needs no
+       the-loop (HITL) approval for write operations. It is the entry               
+                                           runtime tokens and continues to be validated by the Stage 3
+       point for any novel incident. A Type 2 (hybrid) playbook                     
+                                           acceptance tests.                        
+       has a fixed step structure in which only specific stages in-                 
+                                            Promotion is gated by the criteria in Table II. Crucially,
+       voke the LLM, and only for interpretation, classification, or                
+                                           autonomyisattachedtothespecificplaybookclassandaction
+       summarization;everyactionistypedandschema-validated,so                       
+                                           type, based on its evidence, rather than to the capability
+       the LLM decides understanding, not what to do. A Type 1                      
+                                           of the underlying model. A more capable model does not
+       (deterministic) playbook is pre-coded logic that runs with                   
+                                           automatically earn more autonomy; a track record does.
+       the same guarantees as traditional workflow automation, at                   
+       zero token cost and full reproducibility. The three types are                
+                                                      V. ECONOMICMODEL              
+       not separate systems; they are lifecycle stages of the same                  
+       discovered behavior.                                                         
+                                            Each execution type has a characteristic cost (Fig. 2). A
+                                           Type 3 run consumes roughly 10,000 to 50,000 tokens and
+            IV. THECRYSTALLIZATIONLIFECYCLE                                         
+                                           completes in seconds to minutes; a Type 2 run consumes on
+        Crystallization advances a playbook from a higher (more the order of 1,000 to 5,000 tokens; a Type 1 run consumes
+       stochastic)executiontypetoaloweroneasevidenceaccumu- none and completes in milliseconds. The key property is not
+       lates.                              the cost of any single run but the shift in the mix over time.
+        Stage 1: discovery. A novel incident with no matching As recurring patterns crystallize, the platform routes each
+       playbook triggers a Type 3 execution. The agent investigates incoming request to the lowest-cost type available for that
+       using available tools; read operations run autonomously and pattern, so the fraction of Type 1 executions grows and total
+       write operations pause for approval. The complete execution inferencecostfallsevenasautomationvolumerises.Theagent
+       trace is recorded.                  layerbecomesadiscoverymechanismwhosecostisamortized
+
+PAGE 3
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+       Fig. 1. The execution-type spectrum and crystallization lifecycle. Workflows are promoted rightward, toward determinism and zero token cost, only on
+       accumulatedevidence,andaredemotedleftwardautomaticallyonfailure,drift,ortestregression.
+                                                                                    
+                                                                                    
+                                                          TABLEIII                  
+                                                 SAFETYPROPERTIESACROSSEXECUTIONTYPES.
+                                             Property   Type 3 Type 2 Type 1        
+                                             Auditability Full trace Full trace Full trace
+                                             Reproducibility ∼50% ∼90% 100%         
+                                             Blast-radius con- HITL gates Schema Deterministic
+                                             trol              validation logic     
+                                             Compliance Conditional Built-in Built-in
+                                                                                    
+                                              VII. DEMOTIONANDCONTINUOUSDISCOVERY   
+                                            Crystallization is not one-way. Each promoted playbook is
+                                           monitored, and a circuit breaker demotes it to a higher execu-
+                                           tion type on execution failure, safety violation, or acceptance-
+                                           test regression. In production, a deterministic playbook once
+       Fig.2. Costperruncollapsesacrossexecutiontypes.Latencyandper-incident        
+       dollarcostareannotatedaboveeachbar. broke after a firmware update changed a command’s output
+                                           format;thedeterministicparserfailed,thesystemdemotedthe
+                                           playbook to hybrid so the LLM could handle the new format,
+       across all future deterministic executions of what it discovers, and after a run of clean executions it was re-promoted. This
+       rather than a cost incurred on every occurrence. gives the platform the reliability of deterministic automation
+                                           for stable patterns and the adaptability of agents for change,
+               VI. SAFETYMONOTONICITY      without a human deciding when to switch. Genuinely novel
+                                           incidents always enter as Type 3, so the discovery pipeline
+        A natural concern is whether making a workflow cheaper                      
+                                           never closes.                            
+       makes it less safe. We argue the opposite: crystallization pre-              
+       serves or improves every safety property we track (Table III). VIII. PRODUCTIONEVALUATION
+       Auditability is unchanged, since all three types record full We deployed progressive crystallization in a production
+       traces. Reproducibility rises monotonically, from roughly 50 agentic platform for cloud network operations that resolves
+       percent for Type 3 to 100 percent for Type 1. Blast-radius incidents across a large managed network and handles tens
+       control moves from runtime HITL gates (Type 3) to schema of thousands of incidents per month [2]. We report three
+       validation (Type 2) to statically verifiable deterministic logic observations.
+       (Type 1), which is stronger because it can be checked before Themixshiftstowarddeterminism.Atlaunch,essentially
+       executionratherthancaughtduringit.Complianceshiftsfrom all executions were Type 3. Over eight months the share of
+       conditional(dependsonahumanbeingpresent)tobuilt-in.In deterministic (Type 1) executions rose from zero to about 45
+       short, a deterministic playbook is easier to verify, reproduce, percent,withroughly30percenthybridand25percentagent-
+       and audit than the agent run it was distilled from, so safety orchestrated (Fig. 3). The ratio of Type 1:2:3 executions is a
+       and cost improve together rather than trading off. useful platform-maturity metric.
+
+PAGE 4
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                           workflows, an agentic system can become cheaper, faster,
+                                           and safer over time without human rewriting. In production,
+                                           the mix of executions shifted from fully agent-orchestrated
+                                           toward deterministic, cost fell by more than 70 percent as
+                                           volume doubled, and safety improved monotonically because
+                                           determinism buys reproducibility and verifiability. We believe
+                                           theType1:2:3ratioisapracticalmaturitymetricforanyteam
+                                           operating agents at scale, and that the discipline of promoting
+                                           and demoting workflows on evidence is a general pattern for
+                                           making autonomy both affordable and trustworthy.
+                                                        REFERENCES                  
+                                           [1] L. Zhang, T. Jia, M. Jia, Y. Wu, A. Liu, Y. Yang, Z. Wu, X. Hu, P. S.
+                                             Yu,andY.Li,“AsurveyofAIOpsintheeraoflargelanguagemodels,”
+                                             arXivpreprintarXiv:2507.12472,2025.    
+                                           [2] A.Malik,“Autonomousincidentresolutionathyperscale:AnagenticAI
+                                             architecture for network operations,” arXiv preprint arXiv:2606.09122,
+       Fig. 3. Share of executions by type over eight months in production.         
+                                             2026.                                  
+       Deterministic workflows grow from zero to about 45 percent as patterns       
+                                           [3] S.Yao,J.Zhao,D.Yu,N.Du,I.Shafran,K.Narasimhan,andY.Cao,
+       crystallize,whileagent-orchestratedexecutionsfalltoaboutaquarter.            
+                                             “ReAct:Synergizingreasoningandactinginlanguagemodels,”inInter-
+                                             nationalConferenceonLearningRepresentations(ICLR),2023.
+                                           [4] T. Schick, J. Dwivedi-Yu, R. Dessì, R. Raileanu, M. Lomeli, L. Zettle-
+        Cost falls as volume rises. Over the same period, per- moyer, N. Cancedda, and T. Scialom, “Toolformer: Language models
+       incidentagentcostfellbymorethan70percentwhileincident can teach themselves to use tools,” in Advances in Neural Information
+                                             ProcessingSystems(NeurIPS),2023.       
+       volumeroughlydoubled.Thisisthecentraleconomicclaimof                         
+                                           [5] Z.Xietal.,“Theriseandpotentialoflargelanguagemodelbasedagents:
+       the paper realized in production: the platform got cheaper as Asurvey,”arXivpreprintarXiv:2309.07864,2023.
+       it did more, because it stopped paying for inference on work [6] M. Wooldridge, An Introduction to MultiAgent Systems, 2nd ed. John
+                                             Wiley&Sons,2009.                       
+       it had already learned.                                                      
+                                           [7] P. Notaro, J. Cardoso, and M. Gerndt, “A survey of AIOps methods
+        Autonomy and quality held. The platform resolves over for failure management,” ACM Transactions on Intelligent Systems and
+       90percentofcommonincidentcategoriesautonomously,mean Technology,2021.        
+                                           [8] L.Chen,M.Zaharia,andJ.Zou,“FrugalGPT:Howtouselargelanguage
+       time to resolution fell from hours to minutes, and the false-                
+                                             modelswhilereducingcostandimprovingperformance,”arXivpreprint
+       positive remediation rate stayed under 5 percent with no arXiv:2305.05176,2023.
+       customer-visible impact. Crystallization did not trade quality [9] W.M.P.vanderAalst,ProcessMining:DataScienceinAction,2nded.
+                                             Springer,2016.                         
+       for cost; the deterministic paths are the ones that had already              
+       proven reliable as agent runs.                                               
+         IX. DISCUSSION,LIMITATIONS,ANDTHREATSTO                                    
+                     VALIDITY                                                       
+        Results come from a single organization and operational                     
+       domain, so specific thresholds and ratios should be re-derived               
+       elsewhere; the lifecycle itself is domain-agnostic. Crystalliza-             
+       tion assumes recurring patterns, so its benefit is smaller in                
+       environmentsdominatedbygenuinelynovel,one-offincidents,                      
+       where most executions will remain Type 3. The economic                       
+       figuresareplatform-levelobservationsratherthanacontrolled                    
+       comparison,andtheeight-monthwindowreflectsonematurity                        
+       trajectory. Automatic promotion depends on the quality of                    
+       the acceptance tests generated from traces; a pattern that is                
+       under-observed can be promoted prematurely, which is why                     
+       demotion and human review of the final deterministic logic                   
+       are part of the design. Finally, extraction quality depends on               
+       the richness of execution traces; sparse or poorly structured                
+       logging limits what can be crystallized, echoing a known                     
+       dependency in process mining.                                                
+                   X. CONCLUSION                                                    
+        Agent platforms do not have to be permanent cost centers.                   
+       By treating agent exploration as discovery and progressively                 
+       crystallizing proven behavior into deterministic, zero-token                 

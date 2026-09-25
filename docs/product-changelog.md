@@ -2,6 +2,33 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-09-24
+
+### Production Mini container migration
+
+Status: Cutover completed; scheduled-job soak and deferred cleanup remain.
+
+Decision: Keep scheduling in the host crontab, but run the Project Paper app,
+Ollama, and every scheduled workflow inside the production container runtime.
+The former native web and Ollama services remain inactive and preserved for the
+rollback window.
+
+Completed state:
+
+- The app container is healthy and publishes the Review Queue only on
+  `127.0.0.1:8000`.
+- Ollama runs in its own production container.
+- Each host-cron entry calls `scripts/mini_container_job.sh`; `crontab -l` is
+  the scheduling source of truth during the soak period.
+- Final production acceptance passed UI, Qwen, Gemini, and Phoenix checks.
+- The first cutover attempt failed and restored native service. The successful
+  second attempt's main log contains noisy startup failures, so the separate
+  `production-acceptance-20260924-231143.log` is the authoritative success
+  record.
+- Native directories, rehearsal artifacts, rollback evidence, and old
+  containers/volumes are intentionally retained through the weekend soak.
+  Cleanup is deferred until scheduled jobs have been validated.
+
 ## 2026-09-10
 
 ### M1 local package and manual discovery path

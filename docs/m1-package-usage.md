@@ -1,6 +1,11 @@
 # Public Compose package
 
-This installs the public app image and local model runtime, with manual discovery from the Review Queue. Ubuntu x86-64 is the first supported packaged path. The same v0.1.3 image passed macOS Apple Silicon acceptance on 2026-09-12. The existing native Mini deployment is unchanged.
+This installs the public app image and local model runtime, with manual discovery
+from the Review Queue. Ubuntu x86-64 is the first supported packaged path. The
+same v0.1.3 image passed macOS Apple Silicon acceptance on 2026-09-12. The
+operator's production Mini uses a separate containerized deployment described
+in [Mini production operations](mini-production-operations.md); it is not this
+first-user package.
 
 The supported pairing is Linux x86-64 with Docker Engine/Linux amd64 containers. macOS Apple Silicon with Docker Desktop/Linux arm64 containers also passed acceptance. CPU inference is the baseline. Have Git and a writable clone of this repository, and start Docker with Compose v2 first; no host Python, Ollama, cron, systemd, or provider keys are needed. The installer checks provisional Docker RAM (4 GiB) and installation-filesystem free space (6 GiB) thresholds. These are configurable preflight guards; Docker's separate VM/disk-image capacity must also be sufficient.
 
@@ -79,7 +84,11 @@ The Scout log exists after a manual run starts. Inspect it before retrying becau
 
 Data, artifacts and profile live in `paper-data`; mutable topics live in `paper-config`; model weights live in `ollama-data`, all scoped to the saved project name. Stop/start and container recreation retain these volumes. **Do not remove volumes or change the project name to fix an installation.** A failed startup preserves malformed state and reports an error rather than silently replacing it. Moving the installation directory or importing native data requires a separate explicit migration.
 
-Use [packaged backup and restore](package-backup.md) for an offline archive of both authoritative volumes and restoration into empty volumes with the identical app image. Save installation configuration privately alongside it. Upgrades and rollback remain deferred. The native Mini SQLite-only backup script is separate.
+Use [packaged backup and restore](package-backup.md) for an offline archive of
+both authoritative volumes and restoration into empty volumes with the identical
+app image. Save installation configuration privately alongside it. Upgrades and
+rollback remain deferred. The operator Mini's production container backup path
+is separate from this customer-package procedure.
 
 If a process was forcibly killed and left `.paper-install.lock`, first verify no installer is running, then remove that empty lock directory and retry. A model-preparation service already running is reused rather than launching a second pull. Timeout and resource failures leave logs, app and volumes available for inspection. No automatic scouting is installed.
 

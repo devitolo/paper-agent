@@ -1,0 +1,1401 @@
+PAGE 1
+LEFT
+TELLER: Non-intrusive Cross-L
+LLM Inf
+Ruilin Xu∗ Junyi Li∗
+xurlin5@mail2.sysu.edu.cn lijy727@mail2.sysu.edu.cn
+Sun Yat-sen University Sun Yat-sen University
+Guangzhou, China Guangzhou, China
+Abstract
+Large language model (LLM) inference has evolved from an offline
+workload into a continuously operated software service, yet root-
+cause analysis remains difficult because a single request spans the
+inference engine, Python/C++ backend, host CUDA APIs, GPU ker-
+nels, and distributed communication. Existing profilers expose raw
+timelines, while log-based diagnosis often misses cross-layer exe-
+cution semantics and request-level structure. We present TELLER,
+a non-intrusive Trace- and Log-aware LLM infErence Root-cause
+analysis framework. TELLER first collects NVTX/CUPTI traces
+and service logs without modifying model binaries, then recon-
+structs per-request call-chain trees and aligns log lines with the
+corresponding execution steps. We introduce a dependency-aware
+causal-context slice that preserves parent–child structure, temporal
+order, and communication relations, and a Trace Pair Encoding
+(TPE) tokenizer that compresses such slices into compact structural
+token sequences with parent, depth, and duration attributes. On top
+of these representations, TELLER combines numeric candidate local-
+ization with a multimodal root-cause model that jointly predicts ab-
+normal steps, localizes suspicious operators, and generates natural-
+language explanations. Experiments on multi-node GPU inference
+workloads show a clear compression–accuracy trade-off: a moder-
+ate TPE vocabulary reduces per-step trace length by more than 80%
+while achieving the best overall performance on both horizontal
+(cross-node communication) and vertical (within-node execution
+stack) views, whereas more aggressive compression substantially
+degrades diagnosis quality. Further analyses under low-fault pri-
+ors, strengthened baselines, modality ablations, explanation-quality
+checks, and tracing overhead show that TELLER provides a prac-
+tical triage and evidence-localization substrate for LLM inference
+RCA.
+CCS Concepts
+• Software and its engineering → Software testing and debug-
+ging; Software maintenance tools; • Computing methodologies
+→ Neural networks; • Computer systems organization → Ar-
+chitectures.
+∗These authors contributed equally to this work.
+†Corresponding authors.
+This work is licensed under a Creative Commons Attribution-NonCommercial-
+NoDerivatives 4.0 International License.
+ASE ’26, Munich, Germany
+© 2026 Copyright held by the owner/author(s).
+ACM ISBN 979-8-4007-2882-2/2026/10
+https://doi.org/10.1145/3832783.3837440
+6202
+guA
+3
+]ES.sc[
+1v57910.8062:viXra
+RIGHT
+Layer Root-Cause Analysis for
+ference
+Pengfei Chen†✉ Zongxuan Xie†
+chenpf7@mail.sysu.edu.cn xiezx25@mail2.sysu.edu.cn
+Sun Yat-sen University Sun Yat-sen University
+Guangzhou, China Guangzhou, China
+Keywords
+LLM inference, root-cause analysis, observability, debugging, mul-
+timodal diagnosis, trace representation
+ACM Reference Format:
+Ruilin Xu, Junyi Li, Pengfei Chen, and Zongxuan Xie. 2026. TELLER:
+Non-intrusive Cross-Layer Root-Cause Analysis for LLM Inference. In Pro-
+ceedings of the 41st IEEE/ACM International Conference on Automated Soft-
+ware Engineering (ASE ’26), October 12–16, 2026, Munich, Germany. ACM,
+New York, NY, USA, 12 pages. https://doi.org/10.1145/3832783.3837440
+1 Introduction
+Large language models (LLMs) are increasingly deployed as always-
+on software services. Modern inference systems operate under
+sustained concurrency, heterogeneous accelerators, and distributed
+communication, and therefore exhibit a deep software–hardware
+stack that spans the inference engine, tensor runtime, CUDA host
+APIs, GPU kernels, and network collectives [3, 5, 9, 16, 27, 35].
+When a production incident occurs, the practical question is rarely
+whether a request is merely abnormal. Instead, engineers need
+a root cause: what failed, where it failed, when the deviation first
+became visible, and which operators or communication steps were
+involved? This is precisely the kind of automated debugging and di-
+agnosis problem that modern software engineering should address.
+However, root-cause analysis (RCA) for LLM inference remains
+difficult. First, a request is not executed as a simple sequential pro-
+gram. Continuous batching, coroutine scheduling, asynchronous
+CUDA launches, and overlapping communication create many-to-
+one mappings between requests and low-level operators. Second,
+the observability signals themselves are heterogeneous. Traces
+provide precise timing and dependency information, but they are
+low-level and voluminous, while logs carry semantic hints and error
+descriptions, but they are sparse and often detached from the exact
+operator or kernel that triggered the failure. Third, current practice
+remains tool-fragmented. Timeline profilers help experts inspect
+kernels and runtime calls, whereas log-based tools reason over tex-
+tual symptoms, yet neither alone offers a compact, request-level,
+cross-layer explanation. Finally, production serving imposes strict
+operational constraints: instrumentation should be non-intrusive,
+lightweight, and independent of model binaries. We therefore posi-
+tion TELLER as an initial triage and evidence-localization filter for
+engineers: it narrows a large trace/log space to likely faulty steps,
+operators, and explanations, while later human or domain-specific
+validation remains necessary for rare, ambiguous, or high-impact
+incidents.
+The broader systems community has long recognized the im-
+portance of low-overhead, request-centric tracing in large services,
+from Pinpoint to Dapper and later observability stacks [6, 25, 32].
+
+PAGE 2
+LEFT
+ASE ’26, October 12–16, 2026, Munich, Germany
+Yet LLM inference introduces a richer vertical stack and much
+denser asynchronous execution than classic web-service request
+processing. Similarly, existing log-based or LLM-based diagnosis
+methods demonstrate strong textual reasoning ability, but they of-
+ten ignore GPU kernels, CUDA launches, and communication pat-
+terns that are central to inference failures [1, 8, 13, 17–19, 30, 36, 39].
+These challenges motivate a new diagnosis substrate for LLM
+serving. Rather than treating traces as visualization output or treat-
+ing logs as the sole diagnosis input, we argue that RCA should be
+built on a unified trace–log representation that preserves execution
+structure, timing, and semantic context at the request level. To ad-
+dress this need, we propose TELLER, a non-intrusive Trace- and
+Log-aware LLM infErence Root-cause analysis framework.
+The key idea behind TELLER is to separate diagnosis into two
+stages. A lightweight localization stage operates on merged cross-
+layer traces and narrows the search space to suspicious operator
+families and their neighborhoods. A multimodal reasoning stage
+then explains the failure using a compact, dependency-aware rep-
+resentation of the suspicious region together with aligned logs.
+To make this feasible for downstream models, TELLER introduces
+two representation techniques. First, it extracts a causal-context
+slice: a compact subgraph around suspicious operator instances
+enriched with structural ancestry, temporal succession, and com-
+munication coupling. Second, it introduces Trace Pair Encoding
+(TPE), a structure-preserving tokenizer that compresses trace slices
+into symbolic tokens while maintaining parent indices, durations,
+and depths.
+In summary, this paper makes four main contributions.
+(1) Non-intrusive cross-layer trace–log diagnosis. We present
+an end-to-end pipeline that collects NVTX/CUPTI traces and ser-
+vice logs, reconstructs per-request call-chain trees, and aligns logs
+with the corresponding execution steps without modifying model
+binaries.
+(2) A dependency-aware causal-context representation. We
+introduce a causal-context slice that compactly summarizes suspi-
+cious regions by preserving parent–child structure, temporal or-
+der, and communication relations, thereby answering who, where,
+when, and with whom a failure is associated.
+(3) Structure-preserving trace compression and multimodal
+RCA. We propose TPE, a trace-specific structural tokenizer that
+maintains parent, duration, and depth information under BPE-style
+merges, and combine it with a structure- and time-aware Trace
+Encoder and a joint log–trace root-cause model.
+(4) Extensive experimental evaluation. We conduct experiments
+covering step-level detection, operator-level localization, explana-
+tion quality, low-fault-prior behavior, modality contribution, trac-
+ing overhead, and strengthened structured-feature baselines. The
+results show that TELLER provides strong diagnosis and localiza-
+tion quality as an RCA triage substrate, while highlighting the
+importance of moderate structure-preserving compression.
+RIGHT
+R. Xu, J. Li, P. Chen, and Z. Xie
+2 Background and Problem Definition
+2.1 LLM Inference as a Cross-Layer Software
+Stack
+A typical LLM inference deployment can be abstracted into four
+tightly coupled layers [16, 21, 27]. The inference engine layer sched-
+ules requests, manages KV cache, and forms execution steps such
+as prefill and decoding. The compute backend layer maps high-level
+tensor operations to framework- and library-level implementations.
+The host-operator layer launches CUDA runtime and driver calls,
+manages streams and events, and orchestrates memory movement.
+The device-operator layer executes GPU kernels and memory op-
+erations. In distributed settings, communication libraries such as
+NCCL introduce a horizontal dimension through collectives, syn-
+chronization, and transport behavior.
+Two systems properties dominate the diagnosis problem. Asyn-
+chrony means that host calls and device kernels are not naturally
+aligned on a single timeline. Concurrency means that the engine
+merges multiple requests into shared operators or shared com-
+munication groups. As a result, raw events cannot be interpreted
+locally, and they must be reconciled into request-level structures
+that preserve both temporal and semantic information.
+2.2 From Observability to Root-Cause Analysis
+Existing observability tools cover only part of the problem. Profil-
+ers such as Nsight Systems and PyTorch Profiler expose operator
+timelines, kernels, and API activity, but they are fundamentally low-
+level analysis tools and do not directly return request-level root
+causes [24, 28, 34]. Classical anomaly detectors such as KMeans,
+DBSCAN, Isolation Forest, and GMM provide stable numeric sig-
+nals but are weak at semantic interpretation [10, 12, 20, 29, 38].
+Recent log-based or LLM-based diagnosis systems can produce
+human-readable explanations, yet they usually reason over tex-
+tual symptoms rather than over GPU kernels, host launches, and
+communication structure [1, 17–19, 30, 39]. LLM inference RCA
+therefore demands a unified representation that connects (i) low-
+level execution evidence, (ii) structural execution context, and (iii)
+semantic diagnosis cues.
+2.3 Problem Statement
+Let 𝑞 denote a request and 𝑠 one execution step of that request.
+After cross-layer merging, TELLER reconstructs a request-level
+call-chain tree
+C𝑞 (𝑠) = (cid:0)𝑉 𝑞 (𝑠), 𝐸 𝑞 (𝑠)(cid:1),
+whose nodes cover step ranges, front-end and back-end operators,
+host API calls, device kernels, and communication events. From the
+same run, we also collect an aligned log snippet
+L𝑞 (𝑠) = {ℓ
+1
+, . . . , ℓ 𝑚},
+where each ℓ contains at least a timestamp and message content,
+and may also contain request identifiers and log levels.
+The RCA input is thus
+𝑥 𝑠 = (cid:0)C𝑞 (𝑠), L𝑞 (𝑠)(cid:1).
+The output of interest is a triplet
+𝑓 𝜃 (𝑥 𝑠) = (cid:0)𝑦ˆ𝑠 , 𝑟ˆ𝑠 , Oˆ 𝑠 (cid:1),
+
+PAGE 3
+LEFT
+TELLER: Non-intrusive Cross-Layer Root-Cause Analysis for LLM Inference
+where 𝑦ˆ𝑠 is a step-level abnormality decision or fault label, 𝑟ˆ𝑠 ∈ Σ∗
+is a natural-language root-cause explanation, and Oˆ 𝑠 ⊆ 𝑉 𝑞 (𝑠) is an
+evidence set of suspicious operators or communication events.
+We target four requirements: (R1) request-level attribution de-
+spite batching and asynchrony; (R2) compact summaries rather
+than full raw traces; (R3) non-intrusive deployment without binary
+modification; and (R4) transferability across engines, workloads,
+and fault categories.
+3 TELLER
+3.1 Overview
+Figure 1 illustrates the end-to-end workflow of TELLER. At a high
+level, TELLER consists of two stages. The first stage transforms
+raw runtime signals into aligned diagnosis-ready evidence by per-
+forming non-intrusive tracing of LLM inference and raw-events
+preprocessing, including request-level call-chain reconstruction
+and log alignment. The second stage transforms the reconstructed
+evidence into diagnosis outputs through trace understanding and
+fault diagnosis, including candidate localization, causal-context
+slicing, compact trace–log encoding, error-type prediction, and
+root-cause generation.
+Concretely, the pipeline proceeds in four steps. First, TELLER
+performs non-intrusive cross-layer collection by injecting NVTX-
+and CUPTI-based tracing into the LLM inference engine, compu-
+tation frontend, CUDA runtime, communication library, GPU dri-
+ver, and kernel execution, while simultaneously capturing system
+stdout/stderr logs. Second, the raw signals are transformed into
+request-level evidence through call-chain reconstruction and log
+alignment, producing synchronized vertical and horizontal traces
+together with aligned textual logs. Third, TELLER applies candi-
+date localization and causal-context slicing to identify suspicious
+regions and extract a compact dependency-aware subgraph for
+each request. Finally, the sliced trace structure and aligned logs are
+encoded through trace and text tokenization/embedding modules
+and fed into a multimodal decoder, which predicts the LLM infer-
+ence error type and generates the corresponding system root-cause
+explanation.
+The left-hand side of the pipeline is deterministic and systems-
+oriented: it collects heterogeneous runtime signals and reconstructs
+high-fidelity per-request trace–log evidence from raw events. The
+right-hand side is representation- and model-oriented: it localizes
+suspicious regions, compresses structural trace context into com-
+pact embeddings, and combines them with textual logs for down-
+stream reasoning. This separation is important in practice. It helps
+bound online tracing overhead, enables the same collected traces
+to support multiple diagnosis tasks, and isolates the contribution
+of learned reasoning from that of low-level instrumentation and
+preprocessing.
+3.2 Non-Intrusive Cross-Layer Trace and Log
+Collection
+TELLER adopts a non-intrusive collection design for cross-layer
+traces and logs. A target command is launched through a tracing
+wrapper that injects CUPTI and NVTX support using environment
+variables and dynamic library preload, while the measured program
+RIGHT
+ASE ’26, October 12–16, 2026, Munich, Germany
+itself remains unchanged. This wrapper enables three families of
+signals.
+Engine-level and framework-level NVTX ranges. At Python level,
+TELLER dynamically installs NVTX hooks through import-time
+wrapping. The wrapper intercepts selected framework and engine
+functions and emits matching NVTX push/pop ranges. For infer-
+ence engines such as vLLM, step-level wrapper functions addition-
+ally encode the current request identifiers into the NVTX message,
+creating a direct semantic anchor from low-level execution back to
+request-level serving context.
+Runtime, driver, and kernel events via CUPTI. Each worker pro-
+cess loads CUPTI callbacks and activity records to capture CUDA
+runtime calls, driver calls, and GPU kernels. These records expose
+start and end timestamps, process and thread identifiers, and, cru-
+cially, correlation identifiers that connect host launches to device
+kernels.
+Logs captured from the same run. In parallel, TELLER captures
+stdout/stderr or service logs and stores them together with the
+trace outputs. Because the logs come from the same execution, they
+can later be aligned by timestamp and, when available, request
+identifier.
+This design gives us a unified but non-intrusive substrate for
+diagnosis. It is sufficiently low-level to cover kernels and commu-
+nication, yet sufficiently semantic to preserve request and step
+boundaries.
+3.3 Request-Level Call-Chain Reconstruction
+and Log Alignment
+The raw event streams collected above differ in schema, granularity,
+and time origin. We therefore reconstruct request-level trace–log
+examples in four stages: normalization, range reconstruction, cross-
+layer binding, and request/log alignment.
+Event normalization. Each event is normalized to
+𝑒 = (type, name, pid, tid, id, cid, fields),
+where id is an NVTX range identifier when applicable and cid is a
+CUPTI correlation identifier. We then define
+𝜏 (𝑒) =
+ 𝑒
+𝑒
+.
+.
+f
+f
+i
+i
+e
+e
+l
+l
+d
+d
+s
+s
+[
+[
+t
+s
+i
+t
+m
+ar
+e
+t
+s
+]
+t
+,
+amp], 𝑒
+ty
+.t
+p
+y
+e
+pe
+∈
+∈
+{R
+𝑇
+U
+NV
+N
+T
+T
+X ,
+IME, DRIVER},
+𝑒.fields[gpu_start], type = KERNEL.
+
+where 𝑇 = {NVTX_PUSH, NVTX_POP}. All later comparisons
+NVTX
+are performed on 𝜏.
+Range reconstruction. Once events have been normalized onto a
+shared time base, we recover the latent hierarchical structure carried
+by NVTX ranges. For each process–thread pair (𝑝, 𝑡), events are
+sorted by 𝜏 and scanned using a stack. Each NVTX push creates an
+open range, and the matching pop closes it into
+𝑟 = (id, name, pid = 𝑝, tid = 𝑡, start, end).
+The resulting nesting relation
+𝑟 ≺ 𝑟 ⇐⇒ 𝑟 .start ≤ 𝑟 .start < 𝑟 .end ≤ 𝑟 .end
+1 2 2 1 1 2
+
+PAGE 4
+LEFT
+ASE ’26, October 12–16, 2026, Munich, Germany
+Non-Intrusive Tracing of LLM Inference
+LLM Inference Engine Computation Frontend
+(e.g., vLLM, SGLang) (e.g., PyTorch, TensorFlow)
+CUDA Runtime
+GPU Kernels
+& Communication
+& Driver Event
+(e.g., cuDNN, NCCL)
+System Stdout & Stderr
+Call-Chain Reconstruction & Log Alignment
+Vertical & Horizontal Trace System Logs
+Raw Events Preprocessing
+Figure 1: Overview of TELLER. TELLER first performs non-int
+request-level call chains with aligned logs, extracts compact sus
+diagnosis and root-cause analysis to predict error types and gen
+induces a hierarchical forest that represents containment among
+engine steps, front-end operators, back-end operators, and commu-
+nication ranges.
+Host and device binding. The reconstructed ranges provide se-
+mantic containers, but they still need to be populated with low-level
+host and device activity. Let A be the set of runtime and driver
+host
+calls, and K be the set of kernels. For each range 𝑟, we attribute
+host calls whose timestamps fall inside the range:
+host(𝑟) = {𝑎 ∈ A | 𝜏 (𝑎) ∈ [𝑟 .start, 𝑟 .end]}.
+host
+We then bind kernels to host calls using thread and correlation
+identifiers:
+Γ(𝑎) = {𝑘 ∈ K | (𝑎.tid, 𝑎.cid) = (𝑘.tid, 𝑘.cid) ∧ 𝜏 (𝑎) ≤ 𝜏 (𝑘)}.
+This creates a consistent path from request-annotated NVTX ranges
+down to runtime, driver, and kernel events.
+Per-request projection. At this point, the structure is cross-layer
+but not yet request-specific, because concurrent requests may still
+share the same step or operator context. A step-level NVTX range
+contains a request set Q(𝑠). For each 𝑞 ∈ Q(𝑠), we project the ver-
+tical and horizontal descendants of the step into a request-specific
+tree
+C𝑞 (𝑠) = (cid:0)𝑉 𝑞 (𝑠), 𝐸 𝑞 (𝑠)(cid:1),
+where vertical edges preserve parent–child ancestry and communi-
+cation nodes are attached to the nearest enclosing semantic node.
+This yields a per-request call-chain tree spanning engine, backend,
+host, device, and communication layers.
+RIGHT
+R. Xu, J. Li, P. Chen, and Z. Xie
+Fault Diagnosis & Root Cause Analysis
+LLM Inference System Error
+Error Type Root Cause
+Transformer Decoder
+Trace Embedding
+Text Embedding
+Layer
+Trace Graph Trace Tokens
+Trace Pair Encode Tokenizer & Text Tokenizer
+Candidate Localization
+& Causal-Context Slicing
+Trace Understanding
+trusive cross-layer tracing of LLM inference, then reconstructs
+spicious causal contexts, and finally conducts multimodal fault
+nerate root-cause explanations.
+Log alignment. The final step is to align textual evidence with the
+reconstructed request-level structure. Each log line is normalized
+to
+ℓ = (ts, rid, level, msg).
+For request 𝑞 and step 𝑠, TELLER aligns logs by request id when
+available, and otherwise by time overlap:
+L𝑞 (𝑠) = {ℓ | rid(ℓ) = 𝑞 ∨ ts(ℓ) ∈ 𝐼 (𝑠)},
+where 𝐼 (𝑠) is the interval of step 𝑠. Because logs may lag or precede
+the exact operator interval, a small tolerance window is applied
+around 𝐼 (𝑠) in practice.
+In summary, these steps transform heterogeneous raw events
+into per-request aligned trace–log examples that can be directly
+consumed by the downstream RCA model. Algorithm 1 summarizes
+the reconstruction procedure.
+3.4 Candidate Localization and
+Dependency-Aware Causal-Context Slicing
+Running a large reasoning model on a full per-request trace is un-
+necessarily expensive and often counterproductive because normal
+substructures dominate the sequence length. TELLER therefore ap-
+plies a lightweight localization stage first, then extracts a compact
+subgraph around the suspicious region. The first stage identifies
+where the suspicious behavior lies, while the second stage turns
+these candidates into a compact context suitable for downstream
+reasoning.
+
+PAGE 5
+LEFT
+TELLER: Non-intrusive Cross-Layer Root-Cause Analysis for LLM Inference
+Algorithm 1 Request-Level Trace–Log Alignment and Call-Chain
+Reconstruction
+1: Input: raw events E, logs L
+2: Output: per-request aligned examples {(C𝑞 (𝑠), L𝑞 (𝑠))}
+3: normalize all events and compute unified time 𝜏
+4: for each process–thread pair (𝑝, 𝑡) do
+5: sort E𝑝,𝑡 by 𝜏
+6: reconstruct NVTX ranges by stack scanning
+end for
+7:
+8: classify ranges into STEP, FRONTEND, BACKEND, and
+COMM
+9: extract host calls A host and kernels K
+10: for each range 𝑟 do
+11: attach host calls whose time falls in 𝐼 (𝑟)
+12: bind kernels to the attached host calls by (tid, cid)
+end for
+13:
+14: for each step 𝑠 do
+15: parse request set Q(𝑠)
+16: for each request 𝑞 ∈ Q(𝑠) do
+17: project descendants of 𝑠 that belong to 𝑞
+18: construct per-request tree C𝑞 (𝑠)
+19: align log lines L𝑞 (𝑠) by request id and time window
+end for
+20:
+end for
+21:
+22: return {(C𝑞 (𝑠), L𝑞 (𝑠))}
+Numeric candidate localization. We begin with a lightweight
+numeric stage whose role is to prune the search space before multi-
+modal reasoning. For each operator instance 𝑥, we build a feature
+vector
+𝜙 (𝑥) ∈ R𝑑
+from self-time, runtime/driver time and counts, kernel counts and
+totals, approximate bytes moved, stream overlap, and communi-
+cation size when applicable. After log(1 + ·) transformation and
+robust standardization, we fit a Gaussian mixture model per family
+and obtain an anomaly score
+𝑎(𝑥) = 1 − 𝜌 (𝑥),
+where 𝜌 (𝑥) is the responsibility mass assigned to central mixture
+components. Aggregating the least confident quantile within a
+family yields the family-level suspiciousness
+⌊𝑞𝑚⌋
+1 ∑︁
+𝐴 𝑠,𝑡 = 1 − ⌊𝑞𝑚⌋ 𝜌 (𝑖) ,
+𝑖=1
+from which we derive a candidate family set O˜ 𝑠. These family-level
+candidates identify where the anomaly is likely to reside, but they
+are still too coarse to serve directly as RCA input.
+From suspicious families to a causal-context slice. We therefore
+refine these coarse candidates into an instance-level, dependency-
+aware subgraph. Let I𝑠 (O˜ 𝑠) be the set of suspicious instances in
+C𝑞 (𝑠). We next build a dependency-aware slice that approximates
+likely fault-propagation paths. Let 𝐸 𝑝 denote parent–child edges in
+the call-chain tree, 𝐸 𝑡 temporal-succession edges between nearby
+events in the same step, and 𝐸 𝑐 communication-coupling edges
+between compute and communication events that participate in
+RIGHT
+ASE ’26, October 12–16, 2026, Munich, Germany
+the same synchronized region. We define the relevance of node 𝑣
+to the suspicious set as
+𝑅 𝑠 (𝑣) = 𝛼1[𝑣 ∈ I𝑠] + 𝛽1 (cid:2) ∃𝑢 ∈ I𝑠 : (cid:0)(𝑢, 𝑣) ∈ 𝐸 𝑝 ∨ (𝑣, 𝑢) ∈ 𝐸 𝑝 (cid:1)(cid:3)
++ 𝛾
+𝑢
+m
+∈
+a
+I
+x
+𝑠
+exp (cid:18) − Δ 𝑡 (
+𝜏
+𝑢
+0
+, 𝑣) (cid:19) + 𝜂1[∃𝑢 ∈ I𝑠 : (𝑢, 𝑣) ∈ 𝐸 𝑐] .
+Here Δ 𝑡 (𝑢, 𝑣) is the nonnegative temporal distance between 𝑢
+and 𝑣, and 𝛼, 𝛽,𝛾, 𝜂 control the contribution of suspiciousness, ances-
+try, temporal proximity, and communication coupling. The causal-
+context slice is the induced subgraph
+𝐺 𝑠 = (𝑉 𝑠 , 𝐸 𝑠), 𝑉 𝑠 = {𝑣 ∈ 𝑉 𝑞 (𝑠) | 𝑅 𝑠 (𝑣) ≥ 𝜅} ∪ Ancℎ (I𝑠),
+where Ancℎ adds up to ℎ ancestor hops for interpretability. Intu-
+itively, 𝐺 𝑠 keeps the suspicious node, its structural explanation path,
+its nearby temporal symptoms, and its communication partners.
+The resulting slice is then used as the compact structural context
+for the subsequent trace encoding and multimodal RCA stages.
+3.5 Trace Pair Encoding (TPE)
+The causal-context slice 𝐺 𝑠 obtained above is already much more
+compact than the full per-request trace, but it is still a structured
+and irregular object. Feeding it directly to a language model as plain
+text would discard key structural information, whereas feeding the
+raw node sequence would still yield prohibitively long inputs. We
+therefore introduce TPE, a structure-preserving tokenizer tailored
+to inference traces. Its role is to convert the dependency-aware
+slice into a compact symbolic sequence that remains faithful to
+the original call structure and timing signals, while being directly
+consumable by downstream models.
+Motivation. Subword tokenizers such as BPE and SentencePiece
+are effective because they compress frequent local patterns into
+reusable tokens [15, 31]. Our setting is similar in spirit but differ-
+ent in units: the atomic symbols are not characters or subwords,
+but typed execution events such as [STEP], [FE], [BE], [RT], [K],
+and their event names. This observation suggests a trace-specific
+tokenization strategy: instead of learning reusable text fragments,
+we learn reusable execution fragments. To do so, we first need a
+linearized but structure-aware serialization of each trace slice.
+Step serialization. We serialize each step or slice by a depth-first
+traversal. Each node emits a type tag and a normalized name, e.g.,
+[STEP, name, FE, name, BE, name, RT, name, K, name, . . .].
+This serialization provides an ordered symbolic view of the trace
+while keeping semantically meaningful event boundaries. For every
+emitted node, we also preserve three structural side channels: its
+parent index 𝑝 𝑖, its duration Δ 𝑖, and its depth 𝑑 𝑖. The initial symbolic
+sequence is thus
+𝑋 = (𝑤
+1
+, . . . , 𝑤 𝑛), 𝑃 = (𝑝
+1
+, . . . , 𝑝 𝑛),
+Δ = (Δ
+1
+, . . . , Δ 𝑛), 𝐷 = (𝑑
+1
+, . . . , 𝑑 𝑛).
+These side channels are essential. They allow compression to oper-
+ate on a linear sequence without losing the tree and timing infor-
+mation that later stages rely on. With this representation in place,
+we can define a merge rule that compresses frequent local patterns
+while preserving structure.
+
+PAGE 6
+LEFT
+ASE ’26, October 12–16, 2026, Munich, Germany
+Algorithm 2 Structure-Preserving TPE Encoding
+1: Input: symbolic trace sequence (𝑋, 𝑃, Δ, 𝐷), learned merge list
+M
+2:
+Output: (𝑖𝑛𝑝𝑢𝑡_𝑖𝑑𝑠, 𝑝𝑎𝑟𝑒𝑛𝑡_𝑖𝑑𝑥, 𝑑𝑢𝑟𝑎𝑡𝑖𝑜𝑛, 𝑑𝑒𝑝𝑡ℎ)
+3: for each merge rule (𝑎, 𝑏) ∈ M do
+4: scan 𝑋 from left to right
+5: if adjacent tokens (𝑋 𝑖 , 𝑋 𝑖+1 ) = (𝑎, 𝑏) then
+6: replace (𝑋 𝑖 , 𝑋 𝑖+1 ) by new token 𝑐
+7: set 𝑃 𝑖 ← 𝑃 𝑖, Δ 𝑖 ← Δ 𝑖 + Δ 𝑖+1 , 𝐷 𝑖 ← 𝐷 𝑖
+8: delete 𝑃 𝑖+1 , Δ 𝑖+1 , 𝐷 𝑖+1
+9: redirect parent indices that pointed to 𝑖 + 1 to 𝑖
+10: decrement parent indices larger than 𝑖 + 1
+end if
+11:
+end for
+12:
+13: map the final symbolic tokens to ids using the learned vocabu-
+lary
+14:
+return (𝑖𝑛𝑝𝑢𝑡_𝑖𝑑𝑠, 𝑝𝑎𝑟𝑒𝑛𝑡_𝑖𝑑𝑥, 𝑑𝑢𝑟𝑎𝑡𝑖𝑜𝑛, 𝑑𝑒𝑝𝑡ℎ)
+Structure-preserving merge rule. Given a high-frequency adjacent
+pair (𝑤 𝑖 , 𝑤 𝑖+1 ), TPE replaces it by a new token 𝑤 𝑖 ′ and updates the
+side channels as
+𝑝 𝑖 ′ = 𝑝 𝑖 , Δ 𝑖 ′ = Δ 𝑖 + Δ 𝑖+1 , 𝑑 𝑖 ′ = 𝑑 𝑖 .
+All parent indices larger than 𝑖 + 1 are shifted left by one, and all
+references to 𝑖 + 1 are redirected to 𝑖. In this way, the merged token
+inherits the structural position of the left token while accumulating
+the temporal budget of the merged fragment. This rule guarantees
+that compression does not invalidate the call relation or the time
+budget represented by the original sequence. More importantly,
+it ensures that repeated execution motifs can be compressed into
+reusable symbols without collapsing the structural cues needed for
+later localization and reasoning.
+Training and output. Starting from an initial vocabulary con-
+taining special tags and observed symbolic tokens, TPE repeatedly
+merges the most frequent adjacent pair until a target vocabulary
+size is reached. The output of training consists of vocab.json,
+merges.json, and tokenizer metadata. At application time, the
+tokenizer maps each slice to
+(𝑖𝑛𝑝𝑢𝑡_𝑖𝑑𝑠, 𝑝𝑎𝑟𝑒𝑛𝑡_𝑖𝑑𝑥, 𝑑𝑢𝑟𝑎𝑡𝑖𝑜𝑛, 𝑑𝑒𝑝𝑡ℎ).
+This representation is both compact and structure-aware, for it
+reduces input length while preserving the parent/child, depth, and
+timing signals required by the downstream trace encoder and mul-
+timodal RCA model.
+Taken together, serialization, structure-preserving merging, and
+vocabulary learning form a trace-specific encoding pipeline that
+turns irregular execution slices into model-ready symbolic inputs.
+Algorithm 2 summarizes the structure-preserving merge procedure.
+3.6 Structure- and Time-Aware Trace Encoder
+The TPE output is next converted into a sequence of step embed-
+dings. For one token 𝑖, the initial representation is
+ℎ
+𝑖
+(0) = 𝐸
+tok
+(𝑤 𝑖) + 𝐸
+depth
+(𝑑 𝑖) + MLPΔ (cid:0) log(1 + 𝜆Δ 𝑖)(cid:1),
+where 𝐸 is a token embedding table, 𝐸 is a learned depth
+tok depth
+embedding, and MLPΔ encodes time duration on a log scale.
+RIGHT
+R. Xu, J. Li, P. Chen, and Z. Xie
+The parent indices define a graph over the emitted tokens. If
+structure is available, TELLER applies 𝐿 graph-convolution layers
+𝐻 (ℓ+1) = 𝜎 (𝐴ˆ𝐻 (ℓ)𝑊 (ℓ) ),
+where 𝐴ˆ is the normalized adjacency matrix induced by the parent
+relation plus self-loops. This design follows the general intuition of
+GCN-style propagation while operating on trace trees rather than
+on semantic graphs [14]. In implementation, we use a lightweight
+graph encoder that pools token-level graph states into step-level
+vectors and projects them to the hidden size of the language-model
+backbone [11].
+After graph propagation, token embeddings belonging to the
+same step are pooled:
+𝑧 𝑗 = Pool (cid:0){ℎ 𝑖 (𝐿) | 𝑖 ∈ step 𝑗 }(cid:1).
+A final projection maps 𝑧 𝑗 to the hidden size of the downstream
+backbone. The result is a compact step-vector sequence that pre-
+serves topology, duration, and depth information without requiring
+the downstream model to parse raw trace trees.
+3.7 Multimodal Root-Cause Model
+The multimodal RCA stage fuses trace and log evidence for joint
+diagnosis and explanation generation. It supports two complemen-
+tary variants: (i) a dual-head log–trace model (MoT) with modality-
+specific streams and prediction heads; and (ii) a single-stream model
+that serializes both modalities for autoregressive diagnosis.1
+Dual-head log–trace model (MoT). The first variant follows a
+mixture-of-traces/logs design. A causal language-model backbone
+encodes the log stream, while the trace stream is produced by the
+Trace Encoder above. At layer ℓ, the two streams are concatenated
+and passed through a shared causal self-attention module:
+𝐻˜ (ℓ) = Attn (cid:0)[𝐻 (ℓ) ; 𝐻 (ℓ) ], 𝑀 (cid:1).
+log tr causal
+The output is then split back into log and trace states and refined
+by two separate feed-forward branches:
+𝐻 (ℓ+1) = FFN (cid:0)𝐻˜ (ℓ) (cid:1), 𝐻 (ℓ+1) = FFN (cid:0)𝐻˜ (ℓ) (cid:1).
+log log log tr tr tr
+This structure lets the model associate log cues with structural trace
+patterns while preserving modality-specific transformations. At
+the top, the trace stream is pooled and sent to a fault head,
+𝑝 (𝑦 𝑠 | 𝑥 𝑠) = softmax(𝑊 𝑓 𝐻¯ tr ),
+while the log stream feeds the LM head for explanation generation,
+(cid:214)
+𝑝 (𝑟 𝑠 | 𝑥 𝑠) = 𝑝 (𝑟 𝑠,𝑗 | 𝑟 𝑠,<𝑗 , 𝐻 log ).
+𝑗
+Single-stream model. The second variant converts the target into
+a single generated sequence
+𝜓 𝑠 = <fault_type>𝑦 𝑠</fault_type> ◦ 𝑟 𝑠 .
+Logs and compressed trace tokens are serialized into one backbone
+input, and the model predicts 𝜓 𝑠 autoregressively. This formulation
+is attractive for transfer and zero-shot-style settings because fault
+types need not be restricted to a closed classifier head.
+1Unless otherwise stated, all main end-to-end results in Section 5 use the dual-
+head log–trace MoT model. The single-stream formulation is kept as an alternative
+implementation.
+
+PAGE 7
+LEFT
+TELLER: Non-intrusive Cross-Layer Root-Cause Analysis for LLM Inference
+Training objectives. For the dual-head MoT model, the training
+loss is
+L mot = 𝜆 𝑓 L CE (𝑦 𝑠 , 𝑦ˆ𝑠) + 𝜆 𝑟 L NLL (𝑟 𝑠 , 𝑟ˆ𝑠),
+where the first term supervises fault classification and the sec-
+ond term supervises explanation generation. For the single-stream
+model, the objective becomes
+L ss = L NLL (𝜓 𝑠 | 𝑥 𝑠).
+At inference time, both variants are projected onto a schema
+(𝑦ˆ𝑠 , 𝑟ˆ𝑠 , Oˆ 𝑠) = Π S (cid:0)𝑓 𝜃 (𝑥 𝑠)(cid:1),
+which enforces a valid fault type, a bounded explanation length,
+and an optional evidence-operator list.
+4 Experimental Setup
+4.1 Infrastructure and Workloads
+We evaluate TELLER on a dual-node GPU cluster deployed for LLM
+inference. Each node is equipped with an Intel Xeon Gold 6326 CPU
+@ 2.90 GHz, 128 GB RAM, three NVIDIA A40 (48 GB) GPUs, and a
+ConnectX-6 NIC, yielding six GPUs in total across the cluster. The
+vLLM workloads serve Qwen3-8B in both online and offline settings.
+The online workload replays production-like traces with realistic
+batching and concurrency. The offline workload reuses the same
+model and prompts under controlled replay for repeatability.
+4.2 Dataset Construction and Processing
+We construct a request-level dataset that jointly captures vertical ex-
+ecution stacks and horizontal communication events. Each request
+trace corresponds to one end-to-end inference request. It contains
+the reconstructed execution steps for that request, the cross-layer
+trace nodes associated with those steps, and the aligned service-log
+evidence.
+The dataset contains 300 request traces from five inference
+settings: SGLang, Torch FSDP, vLLM v0, vLLM v1 offline, and
+vLLM v1 online. These settings cover both framework diversity
+and deployment-mode diversity. In total, the dataset contains 2,482
+execution steps and 5.63M cross-layer nodes. A node can be a front-
+end or back-end operator, a runtime or driver call, a GPU kernel,
+or a communication event. Table 1 reports the dataset statistics. Of
+the request traces, 57.7% are normal and 42.3% are faulty.
+Table 1: Dataset statistics. Cross-layer nodes include opera-
+tors, calls, kernels, and communication events.
+Engine Requests Faulty Steps Nodes
+SGLang 100 40 850 0.39M
+Torch FSDP 50 24 437 0.62M
+vLLM v0 50 15 379 2.00M
+vLLM v1 offline 50 29 437 0.62M
+vLLM v1 online 50 19 379 2.00M
+Overall 300 127 2,482 5.63M
+Fault injection, coverage, and labels. Faults cover five categories:
+memory/resource (20.5%), CUDA/kernel (21.3%), runtime/driver
+(20.5%), communication/network (18.1%), and scheduling/software
+RIGHT
+ASE ’26, October 12–16, 2026, Munich, Germany
+(19.7%). Software and scheduling faults perturb operator order-
+ing, request scheduling, or engine-level scheduling behavior. Mem-
+ory/resource and CUDA/kernel faults introduce bounded resource
+pressure, throttling, or slowdown. Communication faults perturb
+collective windows, while runtime/driver faults affect the corre-
+sponding call layer.
+The injection magnitude and duration are mechanism-specific.
+Depending on the fault type, we control delay, resource or con-
+tention budget, throttling level, link latency or loss, or scheduling
+perturbation. The traces retain the resulting event timestamps, so
+the RCA model observes the effects through the same trace and log
+channels that would be available during diagnosis.
+Each trace record stores is_fault and fault_type. Its aligned
+annotation stores is_anomaly, a reference explanation, and an
+optional affected step/operator locator. We pair every request trace
+with aligned logs and annotations, expand it into step records, and
+apply TPE. The resulting records retain compressed trace fields
+such as input_ids, parent_idx, duration, and depth, along with
+provenance and textual evidence.
+We randomly shuffle request traces with a fixed seed and allocate
+80%, 10%, and 10% to training, validation, and test sets. All steps
+from one request remain in the same split, so no step from a test
+request appears during training. The splits are request-disjoint.
+However, correlated traces from the same workload, run, or fault-
+injection campaign can still cross splits, so the reported numbers
+should be interpreted as in-distribution estimates. Workload-, run-,
+or injection-disjoint evaluation remains future work.
+4.3 Baselines
+We compare TELLER against a diverse set of existing methods
+widely used in anomaly detection and log-based diagnosis.
+Classical unsupervised methods. We include KMeans, DBSCAN,
+Isolation Forest, and Gaussian Mixture Models (GMM), which rep-
+resent common unsupervised baselines for clustering- and density-
+based anomaly detection [10, 12, 20, 29].
+Classical supervised methods. We include SVM, Random Forest,
+and XGBoost as representative supervised learners for structured
+anomaly classification [4, 7, 33]. Here the comparison uses their
+standard statistical feature setting. To ensure a fairer comparison,
+we also feed flattened operator/parent-name trace features and
+operator-count features to these classical baselines, and the results
+are reported in Table 4.
+Log-based and sequence/deep baselines. We compare against Ro-
+bustlog, LAnoBERT, Logs2Graphs, and MAD-GAN, which cover
+robust log parsing, pretrained language-model-based log diagno-
+sis, graph-based log reasoning, and GAN-style anomaly detection,
+respectively [17–19, 39].
+Prompt and modality baselines. We also evaluate a pure prompt-
+based diagnostic baseline that removes the numeric candidate-
+filtering stage and asks the LLM to reason directly from structured
+summaries. For modality contribution, we compare w/o trace, w/o
+log, and trace w/ log inputs on the request-level dataset using the
+same protocol. Together, these baselines evaluate whether a method
+can identify abnormal steps, localize suspicious operators, exploit
+
+PAGE 8
+LEFT
+ASE ’26, October 12–16, 2026, Munich, Germany
+Table 2: Comparison with existing baselines on horizontal
+Step
+Method Accuracy Precision F1 Precisio
+Horizontal view
+TELLER (ours) 0.930 0.945 0.916 0.821
+Robustlog 0.874 0.735 0.771 0.267
+LAnoBERT 0.882 0.822 0.783 0.259
+Logs2Graphs 0.825 0.603 0.684 0.254
+MAD-GAN 0.819 0.636 0.706 0.246
+KMeans 0.457 0.455 0.611 0.176
+DBSCAN 0.457 0.457 0.628 0.187
+IsolationForest 0.433 0.444 0.604 0.175
+GMM 0.494 0.470 0.603 0.163
+SVM 0.463 0.373 0.302 0.037
+RandomForest 0.805 0.713 0.818 0.178
+XGBoost 0.817 0.817 0.795 0.150
+Vertical view
+TELLER (ours) 0.911 0.878 0.900 0.809
+Robustlog 0.873 0.725 0.703 0.310
+LAnoBERT 0.875 0.675 0.726 0.214
+Logs2Graphs 0.922 0.852 0.791 0.233
+MAD-GAN 0.837 0.686 0.741 0.262
+KMeans 0.518 0.518 0.683 0.191
+DBSCAN 0.518 0.518 0.683 0.191
+IsolationForest 0.537 0.528 0.691 0.191
+GMM 0.549 0.545 0.644 0.149
+SVM 0.701 0.634 0.776 0.191
+RandomForest 0.854 0.942 0.844 0.145
+XGBoost 0.780 0.930 0.746 0.119
+the two modalities, and separate the contribution of representation
+from the final RCA head.
+4.4 Metrics
+We evaluate TELLER along several axes.
+Step-level diagnosis. We report Accuracy, Precision, and F1 over
+abnormal-step predictions. They measure whether the model flags
+the correct execution steps as abnormal before operator localization
+is considered.
+Operator-level localization. The unit of RCA is a step-level deci-
+sion. For each step 𝑖, let 𝑂ˆ 𝑖 be the predicted suspicious-operator set
+and 𝑂 𝑖 be the labeled set. We first compute set-level precision, recall,
+F1 𝑓 𝑖, and Jaccard 𝑗 𝑖 for this step, and then average the per-step
+scores:
+𝑁 𝑁
+1 ∑︁ 1 ∑︁
+𝐹 macro = 𝑁 𝑓 𝑖 , 𝐽 macro = 𝑁 𝑗 𝑖 .
+𝑖=1 𝑖=1
+If 𝑂ˆ 𝑖 = 𝑂 𝑖 = ∅, the system has correctly determined that no suspi-
+cious operator exists, and therefore we set 𝑓 𝑖 = 𝑗 𝑖 = 1. Precision
+and recall are undefined when no positive operator exists, so we
+conservatively set them to 0 for empty-empty steps rather than
+letting normal steps inflate precision. Macro+ repeats the same
+calculation only on operator-positive steps {𝑖 : |𝑂 𝑖 | > 0}. Thus,
+all-step Macro measures full step-level RCA behavior including
+correct empty sets, whereas Macro+ isolates localization quality
+when an operator fault is present.
+RIGHT
+R. Xu, J. Li, P. Chen, and Z. Xie
+and vertical views. Best values in each block are boldfaced.
+Operator set-Macro Operator set-Macro+
+on F1 Jaccard Precision+ F1+ Jaccard+
+1 0.806 0.783 0.915 0.898 0.873
+7 0.384 0.238 0.566 0.597 0.425
+9 0.381 0.236 0.649 0.672 0.507
+4 0.383 0.237 0.514 0.596 0.424
+6 0.382 0.236 0.460 0.579 0.407
+6 0.244 0.176 0.386 0.533 0.386
+7 0.259 0.187 0.408 0.567 0.408
+5 0.244 0.175 0.383 0.533 0.383
+3 0.223 0.163 0.355 0.488 0.355
+7 0.056 0.037 0.082 0.123 0.082
+8 0.248 0.178 0.388 0.543 0.388
+0 0.207 0.150 0.328 0.452 0.328
+9 0.792 0.768 0.897 0.878 0.852
+0 0.447 0.288 0.454 0.559 0.388
+4 0.340 0.205 0.442 0.572 0.401
+3 0.356 0.216 0.434 0.560 0.389
+2 0.392 0.244 0.425 0.558 0.387
+1 0.278 0.191 0.369 0.537 0.369
+1 0.278 0.191 0.369 0.537 0.369
+1 0.278 0.191 0.369 0.537 0.369
+9 0.219 0.149 0.288 0.422 0.288
+1 0.278 0.191 0.369 0.537 0.369
+5 0.212 0.145 0.280 0.409 0.280
+9 0.174 0.119 0.230 0.336 0.230
+Root-cause generation quality. We assess explanation quality over
+fault-type correctness, evidence locator validity, causal consistency,
+actionability, and sentence completeness. We also use BLEU-1/2/3/4
+as auxiliary lexical-overlap metrics for generated root-cause expla-
+nations [26].
+Low-prior robustness. For low-prior analysis, we report recall, F1,
+AUPRC, and AUROC after downsampling positives or negatives to
+target fault priors.
+Together, these metrics separate complementary RCA decisions:
+step-level detection, operator-level evidence localization, explana-
+tion quality, and deployment-oriented low-prior robustness.
+5 Results
+We organize the evaluation around four research questions. RQ1:
+How does TELLER compare with existing methods? RQ2: How does
+TPE vocabulary size affect compression and RCA performance?
+RQ3: Does TELLER generalize across engines and serving stacks?
+RQ4: How does TELLER behave under deployment-oriented con-
+ditions?
+5.1 RQ1: How Does TELLER Compare with
+Existing Methods?
+We first compare the fault-diagnosis capability of TELLER against
+a broad set of existing baselines. Table 2 summarizes the results on
+both horizontal and vertical views.
+
+PAGE 9
+LEFT
+TELLER: Non-intrusive Cross-Layer Root-Cause Analysis for LLM Inference
+Table 3: Main results of TELLER under different TPE vo
+Step Operator set-Macro
+View Vocab Acc. Prec. F1 Prec. F1 Jac.
+Horizontal view
+Horizontal 256 0.930 0.945 0.916 0.821 0.806 0.783
+Horizontal 512 0.800 0.667 0.727 0.190 0.173 0.154
+Horizontal 1024 0.617 0.464 0.531 0.157 0.138 0.116
+Vertical view
+Vertical 256 0.911 0.878 0.900 0.809 0.792 0.768
+Vertical 512 0.733 0.636 0.636 0.179 0.163 0.140
+Vertical 1024 0.567 0.407 0.458 0.157 0.138 0.116
+The comparison shows that the cross-layer request-level rep-
+resentation is effective before final natural-language root-cause
+generation. On the horizontal view, TELLER achieves the best step-
+level Accuracy, Precision, and F1, while also obtaining the best
+operator-level localization scores.
+To further clarify whether structured trace access alone is suffi-
+cient, Table 4 reports additional diagnostic baselines. Prompt-only
+removes numeric candidate filtering and asks the LLM to reason
+directly over structured summaries, while the structured classical
+learners receive flattened operator/parent-name trace features and
+operator-count features. These results show that direct prompt-
+only reasoning is much weaker than TELLER, and that flattened
+structured features alone do not close the gap to the full trace–log
+RCA pipeline.
+Table 4: Additional diagnostic baselines for prompt-only rea-
+soning and strengthened structured-feature classical learn-
+ers.
+Setting H Step F1 H Op F1 V Step F1 V Op F1
+TELLER 0.916 0.806 0.900 0.792
+Prompt-only 0.668 0.303 0.702 0.305
+LinearSVM w/ struct 0.347 0.463 0.559 0.425
+RF w/ struct 0.402 0.455 0.574 0.423
+XGB w/ struct 0.340 0.476 0.580 0.430
+Modality contribution. Table 5 compares w/o trace, w/o log, and
+trace w/ log inputs on the dataset using fault-type accuracy, Macro
+Recall, and Macro F1. Trace information improves fault-type Macro
+F1 over w/o trace, while combining both modalities achieves the
+best fault-type accuracy and Macro F1.
+Table 5: Modality contribution.
+Input Fault Acc. Fault Macro Rec. Fault Macro F1
+w/o trace 0.667 0.341 0.292
+w/o log 0.653 0.446 0.446
+trace w/ log 0.743 0.489 0.476
+5.2 RQ2: How Does TPE Compression Affect
+RCA Performance?
+Table 6 reports the compression statistics. The raw traces are ex-
+tremely long: before TPE, each step contains 2241.92 events on
+RIGHT
+ASE ’26, October 12–16, 2026, Munich, Germany
+ocabulary sizes. Best values in each view are boldfaced.
+Operator set-Macro+ Explanation
+Prec.+ F1+ Jac.+ BLEU-1 BLEU-2 BLEU-3 BLEU-4
+0.915 0.898 0.873 0.910 0.897 0.887 0.878
+0.306 0.279 0.248 0.775 0.730 0.707 0.693
+0.256 0.226 0.190 0.768 0.718 0.693 0.677
+0.897 0.878 0.852 0.908 0.894 0.883 0.875
+0.273 0.248 0.213 0.760 0.705 0.678 0.662
+0.256 0.226 0.190 0.768 0.718 0.693 0.677
+average. Even the least aggressive setting substantially shortens the
+trace, reducing it to 361.43 events per step on average, while more
+aggressive settings compress it further to 25.90 and 3.88 events,
+respectively. Overall, TPE is highly effective as a trace compressor,
+achieving large reductions in sequence length across all settings.
+Table 3 shows a clear trade-off between compression and diagnos-
+tic fidelity. The least aggressive compression setting consistently
+achieves the best results on both horizontal and vertical views,
+across step-level detection, operator-level localization, and expla-
+nation generation. By contrast, the more aggressively compressed
+settings substantially reduce RCA performance, even though they
+yield much shorter sequences. This indicates that TPE is not merely
+a length-reduction mechanism. Its vocabulary size also controls
+how much execution structure remains distinguishable to the down-
+stream RCA model.
+Table 6: Compression statistics of TPE. Reduction denotes
+the percentage decrease in average events per step after en-
+coding.
+Vocab size Avg. events/step after TPE Compression× Reduction
+256 361.43 6.20 83.88%
+512 25.90 86.56 98.84%
+1024 3.88 577.81 99.83%
+This trend is most pronounced for operator-level localization.
+Across both views, aggressive compression sharply lowers Macro F1
+and Macro+ F1, indicating that precise localization is highly sensi-
+tive to the preservation of fine-grained structural distinctions. Step-
+level detection is somewhat more robust, but it also degrades once
+compression becomes too strong. Explanation quality declines more
+gradually than localization performance, suggesting that coarse se-
+mantic patterns can still be preserved under compression, whereas
+accurate fault localization depends on retaining detailed execution
+structure.
+Overall, these results show that TPE should not be optimized
+for compression alone. For RCA, the best setting is the one that
+balances sequence reduction with structural fidelity, rather than
+the one that minimizes token length most aggressively.
+5.3 RQ3: Does TELLER Generalize Across
+Engines and Serving Stacks?
+A practical RCA framework should not be tied to a single inference
+engine, model implementation, or batching strategy.
+
+PAGE 10
+LEFT
+ASE ’26, October 12–16, 2026, Munich, Germany
+On the collection side, TELLER relies only on NVTX ranges to-
+gether with CUPTI activity and callback records over the CUDA
+runtime/driver stack. It does not depend on engine-specific logging
+or model internals. On the representation side, the call-chain re-
+construction and request-level alignment procedure operates on
+generic event tuples without assuming a specific batching policy,
+attention implementation, or model architecture.
+To validate this claim, we additionally evaluate TELLER on
+several serving stacks beyond the main configuration, including
+SGLang, Torch FSDP-based serving, vLLM v0, and vLLM v1. Ta-
+ble 7 shows that TELLER maintains stable step-level and operator-
+positive localization quality across all tested stacks, supporting the
+claim that TELLER is not tied to a particular LLM, engine imple-
+mentation, or batching strategy.
+Table 7: Generalization across serving stacks.
+Stack H Step F1 H Op F1+ V Step F1 V Op F1+
+SGLang 0.908 0.869 0.904 0.873
+Torch FSDP 0.907 0.873 0.912 0.881
+vLLM v0 0.901 0.879 0.907 0.867
+vLLM v1 0.912 0.871 0.909 0.880
+5.4 RQ4: How Does TELLER Behave Under
+Deployment-Oriented Conditions?
+Low-fault-prior behavior. The main step-level dataset is balanced
+for controlled evaluation, while production incidents are typically
+rare. We therefore simulate lower fault priors by downsampling
+positives or negatives to target priors and repeating each setting
+50 times. Table 8 shows that TELLER remains effective at moderate
+low-fault priors: at a 10% prior, horizontal and vertical F1 remain
+0.807 and 0.883, respectively. At a 5% prior, AUROC remains stable
+while AUPRC reflects the expected sensitivity to rarer positives.
+Table 8: Low-fault-prior evaluation.
+View Prior Rec. F1 AUPRC AUROC
+H 50% 0.886 0.922 0.979 0.965
+H 20% 0.884 0.873 0.958 0.964
+H 10% 0.890 0.807 0.947 0.967
+H 5% 0.883 0.694 0.932 0.966
+V 50% 0.787 0.881 0.942 0.946
+V 20% 0.791 0.883 0.833 0.947
+V 10% 0.792 0.883 0.711 0.945
+V 5% 0.781 0.875 0.564 0.950
+Explanation quality. BLEU captures lexical similarity to a ref-
+erence, but not whether an explanation identifies the right fault
+evidence. We therefore check the reference explanations from sev-
+eral quality aspects, including anomaly correctness, fault-type cor-
+rectness, evidence locator validity, causal consistency, actionability,
+and sentence completeness. For each criterion, the score denotes
+the fraction of checked references satisfying the corresponding
+condition, and the overall score averages these criteria. Table 9
+shows high consistency between labels and reference explanations.
+RIGHT
+R. Xu, J. Li, P. Chen, and Z. Xie
+Table 9: Reference explanation quality.
+Criterion Score
+Overall 0.968
+Anomaly correctness 1.000
+Fault-type correctness 1.000
+Evidence locator validity 0.963
+Causal consistency 0.900
+Actionability 0.963
+Sentence completeness 0.930
+Tracing overhead. We use the term non-intrusive to mean that
+TELLER does not modify model binaries, serving-engine source
+code, CUDA libraries, or the application logic that handles requests.
+Instead, it collects observability signals through NVTX ranges,
+CUPTI activity records, and external trace–log alignment. This de-
+sign reduces deployment friction and keeps the serving stack intact,
+but it does not imply zero overhead. Enabling tracing still introduces
+additional event collection, buffering, and post-processing work.
+Table 10 reports this runtime cost. The measurements indicate that
+the overhead is measurable but bounded in our setting.
+Table 10: Tracing overhead.
+Measure Value
+Wall time 64.77s to 71.15s (+9.8%)
+CPU utilization 217% to 236% (+8.8%)
+Max resident memory +3.25%
+Minor page faults +3.55%
+Swap count 0
+6 Case Study: Cross-Layer Scheduling Error
+Causing SSM State Contamination
+We use a real vLLM failure reported by AI21 Labs [2] to illustrate
+why request-level cross-layer evidence is needed. Under GPU mem-
+ory pressure, the scheduler may allocate only one token to a newly
+arrived Mamba request. Although the request is new, the atten-
+tion backend can treat the one scheduled token as a decode signal
+and route the request to the decode path. The device layer then
+launches selective_state_update instead of the prefill kernel
+selective_scan_fwd_kernel, causing the request to read a stale
+SSM state from cache.
+Single-layer tools expose only fragments of this failure: profilers
+show kernels without request semantics, while logs show sched-
+uling metadata without device-level confirmation. TELLER aligns
+these signals without modifying source code. For the faulty request,
+the reconstructed call chain simultaneously shows engine metadata
+for a new request, backend routing to decode, and device execution
+of the decode kernel, while a normal prefill request in the same
+batch executes the prefill kernel instead. This cross-layer contradic-
+tion directly identifies the root cause and demonstrates the value
+of request-granular trace–log reconstruction.
+
+PAGE 11
+LEFT
+TELLER: Non-intrusive Cross-Layer Root-Cause Analysis for LLM Inference
+7 Discussion and Threats to Validity
+Injected versus real faults. Our dataset relies on controlled fault
+injection derived from recurring patterns observed in large-scale
+production clusters, providing coverage, repeatability, and precise
+trace–log alignment. The released archive retains the resulting
+trace timestamps, fault categories, and annotations; the mechanism-
+specific injection settings are summarized in Section 4. Although
+real incidents may be longer, noisier, and more entangled, these
+scenarios cover representative software, CUDA/runtime, resource,
+and communication failures relevant to RCA evaluation. The bal-
+anced step-level dataset is therefore a controlled diagnostic bench-
+mark rather than a production incident prior. Low-prior resampling
+shows the expected F1/AUPRC sensitivity; threshold and alert vali-
+dation at operational scale remains future work.
+Compression sensitivity. The vocabulary-sensitivity study shows
+a clear trend, although the exact optimum may vary across en-
+gines, workloads, and backbones. Our current conclusion is that
+TPE is useful, but preserving structure matters more than pushing
+compression to the limit.
+Generalization scope. End-to-end evaluation centers on a dual-
+node A40 cluster with a Qwen-based serving stack; additional tests
+cover SGLang, Torch FSDP-based serving, and different vLLM ver-
+sions. They support engine-agnostic behavior within the tested
+settings, but not behavior under larger clusters, newer GPUs, or
+long-running multi-tenant workloads; those remain future work.
+Split and explanation limitations. The example-level split is index-
+disjoint, but samples from the same workload, run, or injection can
+cross splits and share context, making in-distribution estimates
+optimistic. The explanation-quality audit checks reference expla-
+nations against labels and trace evidence; it is not independent,
+blinded expert validation of all TELLER-generated explanations.
+Run- or workload-disjoint evaluation and expert validation remain
+future work.
+8 Related Work
+Profiling and request tracing. System profilers and observability
+frameworks expose timelines, counters, and selected framework
+events for ML workloads, while Pinpoint and Dapper established
+request-centric tracing as a practical substrate for problem deter-
+mination [6, 24, 25, 28, 32, 34]. These systems are valuable for
+observability, but they usually stop at either system-level event
+capture or service-level span propagation. LLM inference failures
+often cross this boundary: an abnormal request may originate in
+scheduler state, propagate through Python/C++ runtime calls, and
+only become visible as CUDA kernels or communication stalls.
+TELLER builds on NVTX/CUPTI and this request-level philosophy,
+but targets a deeper LLM inference stack that includes scheduler
+state, CUDA runtime/driver activity, GPU kernels, and distributed
+communication [22, 23].
+Diagnosis and RCA. Classical detectors, log-oriented methods,
+and LLM-based diagnosis systems provide useful baselines for
+anomaly detection, log reasoning, and SRE support [1, 8, 10, 12,
+13, 17–20, 29, 30, 36, 39]. Unsupervised and classical supervised
+RIGHT
+ASE ’26, October 12–16, 2026, Munich, Germany
+methods are lightweight, but they operate on flattened feature vec-
+tors and provide limited causal context. Log-sequence and graph-
+based methods improve symptom modeling, yet they still lack direct
+access to runtime, driver, kernel, and communication evidence. Re-
+cent LLM-based assistants can summarize incidents or propose
+remediation steps, but they depend on the quality of the evidence
+supplied to them. TELLER is complementary to these directions:
+it combines logs with compact cross-layer execution structure so
+that diagnosis, evidence localization, and explanation are grounded
+in request-level traces.
+Trace representation learning. TPE and the Trace Encoder relate
+to subword compression and graph representation learning [11,
+14, 15, 31]. Subword methods reduce sequence length by merging
+frequent token patterns, while graph neural networks encode re-
+lational structure over nodes and edges. Inference traces combine
+both properties: they are long symbolic sequences, but they are also
+hierarchical execution structures with timing, operator semantics,
+and parent–child dependencies. TELLER therefore uses structure-
+preserving merges and graph-aware encoding instead of flattening
+traces into ordinary natural language or treating them as untyped
+graphs.
+9 Conclusion
+We presented TELLER, a non-intrusive framework for cross-layer
+root-cause analysis in LLM inference. TELLER collects traces and
+logs without modifying model binaries, reconstructs request-level
+call-chain trees, extracts compact dependency-aware trace slices,
+compresses them with TPE, and performs multimodal diagnosis
+through joint trace–log modeling. Experiments show that TELLER
+achieves strong step-level diagnosis and operator-level localization
+compared with a broad range of existing baselines, while other
+extensive experiments characterize its role as an RCA triage sub-
+strate. Our results further show that compression is not monotonic
+in benefit: the best RCA quality comes from moderate TPE com-
+pression that preserves diagnostically useful structure, rather than
+from pushing token reduction to the limit. More broadly, TELLER
+suggests that automated software engineering for LLM systems
+should treat traces, logs, and root-cause explanations as parts of
+a unified, request-level diagnosis pipeline rather than as disjoint
+tooling layers.
+Data Availability Statement
+The code and data for TELLER are available in the figshare arti-
+fact [37].
+Acknowledgments
+This work was supported by National Key Research and Devel-
+opment Program of China (Grant Number: 2024YFB4505904). The
+corresponding author is Pengfei Chen.
+
+PAGE 12
+LEFT
+ASE ’26, October 12–16, 2026, Munich, Germany
+References
+[1] Toufique Ahmed, Supriyo Ghosh, Chetan Bansal, Thomas Zimmermann, Xuchao
+Zhang, and Saravan Rajmohan. 2023. Recommending Root-Cause and Mitigation
+Steps for Cloud Incidents Using Large Language Models. In Proceedings of the 2023
+IEEE/ACM 45th International Conference on Software Engineering (ICSE). IEEE,
+1737–1749. doi:10.1109/ICSE48619.2023.00149
+[2] AI21 Labs. 2026. AI21Labs. https://www.ai21.com/. Accessed: Jan. 10, 2026.
+[3] Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu Cui, Kai Dang, Xiaodong Deng, Yang
+Fan, Wenbin Ge, Yu Han, Fei Huang, et al. 2023. Qwen Technical Report. arXiv
+preprint arXiv:2309.16609 (2023). https://arxiv.org/abs/2309.16609
+[4] Leo Breiman. 2001. Random Forests. Machine Learning 45 (2001), 5–32. doi:10.
+1023/A:1010933404324
+[5] Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan,
+Prafulla Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss, Gretchen Krueger, Tom Henighan,
+Rewon Child, Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens Winter,
+Chris Hesse, Mark Chen, Eric Sigler, Mateusz Litwin, Scott Gray, Benjamin
+Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Radford, Ilya
+Sutskever, and Dario Amodei. 2020. Language Models are Few-Shot Learn-
+ers. In Advances in Neural Information Processing Systems, Vol. 33. Curran
+Associates, Inc., 1877–1901. https://proceedings.neurips.cc/paper/2020/hash/
+1457c0d6bfcb4967418bfb8ac142f64a-Abstract.html
+[6] Mike Y. Chen, Emre Kiciman, Eugene Fratkin, Armando Fox, and Eric A. Brewer.
+2002. Pinpoint: Problem Determination in Large, Dynamic Internet Services.
+In Proceedings of the 2002 International Conference on Dependable Systems and
+Networks (DSN). 595–604. doi:10.1109/DSN.2002.1029005
+[7] Tianqi Chen and Carlos Guestrin. 2016. XGBoost: A Scalable Tree Boosting
+System. In Proceedings of the 22nd ACM SIGKDD International Conference on
+Knowledge Discovery and Data Mining (KDD). ACM, 785–794. doi:10.1145/2939672.
+2939785
+[8] Yinfang Chen, Huaibing Xie, Minghua Ma, Yu Kang, Xin Gao, Liu Shi, Yunjie Cao,
+Xuedong Gao, Hao Fan, Ming Wen, et al. 2024. Automatic Root Cause Analysis via
+Large Language Models for Cloud Incidents. In Proceedings of the 19th European
+Conference on Computer Systems (EuroSys). 674–688. doi:10.1145/3627703.3629553
+[9] Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. 2022.
+FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness.
+arXiv preprint arXiv:2205.14135 (2022). doi:10.52202/068431-1189
+[10] Martin Ester, Hans-Peter Kriegel, Jörg Sander, and Xiaowei Xu. 1996. A Density-
+Based Algorithm for Discovering Clusters in Large Spatial Databases with Noise.
+In Proceedings of the Second International Conference on Knowledge Discovery and
+Data Mining (KDD). 226–231. https://www.aaai.org/Papers/KDD/1996/KDD96-
+037.pdf
+[11] Matthias Fey and Jan E. Lenssen. 2019. Fast Graph Representation Learning with
+PyTorch Geometric. arXiv preprint arXiv:1903.02428 (2019). https://arxiv.org/
+abs/1903.02428
+[12] J. A. Hartigan and M. A. Wong. 1979. Algorithm AS 136: A K-Means Clustering
+Algorithm. Journal of the Royal Statistical Society. Series C (Applied Statistics) 28,
+1 (1979), 100–108. doi:10.2307/2346830
+[13] Pengxiang Jin, Shenglin Zhang, Minghua Ma, Haozhe Li, Yu Kang, Liqun Li,
+Yudong Liu, Bo Qiao, Chaoyun Zhang, Pu Zhao, et al. 2023. Assess and Summarize:
+Improve Outage Understanding with Large Language Models. In Proceedings of
+the 31st ACM Joint European Software Engineering Conference and Symposium
+on the Foundations of Software Engineering (ESEC/FSE). 1657–1668. doi:10.1145/
+3611643.3613891
+[14] Thomas N. Kipf and Max Welling. 2017. Semi-Supervised Classification with
+Graph Convolutional Networks. In Proceedings of the 5th International Conference
+on Learning Representations (ICLR). https://openreview.net/forum?id=SJU4ayYgl
+[15] Taku Kudo and John Richardson. 2018. SentencePiece: A Simple and Language
+Independent Subword Tokenizer and Detokenizer for Neural Text Processing.
+In Proceedings of the 2018 Conference on Empirical Methods in Natural Language
+Processing: System Demonstrations. Association for Computational Linguistics,
+Brussels, Belgium, 66–71. doi:10.18653/v1/D18-2012
+[16] Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng,
+Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. 2023. Efficient
+Memory Management for Large Language Model Serving with PagedAttention.
+arXiv preprint arXiv:2309.06180 (2023). doi:10.1145/3600006.3613165
+[17] Yukyung Lee, Jina Kim, and Pilsung Kang. 2023. LAnoBERT: System Log Anomaly
+Detection based on BERT Masked Language Model. Applied Soft Computing 146
+(2023), 110689. doi:10.1016/j.asoc.2023.110689
+[18] Dan Li, Dacheng Chen, Lei Shi, Baihong Jin, Jonathan Goh, and See-Kiong Ng.
+2019. MAD-GAN: Multivariate Anomaly Detection for Time Series Data with
+Generative Adversarial Networks. In International Conference on Artificial Neural
+Networks (ICANN). Springer, 703–716. doi:10.1007/978-3-030-30490-4_56
+[19] Zhong Li, Jiayang Shi, and Matthijs van Leeuwen. 2024. Graph Neural Net-
+works Based Log Anomaly Detection and Explanation. In Companion Proceedings
+of the 46th IEEE/ACM International Conference on Software Engineering (ICSE-
+Companion). ACM, 306–307. doi:10.1145/3639478.3643084
+RIGHT
+R. Xu, J. Li, P. Chen, and Z. Xie
+[20] Fei Tony Liu, Kai Ming Ting, and Zhi-Hua Zhou. 2008. Isolation Forest. In
+Proceedings of the 8th IEEE International Conference on Data Mining (ICDM). IEEE,
+413–422. doi:10.1109/ICDM.2008.17
+[21] NVIDIA. 2024. NVIDIA CUDA Toolkit Documentation. https://docs.nvidia.com/
+cuda/. Accessed: 2025-09-17.
+[22] NVIDIA. 2024. NVIDIA CUPTI Documentation. https://docs.nvidia.com/cupti/
+index.html. Accessed: 2025-09-17.
+[23] NVIDIA. 2024. NVIDIA NVTX Documentation and Source. https://github.com/
+NVIDIA/NVTX. Accessed: 2025-09-17.
+[24] NVIDIA. 2025. NVIDIA Nsight Systems. https://developer.nvidia.com/nsight-
+systems. Accessed: Jan. 10, 2025.
+[25] OpenTelemetry. 2024. OpenTelemetry: High-Quality, Ubiquitous, and Portable
+Telemetry to Enable Effective Observability. https://opentelemetry.io/. Accessed:
+Mar. 1, 2024.
+[26] Kishore Papineni, Salim Roukos, Todd Ward, and Wei-Jing Zhu. 2002. BLEU: a
+Method for Automatic Evaluation of Machine Translation. In Proceedings of the
+40th Annual Meeting of the Association for Computational Linguistics. Association
+for Computational Linguistics, Philadelphia, Pennsylvania, USA, 311–318. doi:10.
+3115/1073083.1073135
+[27] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory
+Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Des-
+maison, Andreas Köpf, Edward Yang, Zachary DeVito, Martin Raison, Alykhan
+Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu Fang, Junjie Bai, and Soumith
+Chintala. 2019. PyTorch: An Imperative Style, High-Performance Deep Learning
+Library. arXiv preprint arXiv:1912.01703 (2019). https://arxiv.org/abs/1912.01703
+[28] PyTorch. 2025. PyTorch Profiler Recipe. https://pytorch.org/tutorials/recipes/
+recipes/profiler_recipe.html. Accessed: Jan. 10, 2025.
+[29] Douglas A. Reynolds. 2009. Gaussian Mixture Models. In Encyclopedia of
+Biometrics, Stan Z. Li and Anil Jain (Eds.). Springer, Boston, MA, 659–663.
+doi:10.1007/978-0-387-73003-5_196
+[30] Devjeet Roy, Xuchao Zhang, Rashi Bhave, Chetan Bansal, Pedro Las-Casas, Ro-
+drigo Fonseca, and Saravan Rajmohan. 2024. Exploring LLM-Based Agents
+for Root Cause Analysis. In Companion Proceedings of the 32nd ACM Interna-
+tional Conference on the Foundations of Software Engineering (FSE). 208–219.
+doi:10.1145/3663529.3663841
+[31] Rico Sennrich, Barry Haddow, and Alexandra Birch. 2016. Neural Machine
+Translation of Rare Words with Subword Units. In Proceedings of the 54th Annual
+Meeting of the Association for Computational Linguistics (Volume 1: Long Papers).
+Association for Computational Linguistics, Berlin, Germany, 1715–1725. doi:10.
+18653/v1/P16-1162
+[32] Benjamin H. Sigelman, Luiz André Barroso, Michael Burrows, Patrick Stephen-
+son, Manoj Plakal, Donald Beaver, Saul Jaspan, and Chandan Kumar Shanbhag.
+2010. Dapper, a Large-Scale Distributed Systems Tracing Infrastructure. In Pro-
+ceedings of the ACM/IEEE International Conference on Operating Systems Design
+and Implementation (OSDI). https://research.google/pubs/dapper-a-large-scale-
+distributed-systems-tracing-infrastructure/
+[33] Ingo Steinwart and Andreas Christmann. 2008. Support Vector Machines. Springer,
+New York, NY. doi:10.1007/978-0-387-77242-4
+[34] TensorFlow. 2020. Introducing New TensorFlow Profiler. https://blog.tensorflow.
+org/2020/04/introducing-new-tensorflow-profiler.html. Accessed: Jan. 10, 2025.
+[35] Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne
+Lachaux, Timothée Lacroix, Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal
+Azhar, Aurelien Rodriguez, Armand Joulin, Edouard Grave, and Guillaume Lam-
+ple. 2023. LLaMA: Open and Efficient Foundation Language Models. Technical
+Report. Meta AI. https://arxiv.org/abs/2302.13971
+[36] Haopei Wang, Anubhavnidhi Abhashkumar, Changyu Lin, Tianrong Zhang,
+Xiaoming Gu, Ning Ma, Chang Wu, Songlin Liu, Wei Zhou, Yongbin Dong, et al.
+2024. NetAssistant: Dialogue Based Network Diagnosis in Data Center Networks.
+In Proceedings of the 21st USENIX Symposium on Networked Systems Design and
+Implementation (NSDI). 2011–2024. https://www.usenix.org/conference/nsdi24/
+presentation/wang-haopei
+[37] Zongxuan Xie, Junyi Li, Ruilin Xu, and Pengfei Chen. 2026. The TELLER Dataset.
+Dataset and code artifact. doi:10.6084/m9.figshare.33142493.v1
+[38] Ruilin Xu, Zongxuan Xie, and Pengfei Chen. 2025. eACGM: Non-Instrumented
+Performance Tracing and Anomaly Detection Towards Machine Learning Sys-
+tems. In 2025 IEEE/ACM 33rd International Symposium on Quality of Service
+(IWQoS). IEEE, 1–6. doi:10.1109/IWQoS65803.2025.11143277
+[39] Xu Zhang, Yong Xu, Qingwei Lin, Bo Qiao, Hongyu Zhang, Yingnong Dang,
+Chunyu Xie, Xinsheng Yang, Qian Cheng, Ze Li, Junjie Chen, Xiaoting He, Ran-
+dolph Yao, Jian-Guang Lou, Murali Chintalapati, Shen Furao, and Dongmei Zhang.
+2019. Robust Log-Based Anomaly Detection on Unstable Log Data. In Proceedings
+of the 27th ACM Joint Meeting on European Software Engineering Conference and
+Symposium on the Foundations of Software Engineering (ESEC/FSE). ACM, 807–817.
+doi:10.1145/3338906.3338931
+Received 2026-03-26; accepted 2026-06-18

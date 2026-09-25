@@ -49,9 +49,13 @@ External discussion is a manual handoff. Review the copied content before sendin
 - [Release acceptance evidence](docs/m1-qa-report.md)
 - [Productization scope and remaining gates](docs/productization-plan.md)
 - [Architecture](docs/architecture.md)
+- [Mini production container operations](docs/mini-production-operations.md)
 - [Native Mini and historical prototype reference](docs/native-operations-history.md)
 
-The historical reference is for maintaining the existing Mini. Its old Compose commands and provider requirements are not customer setup instructions.
+The Mini production runbook is operator-specific and is not customer setup. The
+native reference is archived history from before the 2026-09-24 container
+cutover; its old service and provider commands are no longer the active Mini
+runtime.
 
 ## License
 

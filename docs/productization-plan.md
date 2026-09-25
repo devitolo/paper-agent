@@ -6,7 +6,14 @@ Status: M1.1 installer/Compose packaging and M1.2 manual discovery are implement
 
 Make the existing product portable enough that another technically competent user can install and use it without its creator. The first milestone is **Fresh Install Produces Papers**: clone → minimal configuration → Docker Compose → prepared local Qwen → open UI → configure topics → run bootstrap discovery → see recommendations → restart and retain data.
 
-The PM has selected Docker/Compose as the primary V1 deployment mechanism, fronted by an installer script that detects and validates the customer's supported host configuration. This supersedes this plan's earlier host-native recommendation. The existing Mini's systemd/cron deployment remains operational and untouched; it is not a second new-user installation path to productize. Scheduling, operational polish and showcase work follow the first milestone. Recommendation-quality evaluation continues independently and does not need to be “finished” before productization proceeds.
+The PM selected Docker/Compose as the primary V1 deployment mechanism, fronted
+by an installer that validates the customer's supported host configuration.
+This superseded the plan's earlier host-native recommendation. On 2026-09-24,
+the operator's production Mini also moved its app and Ollama runtime into
+containers while retaining host cron; that migration remains a separate
+operator deployment, not a second new-user path. Scheduling, operational polish
+and showcase work follow the first milestone. Recommendation-quality evaluation
+continues independently and need not finish before productization proceeds.
 
 Preserve Scout → Curator → Review Queue → external Paper Discussion → pasted feedback/score → existing learning paths. The Review Queue is sufficient unless fresh-user testing identifies a concrete problem. Gemini is optional; direct ChatGPT integration is unnecessary. Do not redesign ranking, retrieval, or topic agents to make packaging appear more complete.
 

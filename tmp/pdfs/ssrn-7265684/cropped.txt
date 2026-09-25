@@ -1,0 +1,2886 @@
+CTI Research Paper Series • SSR
+From Pilots to Platforms - Ent
+Architecture
+Oliver Koch, Dietmar G
+Abstract—Around 80 percent of companies are experimenting
+solutions reach production. This paper identifies four system
+Vacuum, and Data Quality Deficits – as structural root causes an
+governance decision. The key lies in a three-layer architecture c
+Application Layer, underpinned by federated governance and
+static blueprint into an ongoing steering instrument.
+Index Terms—Enterprise AI, Enterprise Architecture Managem
+AI, pilot purgatory, federated governance, EU AI Act, agentic A
+Publication Note
+This publication is part of the CTI Research Paper Series and is also p
+Consulting’s website. It was prepared by experienced academic auth
+practice-oriented literature and analysis. While the paper follows a
+undergone external peer review. The website may provide the full web
+audiences. For formal citation, the present SSRN version should be tre
+Author Note
+Oliver Koch is CEO of CTI Consulting and Professor of Business Infor
+and Management. In addition, he serves as Dean of the Department of IT
+& Digitalization. Dietmar Gerlach is Head of IT Management Consult
+Correspondence concerning this paper should be addressed to Oliver K
+Consulting advises companies on architectural and AI initiatives and th
+surveys are from third parties.
+I. THE AI PARADOX - WHEN
+INVESTMENTS FAIL TO SCALE
+Artificial intelligence is transforming companies faster
+than any technology before. Most fail at scaling. Around
+80 percent are experimenting with generative AI; only a
+fraction of self-developed solutions go into production.
+This paper examines the structural causes of this
+discrepancy and shows why AI scaling is primarily an
+architectural and governance decision—not purely a
+technological one. The key is to treat AI as an enterprise
+capability: with its own layers, maturity levels, and
+governance mechanisms within the enterprise
+architecture, with clear responsibilities for use cases, data,
+and change, as well as for security and compliance.
+Enterprise Architecture Management (EAM) provides the
+integrative framework that connects strategy, technology,
+organization, and compliance—provided that EAM itself
+evolves and takes on the ongoing governance of this
+landscape.
+Understanding the problem: Four systematic anti-
+patterns—Shadow AI, Pilot Purgatory, Governance
+Vacuum, and Data Quality Deficits—prevent AI scaling in
+companies. Thinking the architecture: A three-layer
+architecture consisting of a Data & Knowledge Layer, an
+AI Platform Layer, and an Application Layer forms the
+1
+
+RN Working Paper • August 2026
+terprise AI from an Enterprise
+e Perspective
+Gerlach, Guido W. Stass
+with generative AI, yet only a fraction of internally developed
+matic anti-patterns – Shadow AI, Pilot Purgatory, Governance
+nd demonstrates that AI scaling is primarily an architecture and
+comprising a Data & Knowledge Layer, AI Platform Layer, and
+d an Enterprise Architecture Management that evolves from a
+ment, AI governance, three-layer architecture, MLOps, Shadow
+AI.
+presented within the CTI Perspectives publication environment on CTI
+hors and senior practitioners and is grounded in scholarly as well as
+research-informed and academically oriented approach, it has not
+version of this paper as well as shorter derivative formats for specific
+eated as the authoritative reference.
+rmation Systems at FOM University of Applied Sciences for Economics
+T Management and as Director of the ifid – Institute for IT Management
+ting at CTI Consulting. Guido W. Stass is also CEO of CTI Consulting.
+Koch, CTI Consulting, oliver.koch@cti-consulting.de. Disclosure: CTI
+hus has a vested interest in the approaches recommended here; all cited
+convergent organizing principle for scalable AI. Shaping
+the path: A phase-oriented procedural model combines
+quick wins with sustainable platform development—
+steered by federated governance and new EA roles.
+Four anti-patterns systematically prevent AI scaling
+and are mutually reinforcing. A three-layer architecture
+provides the convergent organizing principle for scalable
+Enterprise AI. Federated governance balances
+decentralized innovation speed with central architectural
+coherence. Organizational maturity and technical
+ambition must grow in sync – stages cannot be skipped. A
+dual-track strategy connects quick wins with sustainable
+platform development from day one.
+Generative AI has reached companies faster than any
+technology wave before it. According to UBS estimates
+based on web traffic data, ChatGPT reached around 100
+million monthly active users in January 2023—about two
+months after its release. The service was thus considered
+the fastest-growing consumer application observed to
+date; TikTok had taken about nine months to reach this
+mark, while Instagram took two and a half years.[1] What
+followed has affected nearly every industry. Menlo
+Ventures estimates that US companies will invest around
+$37 billion in generative AI in 2025—a good threefold
+increase over the previous year.[2]
+1
+
+CTI Research Paper Series • SSR
+The returns are not keeping pace. According to a
+particularly widely cited survey, around 95 percent of the
+organizations studied report no measurable business value
+from their AI initiatives.[3] The figure comes from the
+MIT report The GenAI Divide and encapsulates a problem
+that concerns CIOs and IT decision-makers worldwide:
+the gap between potential and value creation is widening
+instead of closing. Cross-industry analyses by McKinsey,
+BCG, and ServiceNow paint the same picture.[4][5][6]
+The 95 percent figure requires context. The MIT report
+is a non-peer-reviewed snapshot and describes its own
+findings as preliminary. It is based on 52 structured
+interviews, 153 surveyed executives, and the analysis of
+over 300 publicly documented AI initiatives. An
+implementation is only considered successful if users or
+executives report a significant and lasting impact.[3] We
+therefore read the 95 percent as an order of magnitude, not
+as a precise metric—and it suffices for the question at
+hand.
+Enterprise AI refers to the company-wide integration
+of AI capabilities into business processes, products, and
+services. Unlike isolated AI projects, the term stands for a
+systematic, platform-based delivery of AI capabilities:
+built once, usable by various business units and
+applications.
+This failure, according to the position of this paper, has
+systematic causes that lie not only in the technology or a
+lack of will. The bottleneck often lies in the fact that AI has
+no architectural place in the corporate landscape—no
+dedicated layer, no assigned responsibility, no place in the
+target vision. This is exacerbated by unclear use case
+prioritization, weak ownership, and a lack of change
+capability, as well as by insufficient data maturity and
+unresolved security and legal requirements. As long as
+organizations treat AI as a collection of isolated tools and
+pilot projects instead of as a strategic enterprise capability,
+scaling, governance, and sustainable value creation will
+fall by the wayside.
+A. The Gap Between Investment and Value
+Creation
+In the same data, there is a large gap between
+experimentation and productive operation. Around 80
+percent of organizations have tested general AI assistants.
+However, for self-developed tools tailored to their own
+operations, the path narrows considerably: from
+evaluation to pilot to productive use, only a fraction
+remains—Chapter 4 details the stages.[3] Gartner
+predicted as early as 2024 that at least 30 percent of
+generative AI projects would be discontinued after the
+proof of concept stage.[7] The findings published since
+then suggest an even higher number.
+This rate refers specifically to individually developed
+enterprise AI solutions; for purchased specialized tools
+and partnerships, the same report documents a
+considerably higher success rate of around two-thirds.[3]
+The choice of deployment model may therefore itself be
+understood as an architectural decision.
+For governance, this means: The path to scaling leads
+less through individual development projects and more
+through a platform strategy that systematically combines
+external solutions and internal capabilities.
+2
+
+RN Working Paper • August 2026
+B. Why Technology is Not the Bottleneck
+The widespread assumption that AI projects fail due to
+technical limitations does not hold true. Model quality,
+response times, and costs per request have improved
+significantly since 2022.[8] The sticking points are usually
+found elsewhere.
+The MIT report cites a learning gap as the central cause.
+[3] Current systems execute tasks but do not learn during
+ongoing operations: They do not adapt to organization-
+specific characteristics and do not improve over time.
+Accordingly, the real challenges lie beyond the technology
+—in project planning, in the collaboration between
+business departments and IT, in data management, and in
+the model lifecycle.[9] In all these areas, organizations
+must first build capabilities, and this development requires
+architectural foundations.
+C. Four Anti-Patterns - One Common Cause
+The causes of scaling failure can be grouped into four
+patterns that occur across industries. Chapter 2 explores
+them in detail; here is a preview.
+Shadow AI describes the uncontrolled proliferation of
+unauthorized AI tools. Employees resort to their own
+solutions because central offerings are lacking or are
+provided too slowly. This implies both: a loss of control
+and an indication of what the official offering fails to
+provide.
+Pilot Purgatory is the scaling trap: Promising pilot
+projects fail to make the transition to production. Between
+a functioning prototype and a productive system lie data
+connectivity, monitoring, and security. Moreover,
+organizational anchoring is required.
+The Governance Vacuum arises because AI adoption
+outpaces the governance capabilities of organizations.
+Existing IT governance structures do not address AI-
+specific requirements.
+Data Quality Deficits affect the foundation. Where
+data management, quality, and responsibilities are not
+established, even the most well-conceived AI architecture
+will not hold up.
+The four patterns rarely occur in isolation. Their
+commonality is a void: AI has no defined place in the
+enterprise architecture. Consequently, the answer to each
+individual pattern also lies there.
+Anti-Pattern Architectural Response
+Shadow AI Central platform with self-
+service
+Pilot Purgatory Scaling architecture with
+MLOps
+Governance Vacuum EA-integrated AI
+governance
+Data Maturity Data foundation as an
+architectural layer
+Table 1: Anti-patterns and their architectural responses (Preview of
+Chapters 2-5)
+D. The Architectural Perspective - A Thesis
+The central thesis of this paper is as follows: The transition
+from AI pilots to a scalable AI platform landscape is
+2
+
+CTI Research Paper Series • SSR
+primarily an architectural and governance decision.
+Technological maturity, talented teams, and ambitious
+strategies are necessary but not sufficient conditions; the
+same applies to suitable use cases, a viable ROI logic, and
+the capacity for change. Organizations that treat AI scaling
+exclusively as a technology decision will, with a high
+probability, systematically falter.
+A series of independent findings supports this view.
+The literature on Enterprise AI Architecture describes a
+well-conceived layering as the foundation for scaling.[10]
+Across various reference architectures, the same three-
+layer architecture is consistently repeated: a Data &
+Knowledge Layer as the foundation, an AI Platform Layer
+as the operational core, and an Application Layer as the
+value creation layer.
+On the governance side, it should be added that EAM is
+the discipline with the broadest cross-functional mandate -
+this paper accordingly derives its position that AI
+governance belongs there.[11] Those who understand
+EAM as a dynamic capability, with the dimensions of
+Sensing, Seizing, and Transforming, have the framework
+for the necessary further development.[12] Moreover, the
+regulatory and normative framework—the EU AI Act as
+applicable law, ISO/IEC 42001 and the NIST AI RMF as
+voluntary standards—points in the same direction:
+Anyone wishing to provide the expected evidence requires
+an overview of the systems in use, a documented risk
+assessment, traceable data provenance, and logged system
+events. These are architectural artifacts.[13]
+This architectural perspective is intentionally not to be
+understood as monocausal. AI scaling equally depends on
+use case selection, ROI logic, and change management. In
+addition, there are ownership, operating model, and
+vendor strategy, as well as qualifications and security and
+legal capabilities. Architecture management does not
+replace these factors; however, EAM forms the integrative
+bracket within which they become visible, prioritizable,
+and governable. Research on AI Governance and
+organizational GenAI adoption confirms that successful
+implementation requires an interplay of technological,
+organizational, and environmental factors.[14][15]
+E. What this paper provides - and what it does not
+This paper is aimed at CIOs and IT decision-makers who
+manage AI initiatives and are facing the question of how to
+move from successful pilots to enterprise-wide scaling. It
+is also addressed to Enterprise Architects who must
+redefine their role for the AI era.
+The focus is exclusively on the strategic governance
+level: How does a company organize and govern its
+overall AI landscape? This paper deliberately does not
+provide an EU-AI-Act deep dive, a TOGAF tutorial, or a
+vendor comparison of AI platforms.
+The AI paradox - high investment with low scaling - is
+not purely a technology problem, but primarily an
+architecture and governance problem. The four central
+anti-patterns can therefore not be eliminated individually;
+they will recur as long as AI as an enterprise capability has
+no place in the enterprise architecture. However, this
+anchoring does not replace use case prioritization, change
+management, and ownership, nor does it replace
+qualification, security, and legal; it creates the framework
+in which these factors can take effect in a coordinated
+3
+
+RN Working Paper • August 2026
+manner. Enterprise Architecture Management can close
+this gap, but must itself change to do so: from a blueprint
+that captures a state to an instrument that continuously
+governs an AI landscape that is changing faster than any
+technology before it.
+References
+[1] Hu, K. (2023): ChatGPT sets record for fastest-growing user base -
+analyst note. Reuters, 02.02.2023. Basis: UBS estimate based on
+Similarweb web traffic data; comparative data for TikTok and
+Instagram from Sensor Tower. Online: reuters.com, Retrieved:
+06.08.2026.
+[2] Menlo Ventures (2025): 2025 - The State of Generative AI in the
+Enterprise. 09.12.2025. Methodology: Survey of N = 495
+enterprise AI decision-makers in the USA, field period November
+2025, supplemented by an ecosystem analysis for market sizing.
+Investor survey, not peer-reviewed. Online: menlovc.com,
+Retrieved: 06.08.2026.
+[3] Challapally, A. et al. (2025): The GenAI Divide - State of AI in
+Business 2025. Preliminary Findings, Project NANDA, MIT
+Media Lab. Research report, not peer-reviewed. The report was
+accessible at nanda.media.mit.edu on the retrieval date; the
+address now redirects to a project overview without a reference to
+the report. Copy with the authors. Retrieved: 26.03.2026.
+[4] McKinsey & Company (2025): The State of AI in 2025: Agents,
+Innovation, and Transformation. McKinsey Global Survey,
+November 2025. Methodology: N = 1,993 participants from 105
+countries, field period June to July 2025. Consulting survey, not
+peer-reviewed. Online:
+mckinsey.com/capabilities/quantumblack/our-insights/the-state-
+of-ai, Retrieved: 26.03.2026.
+[5] Boston Consulting Group (2024): AI Adoption in 2024: 74% of
+Companies Struggle to Achieve and Scale Value. Press release
+from 24.10.2024. Consulting survey, not peer-reviewed. Online:
+bcg.com/press/24october2024-ai-adoption-in-2024-74-of-
+companies-struggle-to-achieve-and-scale-value, Retrieved:
+26.03.2026.
+[6] ServiceNow; Oxford Economics (2025): Enterprise AI Maturity
+Index 2025. Vendor survey in collaboration with Oxford
+Economics, not peer-reviewed. Online:
+servicenow.com/standard/resource-center/white-paper/wp-
+enterprise-ai-maturity-index-2025.html, Retrieved: 26.03.2026.
+[7] Gartner, Inc. (2024): Gartner Predicts 30% of Generative AI
+Projects Will Be Abandoned After Proof of Concept By End of
+2025. Press release from 29.07.2024. Analyst survey, not peer-
+reviewed. Online: gartner.com/en/newsroom/press-releases/2024-
+07-29-gartner-predicts-30-percent-of-generative-ai-projects-will-
+be-abandoned-after-proof-of-concept-by-end-of-2025, Retrieved:
+26.03.2026.
+[8] Feuerriegel, S. et al. (2024): Generative AI. Business & Information
+Systems Engineering, 66(1), 111-126. DOI: 10.1007/s12599-023-
+00834-7.
+[9] Weber, M. et al. (2023): Organizational Capabilities for AI
+Implementation - Coping with Inscrutability and Data
+Dependency in AI. Information Systems Frontiers, 25(4), 1549-
+1569. DOI: 10.1007/s10796-022-10297-y.
+[10] Kreuzberger, D.; Kühl, N.; Hirschl, S. (2023): Machine Learning
+Operations (MLOps): Overview, Definition, and Architecture.
+IEEE Access, 11, 31866-31879. DOI:
+10.1109/access.2023.3262138.
+[11] Alghamdi, H. (2024): Assessing the Impact of Enterprise
+Architecture on Digital Transformation Success: A Global
+Perspective. Sustainability, 16(20), 8865. DOI:
+10.3390/su16208865. Systematic review with meta-analysis.
+[12] Ettinger, A. (2025): Enterprise Architecture as a Dynamic
+Capability for Scalable and Sustainable Generative AI Adoption:
+Bridging Innovation and Governance in Large Organisations
+[Preprint]. arXiv:2505.06326. DOI: 10.48550/arxiv.2505.06326.
+[13] Sunyaev, A. et al. (2025): High-Risk Artificial Intelligence.
+Business & Information Systems Engineering, 67(6), 981-994.
+DOI: 10.1007/s12599-025-00942-6.
+[14] Papagiannidis, E. et al. (2023): Toward AI governance: Identifying
+best practices and potential barriers and outcomes. Information
+Systems Frontiers, 25(1), 123-141. DOI: 10.1007/s10796-022-
+10251-y.
+[15] Hughes, L. et al. (2026): Beyond the hype: Organisational adoption
+of generative AI through the lens of the TOE framework - A
+mixed methods perspective. International Journal of Information
+Management, 86, 102982. DOI: 10.1016/j.ijinfomgt.2025.102982.
+3
+
+CTI Research Paper Series • SSR
+II. WHY AI INITIATIVES FAIL - A
+PATTERN ANALYSIS
+Four recurring anti-patterns - Shadow AI, Pilot
+Purgatory, Governance Vacuum, and Data Quality
+Deficits - explain a large part of the AI scaling problems in
+companies. Each has structural causes that go beyond
+technological limitations and demand architectural
+answers. The four reinforce each other: each pattern
+creates the conditions under which the next one grows -
+and all four are rooted in the same architectural void.
+Chapter 1 diagnosed the paradox: high AI investment
+with low scaling success. Behind this are four anti-
+patterns, which this chapter will address individually.
+They are intertwined. A lack of governance promotes
+Shadow AI, data quality deficits block the scaling of
+pilots, and the resulting uncontrolled growth undermines
+any subsequent governance.
+Shadow AI refers to the unauthorized use of AI tools
+and services by employees - without the knowledge,
+approval, or control of the IT department. This refers to
+two variants: the use of external AI services, such as
+personal ChatGPT accounts for work tasks, and the
+independent development of AI solutions outside of
+official IT governance. The term is based on the
+established concept of Shadow IT. However, the risk
+profile is different: sensitive company data migrates into
+external models, AI-supported decisions remain
+untraceable, and model behavior can neither be centrally
+controlled nor audited.
+A. Shadow AI and Tool Sprawl - When Innovation
+Overtakes Control
+The most visible aspect is the sprawl. What begins as a
+productivity gain for individual employees becomes a
+systemic risk for data protection, compliance, and
+architectural coherence within months.
+In many cases, usage bypasses the IT department. In a
+global survey of 48,340 people in 47 countries, 57 percent
+of employees admitted to hiding their AI usage; nearly half
+had entered company information into public AI tools.[1]
+These are not occasional experiments. The Torii SaaS
+Benchmark Report 2026 counts an average of 830
+applications and a median of 680 in companies, attributing
+61.3 percent of them to Shadow IT.[2] In micro-enterprises
+with 11 to 50 employees, the density is highest: there are
+269 unapproved AI tools per thousand employees.[3] The
+consequences are familiar to every IT leader: duplicate
+subscriptions, inconsistent data flows, and an AI landscape
+that no one can fully oversee anymore.
+The security implications are corresponding. The
+Netskope Cloud and Threat Report 2026 records a
+doubling of incidents compared to the previous year in
+which employees submit sensitive data to AI applications:
+an average of 223 such data policy violations per month
+per organization. 47 percent of users access these via
+personal, unmanaged accounts. This share has decreased
+significantly from 78 percent in the previous year;
+however, the number of incidents continues to rise.[4]
+One-fifth of companies report data breaches directly
+attributable to Shadow AI; these increase the cost of an
+incident by an average of $670,000.[5] Moreover, security
+4
+
+RN Working Paper • August 2026
+teams report longer identification times than for
+conventional incidents.[5]
+However, viewing Shadow AI solely as a risk is short-
+sighted. The MIT report lists it as one of the most
+important indicators of unmet business needs.[6] For the
+broader phenomenon of Shadow IT, information systems
+research has long since proven this dual nature: employees
+circumvent official channels because they are too slow,
+lack features, or approved alternatives are difficult to use.
+[7] Thus, this circumvention can be interpreted. Every
+unapproved use indicates which capability the
+organization should offer centrally in the future. What is
+new about the AI variant is solely the risk profile -
+sensitive data in third-party models, opaque decision-
+making processes, and probabilistic model behavior that is
+difficult to control centrally.[8]
+A prohibition does not appear to eliminate usage so
+much as its visibility. Prohibited activity tends to migrate
+to private devices and personal accounts, and thus beyond
+the reach of any log that a security organization can
+analyze. The consequence is that the risk overview may
+deteriorate precisely at the point where compliance
+statistics indicate success.
+The architectural answer is therefore a central AI
+platform that provides approved access to AI capabilities
+and incorporates governance, data protection, and
+compliance from the outset. If it is missing, employees
+will fill the gap themselves - with all the consequences
+described.
+B. Pilot Purgatory - The Scaling Trap
+Very few companies succeed in transitioning from a
+successful pilot to regular operations. Several figures are
+available on just how few, varying in reliability and
+magnitude.
+Pilot Purgatory describes the state in which
+companies run numerous AI pilot projects that show
+promising results in controlled environments but never
+make the transition to productive, regular operations. The
+pilots remain in a perpetual loop of extension, realignment,
+and re-evaluation.
+The MIT report GenAI Divide cites a figure of around
+five percent for custom-developed AI tools that make it
+into operation.[6] Chapter 1 noted the reservations about
+the figures in this report—not peer-reviewed, small
+sample size, strictly defined success criteria—and
+therefore interpreted them as an order of magnitude. The
+same applies here. Moreover, there is a point that is
+relevant to the scaling issue: The count includes initiatives
+that had already passed the pilot stage, not terminated
+experiments. A vendor analysis estimates the share of
+GenAI initiatives that fail to achieve their intended
+outcome at 70 to 85 percent; this range is an extrapolation
+from older data, not a new survey.[9] The orders of
+magnitude differ, but the direction is consistent.
+The causes extend far beyond technology. The MIT
+report first cites the learning gap: Today's systems do not
+learn from business reality, do not adapt to changing
+requirements on their own, and do not improve over time.
+[6] This is hardly noticeable in the pilot phase. Intensive
+support, curated datasets, and dedicated experts
+compensate for this deficiency. In regular operations, with
+4
+
+CTI Research Paper Series • SSR
+real data volumes and scarce resources, this model is no
+longer sustainable.
+Moreover, time is a factor. What a medium-sized
+company accomplishes in about three months often takes
+nine months or longer in a large corporation—these are
+empirical values from transformation projects, not
+collected metrics. Within this window, priorities shift,
+budget cycles expire, and sponsors change roles. New
+topics displace the original initiative. Ultimately, it dies
+due to the organization's attention span, not a technical
+problem.
+Companies that develop AI solutions with specialized
+partners achieve production readiness about twice as often
+as those that rely solely on their own resources.[6] Thus,
+Pilot Purgatory is also a competence problem.
+Architectural design, MLOps, and governance
+implementation are different skills from those required for
+a successful pilot. Research on collaboration problems in
+ML projects supports this: The transition to production
+requires an orderly interaction between Data Scientists,
+ML Engineers, and Operations, which is rarely established
+in pilot projects.[11]
+The pattern is the same everywhere. Pilots run in a
+protected environment that cannot be transferred to
+operations: without connection to the central data
+infrastructure, without monitoring, without governance
+processes. The architectural answer, therefore, is a scaling
+architecture that is considered from the very beginning.
+C. The Governance Vacuum - When Control
+Cannot Keep Pace with Speed
+A gap is widening between the pace of AI adoption and the
+ability to govern it. Unlike Shadow AI and Pilot Purgatory,
+its effects are not immediately operational. Its risks are
+strategic and regulatory in nature and often only manifest
+with a delay.
+Only 40 percent of employees state that their workplace
+has any policy or guidance on the use of generative AI.[1]
+Meanwhile, a large majority of executives report that the
+pace of adoption exceeds their organization's governance
+capabilities.[12] This is less an oversight than a mismatch
+of cycle times. AI tools are introduced in minutes;
+governance structures take months.
+This vacuum becomes visible on three levels.
+Strategically, many organizations lack the assignment of
+responsibility. Who approves the use of a new LLM-based
+service? Who classifies the risk? Who is liable if the model
+makes a wrong decision? Without answers, AI initiatives
+remain in a no-man's-land between IT, business
+departments, and compliance.[13]
+Operationally, the mechanisms that make governance
+possible in the first place are missing. Without an AI
+system registry, no one reliably knows which models are
+in use, what data they process, and into which risk
+category they fall.[14] Without defined review processes,
+individual teams unilaterally decide on probabilistic
+models in business-critical processes. And without
+monitoring, Model Drift, bias, and declining performance
+remain undetected until damage occurs.
+Regulatorily, the pressure is mounting. The EU AI Act
+requires evidence for high-risk systems that cannot be
+reconstructed from documents after the fact: risk
+classification and technical documentation, automatic
+5
+
+RN Working Paper • August 2026
+event logging, and effective human oversight.[15] The
+deadlines for this were pushed back to July 2026; Chapter
+5 details the current status. Those without governance
+structures in place must still build all of this, and the
+gained lead time is shorter than it appears.
+From this three-tiered vacuum emerges an insight that
+underpins the rest of this paper: Governance without
+architecture remains a documented declaration of intent.
+Policies that are not translated into technical guardrails and
+anchored in the platform are ineffective. The architectural
+answer is Governance as Code. Chapter 3 elaborates on it.
+Governance Observable Architectural
+Gap Symptoms Answer
+Lack of AI decisions in AI Governance
+responsibilities an organizational Board with a
+no-man's-land defined mandate
+No AI system No transparency Central AI
+registry about deployed inventory as an
+models and data EA artifact
+No review Autonomous, Architecture
+processes uncontrolled Review Board
+deployment with AI extension
+decisions
+Lack of Model Drift and Observability
+monitoring bias remain layer in the
+undetected platform
+architecture
+Regulatory Compliance Governance as
+unpreparedness evidence cannot Code in the AI
+be provided platform
+Table 2: Governance gaps and their architectural implications
+D. Data Quality Deficits - The Underestimated
+Foundation
+The data foundation is discussed the least, as model
+architecture and Agentic AI capture the attention.
+However, it underpins everything else. Without robust
+data, every AI initiative is built on a weak foundation,
+regardless of model quality and ambition.
+Gartner quantifies it: 63 percent of organizations do not
+have suitable data management practices for AI—or do not
+know if they do.[16] The same analysis predicts that by
+2026, organizations will discontinue approximately 60
+percent of those AI projects that are not based on an AI-
+ready data foundation.[16] The literature aligns with this.
+Data quality regularly appears there as the most common
+technical reason for failure.[17]
+Three dimensions are intertwined here. The first is data
+quality: Incomplete, contradictory, and outdated data leads
+to models that systematically miss the mark in operation.
+This is one of the reasons for Pilot Purgatory—curated test
+data and real-world corporate data are two different
+worlds. The second is availability. Many organizations
+have enough data but cannot access it: silos between
+business units, incompatible formats, unresolved access
+rights. The third is data governance—which data may be
+used for which model and how its origin and processing
+can be traced. All three require a data lineage
+infrastructure that makes the path of the data from source
+to model output visible.[18]
+5
+
+CTI Research Paper Series • SSR
+Data maturity can hardly be introduced retroactively
+into an ongoing AI initiative. The evidence suggests that it
+should be established for the respective use case before the
+model and the platform are selected. This is not an
+argument for spending years constructing an enterprise-
+wide data foundation before the first pilot begins; what is
+at issue is the sequence in each individual case—first the
+data foundation that the specific use case requires, then the
+technology built upon it. Organizations that reverse this
+sequence tend to create structural instabilities that
+intensify with each stage of scaling.
+E. The Common Deficit - A Lack of Architectural
+Anchoring
+At first glance, the four patterns have little in common.
+Shadow AI concerns user behavior, Pilot Purgatory the
+scaling capability, the governance vacuum the control
+structures, and data quality deficits the technical
+foundation. However, they share a common cause: in none
+of the four cases is AI a subject of the enterprise
+architecture—it happens alongside it.
+Therefore, the patterns feed each other. If an approved
+platform is missing, employees resort to their own tools—
+and each of these stores data in places that no registry
+knows. The governance vacuum thus grows with the
+uncontrolled proliferation it has allowed. Conversely,
+weak data quality keeps pilots confined to the protected
+environment in which they function; the longer one
+remains there, the more attractive a quick, home-grown
+solution from the business department becomes. For
+governance, this means that individual measures are
+ineffective. A ban without a platform offering merely
+shifts the problem, and a guideline without an AI system
+registry governs a landscape that no one sees. Companies
+that succeed in scaling differ from those stuck in the pilot
+stage primarily in that they understand AI as a strategic
+platform capability.[19] Research on AI readiness factors
+points in the same direction: successful adoption requires
+maturity in strategy, data, and technology, as well as in
+organization and governance.[10]
+The architectural answer to all four is developed in the
+following chapter.
+For governance, this leads to an uncomfortable
+consequence: there is no sequence in which the four
+patterns can be tackled one after another. Because each
+creates the conditions for the next, an individual measure
+has at best a local and usually only a short-term effect. The
+four architectural answers—a central platform, a scaling
+architecture, EA-integrated governance, and a Data
+Foundation—only interlock when they are conceived as a
+single structure. This shifts the initial question: it is no
+longer which of the four problems to solve first, but rather
+what overall order the AI landscape should have.
+References
+[1] Gillespie, N. et al. (2025): Trust, attitudes and use of artificial
+intelligence. A global study 2025. KPMG International;
+University of Melbourne. Methodology: N = 48,340, 47 countries,
+field period November 2024 to January 2025, scientific direction
+by the University of Melbourne. Consulting survey, not peer-
+reviewed. Online: kpmg.com, Retrieved: 06.08.2026.
+[2] Torii (2026): The SaaS Benchmark Annual Report 2026. Press
+release "Torii 2026 Benchmark Report: AI Isn't Consolidating
+SaaS - It's Expanding Shadow IT" from 24.02.2026. Vendor
+survey, not peer-reviewed. Online: toriihq.com/saas-benchmark-
+6
+
+RN Working Paper • August 2026
+annual-report-2026 and globenewswire.com, Retrieved:
+07.08.2026.
+[3] Reco AI (2025): 2025 State of Shadow AI Report. Vendor survey,
+not peer-reviewed. Methodology: Analysis of usage data from
+over 50 corporate environments and more than 55,000 SaaS
+applications, no survey. Online: reco.ai/state-of-shadow-ai-report,
+Retrieved: 07.08.2026.
+[4] Netskope (2026): Cloud and Threat Report: 2026. Netskope Threat
+Labs, 07.01.2026. Methodology: anonymized telemetry data,
+collection period October 2024 to October 2025. Vendor survey,
+not peer-reviewed; the full text is behind a registration wall, the
+values reported here are taken from the reporting of several trade
+media. Online:
+netskope.com/resources/cloud-and-threat-reports/cloud-and-
+threat-report-2026, Retrieved: 07.08.2026.
+[5] IBM (2025): Cost of a Data Breach Report 2025. Vendor survey,
+not peer-reviewed. Online: ibm.com/think/x-force/2025-cost-of-a-
+data-breach-navigating-ai, Retrieved: 26.03.2026. The general
+report page now lists the 2026 edition.
+[6] Challapally, A. et al. (2025): The GenAI Divide - State of AI in
+Business 2025. Preliminary Findings, Project NANDA, MIT
+Media Lab. Research report, not peer-reviewed. The report was
+accessible at nanda.media.mit.edu on the retrieval date; the
+address now redirects to a project overview with no reference to
+the report. Copy with the authors. Retrieved: 26.03.2026.
+[7] Silic, M.; Back, A. (2014): Shadow IT - A view from behind the
+curtain. Computers & Security, 45, 274-283. DOI:
+10.1016/j.cose.2014.06.007.
+[8] Haag, S.; Eckhardt, A. (2017): Shadow IT. Business & Information
+Systems Engineering, 59(6), 469-473. DOI: 10.1007/s12599-017-
+0497-x.
+[9] NTT Data (2024): Between 70-85% of GenAI Deployment Efforts
+Are Failing to Meet Their Desired ROI. Vendor survey, not peer-
+reviewed. Online:
+nttdata.com/global/en/insights/focus/2024/between-70-85p-of-
+genai-deployment-efforts-are-failing, Retrieved: 07.08.2026.
+[10] Jöhnk, J.; Weißert, M.; Wyrtki, K. (2021): Ready or Not, AI
+Comes - An Interview Study of Organizational AI Readiness
+Factors. Business & Information Systems Engineering, 63(1), 5-
+20. DOI: 10.1007/s12599-020-00676-7.
+[11] Nahar, N. et al. (2022): Collaboration Challenges in Building ML-
+Enabled Systems: Communication, Documentation, Engineering,
+and Process. In: Proceedings of the 44th International Conference
+on Software Engineering (ICSE), 413-425. DOI:
+10.1145/3510003.3510209.
+[12] EY (2026): CEO Outlook 2026: AI, Transformation and Growth.
+Consulting survey, not peer-reviewed. Online:
+ey.com/en_us/ceo/ceo-outlook-global-report, Retrieved:
+07.08.2026. The page is continuously updated with new survey
+waves; the wave indicated at the time of retrieval is authoritative.
+[13] Weber, M. et al. (2023): Organizational Capabilities for AI
+Implementation - Coping with Inscrutability and Data
+Dependency in AI. Information Systems Frontiers, 25(4), 1549-
+1569. DOI: 10.1007/s10796-022-10297-y.
+[14] Kreuzberger, D.; Kühl, N.; Hirschl, S. (2023): Machine Learning
+Operations (MLOps): Overview, Definition, and Architecture.
+IEEE Access, 11, 31866-31879. DOI:
+10.1109/access.2023.3262138.
+[15] Sunyaev, A. et al. (2025): High-Risk Artificial Intelligence.
+Business & Information Systems Engineering, 67(6), 981-994.
+DOI: 10.1007/s12599-025-00942-6.
+[16] Gartner, Inc. (2025): Lack of AI-Ready Data Puts AI Projects at
+Risk. Press release from 26.02.2025. Methodology: Survey of N =
+248 data management leaders, Q3 2024. Analyst survey, not peer-
+reviewed. Online: gartner.com, Retrieved: 06.08.2026.
+[17] Aldoseri, A.; Al-Khalifa, K. N.; Hamouda, A. M. (2023): Re-
+Thinking Data Strategy and Integration for Artificial Intelligence:
+Concepts, Opportunities and Challenges. Applied Sciences,
+13(12), 7082. DOI: 10.3390/app13127082.
+[18] Díaz-Rodríguez, N. et al. (2023): Connecting the dots in
+trustworthy Artificial Intelligence: From AI principles to
+responsible AI systems. Information Fusion, 99, 101896. DOI:
+10.1016/j.inffus.2023.101896.
+[19] Woerner, S. et al. (2025): Grow Enterprise AI Maturity for
+Bottom-Line Impact. MIT CISR Research Briefing, Vol. XXV,
+No. 8, 21.08.2025. Methodology: MIT CISR 2025 Real-Time
+Business Survey, N = 152. Research report, not peer-reviewed.
+Online:
+cisr.mit.edu/publication/2025_0801_EnterpriseAIMaturityUpdate
+_WoernerSebastianWeillKaganer, Retrieved: 07.08.2026.
+6
+
+CTI Research Paper Series • SSR
+III. AI AS AN ENTERPRISE
+CAPABILITY - THE ARCHITECTURAL
+PERSPECTIVE
+Project-based thinking about AI structurally creates
+fragmentation—the shift to platform thinking is an
+architectural necessity, not a technological option. Across
+all reference architectures, a three-layer architecture
+consisting of a Data & Knowledge Layer, an AI Platform
+Layer, and an Application Layer is converging as a cross-
+industry organizing principle. The choice between a
+central, federated, and hybrid architecture depends on the
+context; regardless, six architectural principles support
+scaling—including Security by Design, which becomes a
+cross-functional aspect with productive access to
+corporate data.
+What the four anti-patterns from Chapter 2 lack can
+also be formulated positively: an order in which AI
+systems, data, and models have a defined place, and rules
+that apply to all initiatives. Both are matters of design
+work. It begins with a decision that precedes any
+technology choice—whether to treat AI as a project or as a
+platform.
+A. From Projects to Platforms - The Paradigm
+Shift
+No company would let each department build its own
+power grid. With AI, however, this is precisely the norm:
+The vast majority of companies still treat it as a collection
+of isolated projects. A business unit identifies a use case, a
+team builds a prototype, a pilot delivers promising results
+—and then the initiative stagnates. This pattern repeats
+across the entire organization, resulting in a patchwork of
+point solutions that are neither compatible with each other
+nor utilize a common infrastructure. Research on AI
+scaling attributes this fragmentation to a project-based
+mindset:[1] Each project builds its own data pipelines,
+selects its own models, and defines its own quality
+standards. The result is data silos and redundant
+infrastructure; the maintenance effort grows with every
+new initiative.
+A study by Carnegie Mellon University investigated
+the specific obstacles in transitioning from ML
+experiments to production. It identified communication
+deficits, insufficient documentation, and fragmented
+engineering processes as the central causes for the failure
+of ML projects.[2] These findings extend far beyond
+technical limitations: Different professional jargon
+between data scientists and software engineers, a lack of
+artifact standardization, and unclear responsibilities for
+production operations create friction that is repeated with
+every isolated project.
+The Enterprise AI Capability is the organization-
+wide ability to deploy AI systematically and repeatably.
+Chapter 1 described Enterprise AI as a state: AI is
+integrated into business processes, products, and services
+across the company. The capability defines what sustains
+this state. It is measurable by what multiple initiatives
+share: infrastructure, standardized processes, and reusable
+components. This is complemented by a governance
+framework that applies to all. Thus, Enterprise AI is the
+goal, while the capability is the prerequisite to achieve and
+maintain it.
+7
+
+RN Working Paper • August 2026
+The path from projects to platforms has been
+demonstrated by cloud migration. Initially, companies
+moved individual applications to the cloud, project by
+project and without an overarching architecture. What
+emerged was uncontrolled hybrid growth. It only became
+manageable through platform strategies centered on the
+Landing Zone: an architectural pattern that defines the
+common infrastructure for all workloads—network
+segmentation, central Identity and Access Management, a
+unified logging infrastructure, and defined compliance
+baselines. Once established, it applied to every application
+that followed. The same holds true for AI: The paradigm
+shift introduces AI as a platform capability;[3] without an
+analogous platform strategy, the AI transformation will
+remain a stream of isolated individual projects with no
+cumulative added value.
+With platform thinking, the organizational logic shifts.
+Investments are then directed toward a common
+foundation with reusable components: central data
+pipelines, standardized model services, and uniform
+governance mechanisms, supplemented by shared
+monitoring tools.[1] Business units consume these
+services; custom building is no longer necessary.
+Empirical research supports this: Companies that
+successfully scale AI differ from stagnating organizations
+in their ability to conceptualize AI as a strategic platform
+capability.[4]
+Investment figures show how rapidly the field is
+growing. In 2025, companies are estimated to invest $37
+billion in generative AI—an increase by a factor of 3.2
+compared to the previous year.[5] Of this, $19 billion
+flowed into the application layer and $18 billion into the
+infrastructure layer.[5] Consequently, the market has long
+been organized in layers. The open question is whether
+companies will replicate this structure internally or
+continue to make scattered purchases.
+The difference is most evident in the budget. A project
+is justified by its individual business case, whereas a
+platform is justified by the cumulative value of all use
+cases running on it. This transition, therefore, reaches deep
+into the organization: funding logic, governance
+structures, and responsibilities change accordingly.[1]
+This shift in argumentation is one of the biggest hurdles on
+the path to scaling; Chapter 6 explores it in greater detail.
+The most frequently observed error in the platform
+transition is that organizations build the platform without a
+concrete use-case pull. Capability that no one demands
+generates cost without generating value. Organizations
+that succeed tend to begin with individual use cases and
+allow the platform to grow around them.
+B. The Three-Layer Architecture as an
+Organizing Principle
+Providers name their building blocks differently. When
+comparing the reference architectures for Enterprise AI—
+the offerings of cloud providers, the frameworks of
+analysts, the academic models—the same structure is
+almost always found underneath: Despite differing
+terminology and levels of detail, nearly all approaches
+organize the field into three layers.[6] We will henceforth
+refer to this organizational model as the Three-Layer
+Architecture. The reason for this is structural. Only when
+data management, model operations, and application
+7
+
+CTI Research Paper Series • SSR
+integration are decoupled from one another can a system
+be scaled, maintained, and governed.
+Sculley et al. described early on what happens when
+this separation is missing: ML systems without clear layer
+separation accumulate significant technical debt.[7] The
+actual ML code typically constitutes only a fraction of a
+production system. The vast majority is dedicated to data
+collection, feature extraction, and serving infrastructure,
+as well as configuration management and monitoring. If
+these components are not systematically separated and
+managed, hidden dependencies arise that make any change
+to the system an incalculable risk. Google demonstrated
+how this separation can be implemented in a production
+environment with TFX, a platform for ML pipelines: data
+validation, model training, and serving are explicitly
+separated.[8] TFX established uniform building blocks for
+each step of the pipeline and defined clear interfaces
+between them; consequently, individual parts could be
+further developed and exchanged independently of one
+another.
+The Data & Knowledge Layer supports everything
+that lies above it. It brings together the components for the
+collection and storage, integration, and provision of data,
+in addition to knowledge representations.[9] At its core,
+this includes Data Lakes and Data Warehouses as central
+storage systems, Feature Stores for the consistent delivery
+of ML features, and vector databases for semantic search
+and Retrieval-Augmented Generation (RAG)—that is, for
+answers that a language model composes from specifically
+retrieved company documents; Knowledge Graphs map
+structured relationships. Upwards, the layer delivers what
+the others need: reliable, consistent, and accessible data.
+This is precisely where the bottleneck lies: 63 percent of
+organizations do not have suitable data management
+practices for AI—or do not know if they do.[10]
+Layer Core components
+Application Layer Intelligent Apps, Copilots,
+Agents, APIs
+AI Platform Layer Model Registry, MLOps, LLM-
+Gateway, Monitoring
+Data & Knowledge Layer Data Lake, Feature Store, Vector
+DB, Knowledge Graph
+Table 3: The three layers of the Enterprise AI architecture with core compon
+As an organizational framework, the Three-Layer
+Architecture is intentionally kept general and vendor-
+agnostic. Which technology is used within a layer depends
+on the corporate context, the cloud strategy, and the
+existing IT environment. The crucial aspect is the
+structural separation of responsibilities: changes in one
+layer should affect the others as little as possible. A change
+of the language model in the AI Platform Layer must not
+destabilize the business applications in the Application
+Layer; conversely, an expansion of data sources in the
+Data & Knowledge Layer should automatically benefit all
+services above it.
+In practice, many organizations supplement the three
+layers with an explicit governance layer, which acts as a
+cross-cutting function through all others.[13] It addresses
+compliance requirements and model governance, in
+8
+
+RN Working Paper • August 2026
+Between the data foundation and the application, a
+model needs a place where it is created and remains
+operational. The AI Platform Layer is this operational
+core: Here, models are developed and trained, rolled out
+and monitored.[11] It encapsulates technical complexity
+and provides access via uniform interfaces—for Data
+Scientists, ML Engineers, and increasingly for business
+users as well. Core components include ML frameworks
+and experiment tracking for model development, a Model
+Registry for versioning and managing trained models, and
+MLOps pipelines for automated integration and
+deployment. Additionally, there are LLM gateways that
+centrally manage language model access and compliance
+monitoring that continuously oversees regulatory
+requirements.
+MLOps (Machine Learning Operations) transfers the
+principles of DevOps to the context of Machine Learning.
+The discipline encompasses practices, technologies, and a
+culture for the systematic development, deployment, and
+maintenance of ML systems in production environments
+—including automated pipelines, version control, and
+performance monitoring.
+Business value is only created at the very top. The
+Application Layer integrates AI capabilities into business
+applications and end-user interfaces,[12] translates
+probabilistic model outputs into business-relevant
+decision support, and forms the interface to existing IT
+systems. Typical manifestations include AI-powered
+business applications, Copilot integrations, and
+autonomous agents. The economic focus is also here: Of
+the 19 billion dollars that flowed into the application layer
+of generative AI in 2025, the largest share among domain-
+specific applications, at 4 billion dollars, was allocated to
+coding assistants.[5]
+The following table classifies the three layers with their
+core components and architectural responsibilities:
+Function Responsibility
+Generate business value Business Units, Product Teams
+Operate and govern models AI Platform Team, ML
+Engineering
+Provide and quality-assure data Data Engineering, Data
+Governance
+nents and responsibilities
+addition to bias management and ethical guidelines. With
+the EU AI Act and comparable regulatory frameworks,
+this dimension is gaining importance; the architectural
+embedding of governance is explored in depth in Chapter
+5.
+C. A Comparison of Architectural Patterns
+This, however, does not yet decide who operates what. The
+three layers define which functions an enterprise AI
+architecture must cover; how these functions are
+distributed organizationally and technically is determined
+by the choice between three architectural patterns: central,
+federated, or hybrid.[6]
+The central AI platform consolidates all AI activities
+on a unified infrastructure. A dedicated AI Center of
+Excellence operates the platform and provides
+8
+
+CTI Research Paper Series • SSR
+standardized services for the entire organization.[1] This
+leads to efficient resource utilization, uniform standards,
+and simplified governance. The downside becomes
+apparent with growing demand: the central team becomes
+a bottleneck, domain-specific requirements are not
+adequately met, and the pace of innovation in business
+departments suffers from waiting times. This pattern is
+particularly suitable for organizations with a manageable
+AI portfolio and high regulatory pressure.
+The federated approach distributes AI capabilities
+across decentralized teams and domains that develop and
+operate models autonomously. This is primarily a matter
+of responsibility: decentralized teams assume full
+responsibility for their data products and models—
+including quality assurance and governance. This
+autonomy fosters domain-specific expertise; however, it
+requires explicit agreements on interoperability standards
+and common quality metrics. Federated approaches are
+Dimension Central Platform
+Governance Uniform, centrally controlled
+Scaling Vertical (more capacity)
+Flexibility Limited
+Coordination Effort Low
+Suitable for Regulated industries, smaller AI
+landscapes
+Table 4: A comparison of architectural patterns - central platform, federated
+Which pattern is suitable depends on the context: the
+company's size and organizational complexity, the
+industry's regulatory environment, and the maturity of the
+existing IT environment. Moreover, it depends on how an
+organization weighs the trade-off between speed and
+controllability. There is no one-size-fits-all pattern;
+however, practice shows that hybrid models offer the best
+balance between control and flexibility in most enterprise
+contexts.[6]
+D. Architectural Principles for Scalable Enterprise
+AI
+The organizational model varies, but the underlying
+principles should not. Five are considered prerequisites for
+scalable Enterprise AI, regardless of whether an
+organization builds in a centralized, federated, or hybrid
+manner; each can be translated into concrete design
+decisions.
+If a new language model cripples the business
+application, Separation of Concerns is missing: the
+consistent decoupling of data, models, and applications.
+[11] It is directly reflected in the three-layer architecture.
+Changes in data management should not force changes to
+the models, and a model change should not require an
+adaptation of the business application. In practice, this
+means: clearly defined interfaces between the layers, no
+direct dependencies. The violation of this principle is one
+of the most common reasons why pilot projects fail to
+scale: they merge data preparation, model logic, and
+application integration into a monolithic system that can
+only be changed as a whole. Sculley et al. have described
+9
+
+RN Working Paper • August 2026
+therefore often found in organizations with strict data
+protection requirements or highly heterogeneous business
+areas.
+The hybrid model combines elements of both
+approaches and has established itself in practice as the
+most common compromise.[6] A common pattern is the
+hub-and-spoke model: a central hub provides common
+infrastructure, standards, and governance, while spokes in
+the business departments are responsible for domain-
+specific data and applications. The interfaces between the
+hub and spokes follow clearly defined APIs and
+governance rules. This pattern is oriented towards the data
+mesh concept, which combines decentralized data
+ownership with central interoperability and federated
+governance. Platform literature describes this dynamic as
+a balancing act between central control and local
+autonomy.[3] The trade-off never disappears; the
+architecture must make it manageable.
+Federated Approach Hybrid Approach
+Decentralized, domain-specific Federated: central standards, local
+implementation
+Horizontal (more teams) Combines both dimensions
+High Moderate to high
+High Medium
+Data privacy-sensitive contexts, Most enterprise contexts
+heterogeneous business areas
+d, and hybrid approaches
+this risk: ML systems with unclear component boundaries
+accumulate technical debt, which manifests as instability,
+difficult maintainability, and decreasing development
+velocity.[7]
+API-First requires that all AI services are accessible
+via defined, standardized interfaces.[11] No model, no
+Feature Store, and no monitoring dashboard exists without
+an API. Thus, components become reusable, integration
+into existing IT systems becomes simpler, and business
+departments can engage in self-service. In the context of
+generative AI, this principle gains additional weight: LLM
+gateways, which control access to various language
+models via a unified API, allow for flexible switching
+between providers and reduce vendor lock-in.
+Data Lineage by Design ensures that the origin and
+processing of data remain traceable at all times.[9] For AI
+systems, this principle is critical for two reasons: First, the
+quality and composition of the training data directly
+influence model behavior—without lineage, incorrect
+behavior cannot be diagnosed. Second, regulatory
+frameworks such as the EU AI Act require explicit
+documentation of data origin for high-risk AI systems.
+Modern data platforms support automated lineage tracking
+across all processing stages—from the raw source through
+Feature Engineering to the model decision. Without
+lineage, both are missing: diagnostics during operation
+and proof for regulatory authorities.
+AI systems differ from deterministic software through
+phenomena such as Concept Drift and Data Drift: Model
+performance can decline over time without a technical
+error being present. Observability is aimed precisely at
+this—going beyond classic monitoring to the continuous
+9
+
+CTI Research Paper Series • SSR
+measurability of model behavior, costs, and performance.
+[11] An observability infrastructure detects degradation
+early and initiates retraining or manual reviews. It also
+creates cost transparency per use case, a key prerequisite
+for the business management of the AI portfolio.
+Governance as Code embeds policies directly into the
+platform. The model is Infrastructure as Code, the DevOps
+principle of machine-readable infrastructure definition;
+applied to AI platforms, it means enforcing governance
+policies automatically.[13] Compliance checks run in the
+pipeline, model deployments pass through defined quality
+gates, and risk classifications automatically determine the
+required review process. MLOps research shows what this
+looks like: Pipelines integrate validation steps for data
+quality, model performance, and fairness metrics before a
+deployment is approved.[11] Thus, the principle addresses
+the governance vacuum from Chapter 2. The fact that only
+a minority of employees are even aware of a policy on AI
+use is often because governance is designed as a separate,
+manual process. As code, compliance is integrated into the
+development and deployment process.
+These five principles are intentionally formulated to be
+framework-agnostic. They apply regardless of whether an
+organization works with TOGAF, Zachman, or its own
+enterprise architecture (EA) framework, and are also
+independent of the chosen cloud strategy. Their
+implementation follows a maturity logic: A company at
+the beginning of its AI integration will first implement
+API-First for its most important model services before
+building a complete service mesh architecture—a
+consistently managed traffic layer for the exchange of all
+services with each other. A sixth principle is added as soon
+as AI works with enterprise data in production; it is the
+subject of the following section.
+E. Security Architecture as a Cross-Cutting
+Function
+Once AI is operating productively, the attack and risk
+surface expands compared to traditional application
+architecture. The systems access large, often sensitive
+datasets, use external model and cloud services, and
+generate decisions that must remain traceable and
+verifiable. Security is therefore a cross-cutting function
+and must be embedded in all three layers.[13]
+Data classification is the starting point. The Data &
+Knowledge Layer requires role- and attribute-based access
+control, encryption, and Data Loss Prevention against
+unintentional data leakage; moreover, the traceability of
+data provenance and usage is essential. RAG and LLM
+scenarios in particular increase the demands on
+authorization concepts: Retrieval components must
+prevent users from accessing information via semantic
+search to which they are not entitled in the source systems.
+[9]
+One layer higher, the AI Platform Layer centralizes
+control: Model access, Secrets Management, and gateway
+architectures are managed centrally here, as are prompt
+and output filters, Guardrails, and monitoring and audit
+logs. An LLM gateway can do more than just manage
+costs and vendor access: It can enforce policies—such as
+permitted models, data leakage controls, and logging, as
+well as Rate Limits and approval processes. Thus, Security
+by Design becomes part of the platform architecture and
+1
+
+RN Working Paper • August 2026
+does not remain the responsibility of each individual
+application.[11]
+At the Application Layer, the question shifts from
+access to accountability. It requires role-based usage,
+secure integration into business processes, and human-in-
+the-loop mechanisms—meaning mandatory review by a
+human—and clear accountability for every AI-supported
+decision. Architecturally, it follows that Security Patterns,
+predefined control points, and Zero-Trust principles—i.e.,
+no implicit trust in networks or systems—must be as
+mandatory for AI platforms as API and MLOps standards.
+[14] Those who omit these controls ultimately scale the
+risk surface along with their operations.
+Thus, Security by Design joins the five from section
+3.4 as the sixth principle. It shares their character: a design
+decision that is reflected in interfaces, pipelines, and
+control points. How organizations determine their current
+maturity level and define the next realistic step is the
+subject of the following chapter.
+The three layers are less a target state and more a
+decision-making framework: Every single AI decision—a
+model change, a new data source, a purchased assistant—
+can be positioned within it, and its consequences for the
+other layers become assessable. Its practical value lies in
+its durability. Vendors, models, and tools change at short
+intervals; the separation of data management, model
+operation, and application outlasts these cycles, and so do
+the six principles from Separation of Concerns to Security
+by Design. An organization that has mandated them once
+does not need to re-address the architecture question with
+the next technology wave.
+References
+[1] Weber, M. et al. (2023): Organizational Capabilities for AI
+Implementation - Coping with Inscrutability and Data
+Dependency in AI. Information Systems Frontiers, 25(4), 1549-
+1569. DOI: 10.1007/s10796-022-10297-y.
+[2] Nahar, N. et al. (2022): Collaboration Challenges in Building ML-
+Enabled Systems: Communication, Documentation, Engineering,
+and Process. In: Proceedings of the 44th International Conference
+on Software Engineering (ICSE), 413-425. DOI:
+10.1145/3510003.3510209.
+[3] Tiwana, A. (2014): Platform Ecosystems: Aligning Architecture,
+Governance, and Strategy. Morgan Kaufmann.
+[4] Jöhnk, J.; Weißert, M.; Wyrtki, K. (2021): Ready or Not, AI Comes
+- An Interview Study of Organizational AI Readiness Factors.
+Business & Information Systems Engineering, 63(1), 5-20. DOI:
+10.1007/s12599-020-00676-7.
+[5] Menlo Ventures (2025): 2025 - The State of Generative AI in the
+Enterprise. 09.12.2025. Methodology: Survey of N = 495
+enterprise AI decision-makers in the USA, field period November
+2025, supplemented by an ecosystem analysis for market sizing.
+Investor survey, not peer-reviewed. Online: menlovc.com,
+Retrieved: 06.08.2026.
+[6] Ettinger, A. (2025): Enterprise Architecture as a Dynamic
+Capability for Scalable and Sustainable Generative AI Adoption:
+Bridging Innovation and Governance in Large Organisations
+[Preprint]. arXiv:2505.06326. DOI: 10.48550/arxiv.2505.06326.
+[7] Sculley, D. et al. (2015): Hidden Technical Debt in Machine
+Learning Systems. In: Advances in Neural Information Processing
+Systems 28, 2503-2511.
+[8] Baylor, D. et al. (2017): TFX: A TensorFlow-Based Production-
+Scale Machine Learning Platform. In: Proceedings of the 23rd
+ACM SIGKDD International Conference on Knowledge
+Discovery and Data Mining, 1387-1395. DOI:
+10.1145/3097983.3098021.
+[9] Aldoseri, A.; Al-Khalifa, K. N.; Hamouda, A. M. (2023): Re-
+Thinking Data Strategy and Integration for Artificial Intelligence:
+Concepts, Opportunities and Challenges. Applied Sciences,
+13(12), 7082. DOI: 10.3390/app13127082.
+[10] Gartner, Inc. (2025): Lack of AI-Ready Data Puts AI Projects at
+Risk. Press release from 26.02.2025. Methodology: Survey of N =
+10
+
+CTI Research Paper Series • SSR
+248 data management leaders, 3rd quarter 2024. Analyst survey,
+not peer-reviewed. Online: gartner.com, Retrieved: 06.08.2026.
+[11] Kreuzberger, D.; Kühl, N.; Hirschl, S. (2023): Machine Learning
+Operations (MLOps): Overview, Definition, and Architecture.
+IEEE Access, 11, 31866-31879. DOI:
+10.1109/access.2023.3262138.
+[12] Omol, E. J. (2024): Organizational digital transformation: from
+evolution to future trends. Digital Transformation and Society,
+3(3), 240-256. DOI: 10.1108/dts-08-2023-0061.
+[13] Díaz-Rodríguez, N. et al. (2023): Connecting the dots in
+trustworthy Artificial Intelligence: From AI principles to
+responsible AI systems. Information Fusion, 99, 101896. DOI:
+10.1016/j.inffus.2023.101896.
+[14] Rose, S. et al. (2020): Zero Trust Architecture. NIST Special
+Publication 800-207. DOI: 10.6028/nist.sp.800-207.
+IV. MATURITY LEVELS AND
+EVOLUTIONARY PATHS
+Established maturity models converge on common
+dimensions: Strategy, data, and technology, as well as
+organization and governance, determine an
+organization's AI maturity level. This paper adds the
+maturity of Enterprise Architecture Management (EAM)
+as a sixth dimension. Technical evolutionary stages, from
+Basic Prompting to multi-agent systems, each require
+specific architectural prerequisites that cannot be
+improvised. Technical ambition without organizational
+and architectural maturity creates architectural debt—
+stages cannot be skipped; however, the throughput speed
+can be influenced.
+A target architecture is of little use as long as the
+starting point is undefined. Anyone planning a platform
+without knowing which models are already running
+productively in-house and who is accountable for them is
+planning in a vacuum. Maturity models provide this
+positioning: They translate architectural complexity into
+an ordered sequence of stages, which can guide investment
+decisions as well as the development of governance and
+competence. Chapter 3 described where the path leads;
+this chapter is about where it begins.
+A. Enterprise AI Maturity - An Assessment
+If you ask about the AI maturity level within a company,
+the answer will differ depending on which floor you are
+on. The executive board will cite the number of ongoing
+Maturity Level MIT CISR
+Stage 1 Experiment and Prepare
+Stage 2 Build Pilots and Capabilities
+Stage 3 Develop AI Ways of Working
+Stage 4 Become AI Future Ready
+Stage 5 -
+Table 5: Maturity models in comparison - MIT CISR and Gartner
+Five dimensions recur across all models. It begins with
+Strategy: an explicit AI strategy that is linked to the
+corporate strategy, not one that stands alongside it. Data
+means more than just quantity—it implies a consistent data
+strategy, sufficient quality, and functioning Data
+1
+
+RN Working Paper • August 2026
+pilots. The architecture department will mention the
+number of interfaces that no one has documented. Both
+answers are correct, and they measure different things.
+Universities, consulting firms, and technology analysts
+have each presented their own maturity models for this
+question in recent years. In comparison, the models
+primarily show common fundamental dimensions; they
+differ more in their granularity than in their underlying
+logic.[1]
+An AI Maturity Model describes the phased
+development of an organization with regard to its ability to
+strategically manage and operationally utilize Artificial
+Intelligence in a resilient manner. It typically comprises
+three to five stages and assesses dimensions such as data
+strategy and governance, technology infrastructure, and
+competency development.
+The model from the Center for Information Systems
+Research at MIT (CISR) is the most broadly empirically
+supported: the MIT CISR Enterprise AI Maturity
+Model by Weill, Woerner, and Sebastian. It is based on a
+survey of 721 companies and distinguishes four stages:
+Experiment and Prepare, Build Pilots and Capabilities,
+Develop AI Ways of Working, and Become AI Future
+Ready.[2] Financial performance increases with each
+stage: companies at stages 1 and 2 are below the industry
+average, while companies at stages 3 and 4 are above it. A
+2025 update—based on a smaller survey of 152 companies
+—identifies the transition from stage 2 to stage 3 as the
+step with the greatest financial impact.[3] Approaching
+from another angle, the MIT study on the GenAI Divide,
+i.e., the gap between experimentation and productive use,
+describes the same movement: 60 percent of companies
+are evaluating AI systems, 20 percent reach the pilot
+phase, and five percent achieve productive deployment.[4]
+From the vendor and consulting environment,
+ServiceNow, McKinsey, and Deloitte present a similar
+picture—surveys without peer review, which should
+accordingly be read with caution. Nearly two-thirds of
+organizations have not yet scaled AI across the enterprise.
+Data quality and strategic anchoring are considered the
+strongest predictors of scaling success. Moreover, the
+ability to transition pilots into production grows with
+governance maturity.[5][6][7]
+Gartner Typical Characteristic
+Awareness/Ad-hoc Isolated experiments, no central
+plan
+Developing Coordinated pilots, local
+responsibility
+Defined Central strategy, initial platform
+approaches
+Managed Scaled platform, federated
+governance
+Optimizing Continuous optimization, AI as a
+strategic capability
+Governance, i.e., rules and responsibilities for the use of
+data. With Technology, the decisive factor is whether a
+scalable platform infrastructure exists or if each team
+works with its own isolated tools. Organization and
+Culture includes dedicated roles, cross-functional teams,
+11
+
+CTI Research Paper Series • SSR
+and a data-driven decision-making culture. And
+Governance requires that responsibilities are defined and
+that risk management and compliance for AI are
+effectively implemented.[1]
+The research by Jöhnk et al. on AI Readiness Factors
+empirically confirms these dimensions. Their study
+identifies 18 readiness factors in the categories of strategic
+alignment, resources and knowledge, culture, and data.
+Organizational and cultural factors are weighted at least as
+heavily as technological prerequisites.[1]
+For the perspective of this paper, a sixth dimension is
+added: the maturity of Enterprise Architecture
+Management. It can hardly be separated from the AI
+maturity level. Where architectural principles are lacking
+and target architectures remain non-binding,[1][8] AI
+pilots certainly emerge—however, in our observation,
+they are rarely scaled. Conversely, higher EAM maturity
+lays the foundation for central platform services, for
+reusable components, and for traceable data origin (data
+lineage), as well as for machine-enforced rules
+(Governance as Code) and portfolio-wide prioritization.
+This leads to the hypothesis of this paper: The maturity of
+architecture management moderates the probability of
+success for AI implementations because it determines
+whether use cases can evolve from isolated experiments
+into productive, integrated capabilities. It is a well-
+founded assumption, not a finding—its verification is still
+pending.
+In the consulting practice of the authors, self-
+assessments regularly prove to be overly optimistic; this
+observation has not been formally surveyed, but it recurs
+consistently. Organizations assessing themselves tend to
+count what is visible—tools and licenses, successful
+demonstrations—while what is absent goes unnoticed in
+the count. Functioning ChatGPT access and three pilot
+projects do not constitute stage 3. They typically
+correspond to stage 1: the technological equipment is in
+place, whereas the organizational and procedural
+prerequisites of higher maturity levels are not.
+B. Technical Stages of Evolution of AI Integration
+Alongside the organizational maturity level, a second
+development is taking place: the way in which AI is
+technically integrated into systems and processes. With
+each stage, the number of integration points and the
+demand for control increase, and each stage requires
+certain architectural foundations. Where a license
+agreement is sufficient at the beginning, permissions,
+logging, and intervention rights are ultimately tied to each
+individual processing step. If these foundations are
+missing, the transition to the next stage will be unstable or
+will fail.
+A separate framework exists for the technical side. In
+Nature Communications, Lavin et al. have presented a
+model of Technology Readiness Levels (TRL) for
+machine learning: a scale for technical maturity that allows
+ML systems to be systematically classified.[9] Their ten
+stages range from Level 0 to 9; Level 0 is the innovation
+compared to the classic TRL model. Their logic aligns
+with the one presented here: progress in maturity depends
+on preliminary work that cannot be retroactively
+completed during the ongoing project.
+1
+
+RN Working Paper • August 2026
+Stage 1 - Basic Prompting is the entry point. Someone
+opens a browser tab, describes their task, and manually
+transfers the result to the system where the work is actually
+performed. Employees use generative AI tools via their
+standard interfaces, without connection to internal systems
+and without central control. Architecturally, this costs
+almost nothing: internet access and a license budget are
+sufficient. Accordingly, the business value remains
+selective and individual—it can be neither measured nor
+scaled.[10]
+With Stage 2 - Copilot Integration, the systematic
+embedding begins. AI assistants work within existing
+applications, for example, as Microsoft 365 Copilot,
+GitHub Copilot, or as an AI function in customer
+management (Customer Relationship Management, CRM)
+and in resource planning (Enterprise Resource Planning,
+ERP). This significantly increases the requirements:
+Identity Management must accommodate AI usage, data
+permissions must apply down to the document level, and
+initial governance policies are needed. The value lies in
+productivity gains—limited by the respective application
+platform.[5]
+Stage 3 - Tool Augmentation goes beyond built-in
+copilot capabilities and extends existing systems with
+proprietary AI functions: text analysis in ticketing
+systems, automated document classification, AI-supported
+anomaly detection. Here, the three-layer architecture
+described in Chapter 3 becomes a prerequisite, at least in
+its basic form: the Data & Knowledge Layer for data
+access, the AI Platform Layer for API connectivity and
+Model Serving (the controlled deployment of models),
+plus defined interfaces to the Application Layer, where the
+business applications reside.[11]
+At Stage 4 - Engine Approaches, AI becomes an
+independent service with standardized APIs. AI models
+run as independent services that various business
+applications consume: a Recommendation Engine serves
+the webshop, the mobile app, and the call center system
+equally. This requires a fully operationalized AI Platform
+Layer—with a model directory (Model Registry) and
+automated MLOps pipelines, with versioning and
+monitoring.[11] Feature Stores keep the input data
+consistent for all consumers, and an API gateway manages
+access and versioning. If this infrastructure is lacking, the
+integration effort is repeated for each new consumer.
+Currently, the upper end is formed by Stage 5 - Multi-
+Agent and LLM-native Systems. An agent receives a
+complaint, reconciles delivery and inventory data from
+two separate systems, initiates the replacement delivery,
+and only presents the disputed case to a human.
+Autonomous AI agents take on complex, multi-stage
+tasks, orchestrate each other, and make decisions
+themselves within defined limits. Business processes here
+are AI-native: the AI drives the process instead of
+supplementing it. Architecturally, this demands an
+orchestration layer for agent communication, robust
+guardrails for what an agent is allowed to do, and real-time
+monitoring from which interventions can be made—and
+above that, a governance structure that clearly assigns
+responsibilities for machine-based decisions.
+Two forecasts from Gartner illustrate how quickly this
+stage will achieve widespread adoption—and how often it
+will fail. By 2028, around 33 percent of enterprise
+12
+
+CTI Research Paper Series • SSR
+software is expected to contain Agentic AI, meaning
+agents capable of action rather than supportive assistants,
+compared to less than one percent in 2024. At the same
+time, Gartner expects that over 40 percent of Agentic AI
+projects will be discontinued by the end of 2027; the
+analysis cites escalating costs, unclear business value, and
+insufficient risk controls as reasons.[12] None of these
+three reasons lies in the model quality.
+Agentic AI refers to AI systems that independently
+plan and execute complex, multi-stage tasks, interacting
+with other systems and agents, and making decisions
+autonomously within defined limits. A copilot waits for
+human instruction; an agent acts on its own initiative.
+Accordingly, the requirements for governance are higher.
+C. The Correlation - Organizational Maturity ×
+Level of Technical Evolution
+Stage 4 technology can be bought; however, it cannot be
+reliably operated at maturity level 2. Both axes are
+interconnected, and this connection can be broken by
+neither a budget increase nor a change in technology.
+Those who aim for a multi-agent architecture at maturity
+level 2 rarely fail because of the technology—they lack
+governance, data quality, and the appropriate
+organizational and competency structures.
+This interpretation is not proven; however, it is
+supported from two sides. The finding reported in Chapter
+2—that only five percent reach production—can plausibly
+be attributed to the maturity level of the organizations
+involved; this correlation, however, was not measured
+there. Jöhnk et al. show that organizations that ignore
+individual readiness dimensions fail regardless of the
+quality of their technical implementation.[1] Lavin et al.
+describe the same from a technical perspective: ML
+systems at low TRL levels have fundamentally different
+requirements for infrastructure, data quality, and
+governance than systems at high levels. Skipping this
+requirement profile introduces systemic instabilities.[9]
+The most common anti-pattern has a name: technically
+ambitious, organizationally immature. Its course is
+predictable. A business department builds the engine, the
+platform is created afterward, and data responsibility
+remains unresolved. In the end, there is infrastructure, but
+no one systematically monitors model quality, the results
+fluctuate with the data situation, and no single entity is
+responsible for wrong decisions. What remains is
+technical debt that grows with every additional use case. It
+is the Hidden Technical Debt described in Chapter 3 with
+Sculley et al.: The effort lies in the periphery of the model,
+and that is also where the debt grows.[13]
+The following mapping combines both axes. It is an
+original representation: The stage designations are partly
+from MIT CISR and partly from Gartner, and the pairing
+with the technical stages is a derivation of this paper, not a
+result of the cited studies.
+Organizational Realistically Typical Risk of
+Maturity Level Manageable Overambition
+Tech Stage
+Stage 1 - Ad-hoc Basic Prompting Tool
+proliferation,
+Shadow AI
+1
+
+RN Working Paper • August 2026
+Organizational Realistically Typical Risk of
+Maturity Level Manageable Overambition
+Tech Stage
+Stage 2 - Pilot Copilot Fragmented
+Operation Integration solutions without
+reuse
+Stage 3 - Scaling Tool Platform without
+Augmentation, governance, data
+first engines inconsistency
+Stage 4 - AI Engine Over-
+Future Ready approaches, first engineering, lack
+agents of agility
+Stage 5 - Multi-Agent, Loss of control
+Optimizing Agentic AI due to
+insufficient
+monitoring
+Table 6: Mapping of organizational maturity level and level of
+technical evolution (original representation)
+This leads to an encouraging conclusion for management:
+Those who adhere to the sequence are not condemned to
+slowness. Section 4.1 has already identified where the leap
+yields the most benefit—in the transition from Stage 2 to
+Stage 3.[3] Therefore, it is worthwhile to provide an
+architectural foundation for each subsequent step, rather
+than aiming for the highest stage as quickly as possible.
+Moreover, the pace can be increased with external
+experience. The MIT survey reports that companies
+collaborating with external partners on AI scaling are
+about twice as likely to achieve production deployment as
+organizations operating purely internally—subject to the
+same reservations about success criteria and reliability
+mentioned in Chapters 1 and 2 regarding this source.[4]
+Those who have already supported a scaling process know
+the typical stumbling blocks and do not fall into every one
+of them.
+D. Diagnostics - Where Does My Company Stand?
+A useful self-assessment requires questions that cannot be
+answered by good will alone. What is insightful here is not
+so much the target state, but rather the dimension that is
+currently holding back the next step. The following
+guiding questions lead through such an assessment along
+the six dimensions introduced.
+Strategy: Is AI found as a strategic priority in the
+board's planning documents—with concrete goals and
+metrics, or merely as a declaration of intent? Are use cases
+prioritized by business value and are investments managed
+centrally?
+Data: Are the relevant data sources inventoried and
+accessible via standardized interfaces? Are there defined
+quality metrics and automated validation mechanisms?
+Are responsibilities for data ownership and data lineage
+clearly assigned? Chapter 2 has quantified how rarely
+these prerequisites are met.[14]
+Technology: Does the organization operate AI models
+in a standardized environment with versioning,
+monitoring, and automated deployment pipelines—or are
+development and deployment carried out individually for
+each project? Is there a central model registry? How many
+productive AI applications consume central platform
+services—and how many operate parallel proprietary
+infrastructure?[11]
+13
+
+CTI Research Paper Series • SSR
+Organization and Culture: Are there dedicated roles
+such as the Enterprise AI Architect? Are there cross-
+functional teams of data scientists, ML engineers, and
+subject matter experts? Is there a Center of Excellence,
+i.e., a permanent body that sets standards and disseminates
+knowledge? Research on collaboration challenges shows
+that the transition from experiment to production requires
+specific organizational capabilities that go beyond purely
+technical competencies.[15]
+Governance: Is the organization aware of the entirety
+of its productive AI applications? Is there an AI system
+register? Are risk classification and responsibilities
+documented? Are there operational governance
+mechanisms—such as architecture reviews—or is
+governance limited to policy documents without
+operational enforcement?
+EAM Maturity: Are there binding architectural
+principles, current architecture and data inventories,
+established review processes, and a target state that guides
+concrete AI initiatives? Are architectural decisions
+documented and tracked—or does EAM primarily remain
+a retrospective documentation function? Aligning with
+established architecture maturity models helps to
+systematically assess this question—for instance, with the
+Architecture Capability Maturity logic of The Open Group
+Architecture Framework (TOGAF), which is widely used
+in enterprise architecture.[8]
+The dimensions are rarely developed evenly. An
+organization can operate at level 3 technologically while
+remaining at level 1 in governance and data. The platform
+then bears loads for which its rules were never designed.
+These asymmetries give rise to architectural debt.
+Consequently, the most important principle is: The next
+step carries more weight than the final goal. A company at
+level 2 does not need a detailed plan for level 5. It needs a
+robust plan for the transition to level 3.
+The question remains as to who is responsible for this
+plan. A diagnosis does not steer anything by itself; it
+requires a discipline that authoritatively sets the next step,
+monitors its adherence, and keeps the existing landscape in
+view—the subject of the following chapter.
+According to the models referenced here,
+organizational maturity and the technical stage of
+evolution are closely linked; a study that measures this fit
+itself is not available. At the governance level, the
+connection becomes tangible: Without binding
+architectural principles, current inventories, and effective
+review mechanisms, the institutional foundation for
+scaling is missing. For practice, a rule of priority follows
+from this. The pace of an AI transformation is determined
+by the weakest of the six dimensions—an organization
+with an excellent platform and unassigned data
+responsibility will only get as far as its data responsibility
+allows. Therefore, investments belong where the diagnosis
+reveals the largest gap, even if this is less visible than the
+next model change.
+References
+[1] Jöhnk, J.; Weißert, M.; Wyrtki, K. (2021): Ready or Not, AI Comes
+- An Interview Study of Organizational AI Readiness Factors.
+Business & Information Systems Engineering, 63(1), 5-20. DOI:
+10.1007/s12599-020-00676-7.
+[2] Weill, P.; Woerner, S. L.; Sebastian, I. M. (2024): Building
+Enterprise AI Maturity. MIT CISR Research Briefing, Vol.
+XXIV, No. 12, 19.12.2024. Methodology: MIT CISR 2022 Future
+1
+
+RN Working Paper • August 2026
+Ready Survey, N = 721. Research report, not peer-reviewed.
+Online:
+cisr.mit.edu/publication/2024_1201_EnterpriseAIMaturityModel_
+WeillWoernerSebastian, retrieved: 07.08.2026.
+[3] Woerner, S. et al. (2025): Grow Enterprise AI Maturity for Bottom-
+Line Impact. MIT CISR Research Briefing, Vol. XXV, No. 8,
+21.08.2025. Methodology: MIT CISR 2025 Real-Time Business
+Survey, N = 152. Research report, not peer-reviewed. Online:
+cisr.mit.edu/publication/2025_0801_EnterpriseAIMaturityUpdate
+_WoernerSebastianWeillKaganer, retrieved: 07.08.2026.
+[4] Challapally, A. et al. (2025): The GenAI Divide - State of AI in
+Business 2025. Preliminary Findings, Project NANDA, MIT
+Media Lab. Research report, not peer-reviewed. The report was
+accessible at the retrieval date under nanda.media.mit.edu; the
+address now redirects to a project overview with no reference to
+the report. Copy with the authors. Retrieved: 26.03.2026.
+[5] ServiceNow; Oxford Economics (2025): Enterprise AI Maturity
+Index 2025. Vendor survey in collaboration with Oxford
+Economics, not peer-reviewed. Online:
+servicenow.com/standard/resource-center/white-paper/wp-
+enterprise-ai-maturity-index-2025.html, retrieved: 26.03.2026.
+[6] McKinsey & Company (2025): The State of AI in 2025: Agents,
+Innovation, and Transformation. McKinsey Global Survey,
+November 2025. Methodology: N = 1,993 participants from 105
+countries, fieldwork June to July 2025. Consulting survey, not
+peer-reviewed. Online:
+mckinsey.com/capabilities/quantumblack/our-insights/the-state-
+of-ai, retrieved: 26.03.2026.
+[7] Deloitte (2026): The State of AI in the Enterprise. 2026 AI Report.
+Consulting survey, not peer-reviewed. Methodology: N = 3,235
+executives, fieldwork August to September 2025. Online:
+deloitte.com/global/en/issues/generative-ai/state-of-ai-in-
+enterprise.html, retrieved: 07.08.2026.
+[8] The Open Group (2022): The TOGAF Standard, 10th Edition.
+Online: publications.opengroup.org/c220, retrieved: 07.08.2026;
+updated several times by corrigendum since its initial publication
+on 25.04.2022. On the maturity logic in particular: The Open
+Group (2022): TOGAF Series Guide - Architecture Maturity
+Models (G203). Online: publications.opengroup.org/g203,
+retrieved: 07.08.2026.
+[9] Lavin, A. et al. (2022): Technology readiness levels for machine
+learning systems. Nature Communications, 13, 6039. DOI:
+10.1038/s41467-022-33128-9.
+[10] Menlo Ventures (2025): 2025 - The State of Generative AI in the
+Enterprise. 09.12.2025. Methodology: Survey of N = 495
+enterprise AI decision-makers in the USA, fieldwork November
+2025, supplemented by an ecosystem analysis for market sizing.
+Investor survey, not peer-reviewed. Online: menlovc.com,
+retrieved: 06.08.2026.
+[11] Kreuzberger, D.; Kühl, N.; Hirschl, S. (2023): Machine Learning
+Operations (MLOps): Overview, Definition, and Architecture.
+IEEE Access, 11, 31866-31879. DOI:
+10.1109/access.2023.3262138.
+[12] Verma, A. (2025): Gartner Predicts Over 40% of Agentic AI
+Projects Will Be Canceled by End of 2027. Gartner, Inc., Press
+release from 25.06.2025. Analyst survey, not peer-reviewed.
+Online: gartner.com/en/newsroom/press-releases/2025-06-25-
+gartner-predicts-over-40-percent-of-agentic-ai-projects-will-be-
+canceled-by-end-of-2027, retrieved: 26.03.2026.
+[13] Sculley, D. et al. (2015): Hidden Technical Debt in Machine
+Learning Systems. In: Advances in Neural Information Processing
+Systems 28, 2503-2511.
+[14] Gartner, Inc. (2025): Lack of AI-Ready Data Puts AI Projects at
+Risk. Press release from 26.02.2025. Methodology: Survey of N =
+248 data management leaders, Q3 2024. Analyst survey, not peer-
+reviewed. Online: gartner.com, retrieved: 06.08.2026.
+[15] Nahar, N. et al. (2022): Collaboration Challenges in Building ML-
+Enabled Systems: Communication, Documentation, Engineering,
+and Process. In: Proceedings of the 44th International Conference
+on Software Engineering (ICSE), 413-425. DOI:
+10.1145/3510003.3510209.
+V. ENTERPRISE ARCHITECTURE AS A
+GOVERNANCE INSTRUMENT FOR AI
+AI systems and models belong in the EA metamodel as
+independent building blocks, along with data lineage and
+the risk category for each system; together with the
+appropriate governance mechanisms, EAM becomes a
+governance instrument for AI. Federated governance
+14
+
+CTI Research Paper Series • SSR
+resolves the innovation dilemma between decentralized
+experimentation speed and central architectural
+coherence. Regulation codifies what is architecturally
+sensible anyway: The required evidence is generated in
+the system landscape, not in the compliance department—
+and the deadlines for high-risk systems, postponed in July
+2026, provide time for development, not a deferral.
+Who steers the path from AI pilots to a scalable
+platform? This paper takes the position that Enterprise
+Architecture Management, due to its connecting function,
+is the natural home for this task—however, only if EAM
+itself evolves. And that begins with an uncomfortable
+finding: EA does not enjoy a good reputation in many
+organizations.
+A. The EA Renaissance - From a Documentation
+Tool to a Steering Instrument
+What do business departments think of when they hear
+"Enterprise Architecture"? Usually, a colleague who
+maintains diagrams that no one ever looks at, and a
+committee that pushes projects back by a quarter. This
+reputation has a history. Traditional EA frameworks like
+TOGAF (The Open Group Architecture Framework) and
+Zachman emerged in an era when IT landscapes were
+relatively stable, and architectural decisions could be
+planned quarters or even years in advance.[1] The result
+was thick blueprints that were already outdated by the time
+they were completed. Anyone looking to manage an AI
+portfolio today is confronted with precisely this legacy.
+Enterprise Architecture Management (EAM): EAM
+refers to the systematic design and governance of a
+company's overall architecture—from business
+capabilities, data, and applications to the technological
+infrastructure. The goal is to align every architectural
+decision with the company's objectives.
+Almost everything about this description is correct. It
+reflects the practice of many EA functions, but not the
+potential of the discipline: The weakness lay in the
+execution. Operating EA purely as a documentation tool is
+like using a navigation system only to read maps without
+activating the route guidance. Ross, Weill, and Robertson
+pointed this out as early as 2006: The enterprise
+architecture must form the foundation for business
+execution and not end as a downstream documentation
+exercise.[2] A meta-analysis on the contribution of
+Enterprise Architecture to the success of digital
+transformation primarily reports two effects: The
+complexity of digital ecosystems becomes manageable,
+and strategic alignment increases.[1]
+With digital transformation, the requirements for
+Enterprise Architecture have shifted. Verhoef et al. divide
+the path into three stages—Digitization, Digitalization,
+and Digital Transformation—each requiring different
+architectural governance capabilities.[3] AI marks the
+transition to the third stage, in which business models
+themselves must be architecturally re-envisioned. Those
+who merely digitize existing processes will not get there.
+AI-native business logics are emerging that must be
+designed from the ground up.
+An internal assistant that searches documents is rarely
+just an application: It accesses document repositories,
+depends on permissions, model access, and logging, and
+raises the question of who is functionally responsible for
+1
+
+RN Working Paper • August 2026
+the information it provides. Thus, AI forces the cross-
+connections that EA was always meant to establish—
+across data strategy and the application landscape, across
+technology infrastructure, compliance, and business
+processes. No other governance discipline connects these
+dimensions with the same breadth.[4] Bharadwaj et al.
+argued as early as 2013 that digital strategy and corporate
+strategy must merge—a thesis that is confirmed in a more
+acute form by AI.[5] EAM is the operational instrument
+for this merger because it brings together business
+capabilities and data flows with governance requirements
+in a coherent model, including technology components.
+Conceptually, this connection is called Dynamic
+Capability—EA as the ability to recognize technological
+changes (Sensing), develop architectural responses
+(Seizing), and adapt the organization and architecture
+accordingly (Transforming).[4] This is precisely what the
+introduction of AI demands from organizations. A
+methodological limitation must be mentioned here: The
+specific causal relationship between the maturity of
+Enterprise Architecture Management and the success of
+AI scaling has not yet been validated by dedicated
+empirical studies. The argument is based on converging
+evidence from EA research, AI adoption research, and
+practical application. Direct proof remains an important
+desideratum for future studies.
+Enterprise Architecture can assume the role of a
+governance body only if it transforms itself. Attempts to
+govern AI with the instruments of EA 1.0—static models,
+quarterly reviews, a documentation-centric approach—
+risk producing precisely the bureaucracy that drives AI
+teams toward Shadow AI, that is, toward tools procured
+and paid for without the involvement of the IT function.
+Three levers turn the documentation tool into a steering
+instrument. The first lies in the review process: away from
+the quarterly approval gate and toward continuous,
+lightweight guidance. Moreover, the artifacts are changing
+—from static documents to living, data-driven models.
+And the role itself is shifting: The blueprinter is becoming
+a strategic advisor who sets guardrails and identifies
+decision options.[4]
+B. AI as a First-Class Citizen in the EA
+Metamodel
+What is not represented in the metamodel can hardly be
+governed later. Traditional metamodels recognize
+business processes, applications, and databases, along
+with technology components—AI systems appear in them,
+at best, as a subtype of applications. This classification
+underestimates what makes AI different: An AI model
+learns from data, behaves probabilistically, and is subject
+to Model Drift—its quality gradually declines as reality
+diverges from the training data. Therefore, it requires
+continuous monitoring.[6] Such an object demands its
+own distinct architecture artifacts. The implications of this
+are demonstrated by a simple search query: Anyone
+wanting to see all systems with personal training data in
+the repository will only get a result if training data is
+managed there as a distinct entity. Otherwise, the results
+list will remain empty, even though the systems exist.
+The EA metamodel defines the fundamental
+categories and relationships used to describe an enterprise
+architecture—such as business capabilities and
+15
+
+CTI Research Paper Series • SSR
+applications, data, and technology components. As the
+"model of models," it determines which architecture
+artifacts are documented and governed in the first place.
+In this context, First-Class Citizen simply means: a
+dedicated category, clearly named attributes, and
+regulated maintenance. Five such new building blocks are
+added. The first three document what is actually running.
+The AI system is established as an independent
+architecture component alongside classic applications,
+with attributes such as model type, risk category, and the
+responsible Business Unit. The AI model includes
+versioning and provenance information; moreover,
+performance metrics and the lifecycle status are added.[6]
+Data lineage—the documented trail of data from its source
+to the finished model—becomes an explicit artifact: It
+records where training data originates and which quality
+metrics it meets.[7] The two remaining building blocks
+make the inventory governable. AI risks become
+documented categories—Bias, hallucination, or Model
+Drift—that are linked to specific systems.[8] Finally, the
+model lifecycle becomes a process artifact that maps
+training and validation, deployment, and retirement as
+governed phases.[6]
+Artifact Key Attributes Governance
+Category Relevance
+AI System Model Type, System
+Risk Level, Registration,
+Business Owner, Accountability
+Compliance
+Status
+AI Model Version, Training Model Lifecycle,
+Data, Version Control
+Performance
+Metrics,
+Lifecycle Stage
+Data Lineage Data Sources, Traceability,
+Transformations, Auditability
+Quality Metrics
+AI Risk Risk Category, Risk
+Impact Level, Management,
+Mitigation Regulatory
+Strategy Compliance
+Model Lifecycle Phase, Trigger, Process
+Responsible Governance,
+Parties, Metrics Compliance
+Table 7: AI artifacts as dedicated categories in the EA metamodel
+Operationally, this extension is linked to an AI system
+registry that captures an organization's entire inventory—
+the chatbot in customer service, the forecasting model in
+procurement, and also the text assistant that the marketing
+department procured on its own. Without an overview,
+there is no governance, and without governance, there is
+no scaling. The registry answers three questions: What is
+in use? Who is responsible? What is the risk category?[9]
+Without a reliable answer to these, every audit begins with
+a search.
+The data architecture deserves particular attention in
+this regard. By extending the metamodel with data lineage
+artifacts, the origin, processing, and quality of training
+data can be traced at any time.[7] From a regulatory
+perspective, this point gains additional weight, as the EU
+1
+
+RN Working Paper • August 2026
+AI Act requires explicit documentation of training data for
+high-risk AI systems.[10]
+These artifacts can be integrated without disrupting
+existing EA frameworks; established frameworks offer
+sufficient extension points for this purpose. The decisive
+factor is how consistently AI is treated as a distinct
+dimension. Which underlying framework is used is of
+secondary importance.
+C. Federated AI Governance
+The marketing department wants the AI-powered
+campaign to go live next week; the IT department is asking
+about data leakage, model providers, and auditability. This
+is what AI governance looks like in daily operations.
+Decentralized business teams need short decision-making
+paths and access to new tools without lengthy approval
+processes; central IT and EA teams champion architectural
+consistency, security, and compliance. Both sides are
+right, and the conflict is systemic.
+At the control level, this corresponds to federated
+governance. What Chapter 3 structurally separated -
+central platform services with decentralized application
+responsibility - becomes the order of responsibilities here.
+Standards, platform services, and risk classification
+remain central, along with the guardrails themselves. The
+business teams retain local autonomy in selecting specific
+AI applications - within these very guardrails.[11]
+Three mechanisms support this operationally, and the
+first is a tiered review process: In place of the monolithic
+architecture board, there is a review depth that depends on
+the risk profile. An internal translation tool with no access
+to customer data undergoes an automated self-assessment
+check; an application classified as high-risk requires a full
+architecture review, including a compliance check.[10]
+The governance scales with the risk.
+The second mechanism replaces gatekeeping with
+guardrails. The platform provides standardized, secure
+building blocks with which business departments can
+experiment freely within defined limits.[4] An LLM
+gateway, for example, opens up access to various language
+models, while automatically filtering sensitive data and
+logging usage. The guardrail is embedded in the
+infrastructure.
+Governance as Code, introduced in Chapter 3 as an
+architectural principle, ultimately shifts policies from
+documents to automated policies on the AI platform.[6] A
+new AI model then automatically undergoes bias checks,
+performance validations, and compliance reviews before it
+can be deployed to production. If a threshold is breached,
+deployment is halted without anyone having to write an
+approval email. The checks are integrated into the MLOps
+pipeline, i.e., in the automated build and rollout track for
+models.
+Formal processes alone rarely sustain the balance
+between exploration and exploitation. Alongside these, a
+softer layer is at work: the informal networks, the
+communities of practice, through which central and
+decentralized teams actually communicate with each
+other. Ambidexterity research examines this interplay of
+formal and personal coordination mechanisms in
+individual executives; it finds positive correlations for
+both.[12] For the governance level, this is an analogy, not
+proof - but one that is regularly confirmed in practice.
+16
+
+CTI Research Paper Series • SSR
+D. New Roles and Structures
+Without a clear mandate, AI governance ends up
+somewhere between the architecture function, the Data
+Office, Security, and Legal—in other words, nowhere.
+More recent conceptual works describe the Enterprise AI
+Architect for this purpose: a bridging role between the
+business department and IT, data responsibility, and
+compliance.[4] This role combines architectural thinking
+with robust knowledge of AI technologies, data strategies,
+and regulatory requirements.
+The Enterprise AI Architect is responsible for the AI
+reference architecture and sets the standards for model
+development and deployment. This person evaluates new
+AI technologies for architectural fit and ensures that AI
+initiatives are integrated into the overall architecture.[9]
+Their guiding question is not, “How do I train the best
+model?” but rather, “How does this model fit into the
+three-layer architecture, the governance structures, and the
+compliance requirements?”
+Role / Committee Core Responsibility
+Enterprise AI Architect AI reference architecture,
+standards, tech radar
+AI Governance Board Strategy, risk classification,
+budget
+AI Product Owner (per BU) Use case prioritization, business
+case
+Data Steward for AI Data quality, Feature Store,
+lineage
+MLOps Engineer CI/CD for ML, deployment,
+monitoring
+Table 8: Roles and committees of federated AI governance
+The cadence is crucial: The AI Governance Board meets
+monthly, not quarterly. AI moves faster than traditional IT
+topics, and a quarterly cycle can mean that facts are
+established uncontrollably for three months. Accordingly,
+the agenda includes the initiatives of the last four weeks:
+What went live, what was escalated, where is an owner
+still missing? However, the committee must not become a
+bottleneck in this process: Operational decisions within
+the established guardrails remain with the decentralized
+teams.
+This structure does not have to start from scratch. Many
+organizations already have Architecture Review Boards or
+IT Governance Committees. The pragmatic
+recommendation is to expand existing structures with AI-
+specific mandates rather than building parallel ones.[1]
+Anyone who establishes a second board alongside the
+existing one primarily just doubles the number of
+meetings.
+E. Regulation as a Catalyst
+For architectural work, what the frameworks are called is
+less important than the evidence they require. Three
+currently shape the approach to AI risks, with very
+different degrees of binding force: the EU AI Act as
+applicable law, ISO/IEC 42001 as a voluntarily certifiable
+international standard for AI management systems, and
+the NIST AI Risk Management Framework as a voluntary
+1
+
+RN Working Paper • August 2026
+However, this role does not make decisions alone. For
+risk classification, budgeting, and prioritization, the
+organization needs an AI Governance Board with a clear
+mandate, staffed cross-functionally to reflect the cross-
+sectional nature of AI. The board is chaired by the CIO or
+the CDO; seated at the table are the relevant Business
+Units, Legal and Compliance, and the Data Lead. Security
+is represented twice—once through information security
+(CISO or the person responsible for IT security) and once
+through Security Architecture.
+Especially for Enterprise AI, Security Architecture
+belongs on the Governance Board as a formative role, not
+as a subordinate control function. It assesses access
+patterns as well as provider and third-party risks, secure
+designs for Retrieval-Augmented Generation (RAG) and
+LLM gateways, in addition to guardrail architectures and
+auditability. Thus, it connects Security by Design with the
+architectural principles from Chapter 3 and prevents
+security from becoming a roadblock only when going live.
+[6][10]
+Decision-Making Authority Cadence
+Architectural principles, tool Continuous
+selection
+Strategic AI investments, policies Monthly
+Application design, local Weekly
+resources
+Data release, quality standards Continuous
+Technical implementation Continuous
+U.S. guideline. What they have in common is the place
+where the evidence is generated: documented data
+provenance, logged system events, documented risk
+assessments, clear responsibility per system—all of this
+originates not in the compliance department, but in the
+system landscape. It cannot be reconstructed retroactively
+from documents.
+The EU AI Act follows a risk-based approach with
+categories ranging from minimal to unacceptable risk.[10]
+For high-risk systems, it requires a risk management
+system and data governance, technical documentation, and
+human oversight.
+The timeline for this has recently shifted. Originally,
+Article 113 stipulated August 2, 2026, for newly marketed
+standalone high-risk systems under Annex III; for systems
+embedded in products under Annex I, the date was already
+August 2, 2027. Regulation (EU) 2026/1744 of July 8,
+2026, has recast the article: The requirements of Chapter
+III, Sections 1 to 3, now apply to systems under Article
+6(2) in conjunction with Annex III from December 2,
+2027, and for systems under Article 6(1) in conjunction
+with Annex I, Section A, from August 2, 2028.[13] Thus,
+only the high-risk block has been postponed. The
+prohibitions under Article 5 and the AI literacy
+requirement under Article 4 have been in effect since
+February 2, 2025, the rules for general-purpose AI models
+and the governance and sanction provisions since August
+17
+
+CTI Research Paper Series • SSR
+2, 2025, and the transparency obligations under Article 50
+since August 2, 2026.[14]
+Anyone who concludes from this that the topic has been
+deferred underestimates the scale of the task. Data lineage
+across organically grown system landscapes, a complete
+AI system register, and robust audit trails are not created in
+a single quarter. The time gained is time for building, not a
+deferral.
+ISO/IEC 42001:2023 supplements the legal framework
+with a management system-oriented approach. The
+overlap lies less in the terminology than in the subject
+matter: Where the EU AI Act requires the origin of
+training data to be documented, the standard introduces its
+own control for data provenance; where it demands
+automatic event logging, the standard specifies the
+recording of system events.[15] The NIST AI Risk
+Management Framework structures the handling of AI
+risks into four functions: Govern, Map, Measure, and
+Manage.[16]
+Consequently, the regulation demands evidence that a
+viable architecture should generate anyway. However, it
+does not mandate an AI system register for companies that
+merely use AI—the registration under Article 49 applies to
+providers, and on the operator side, only to public
+authorities. Nevertheless, there is no way around an
+inventory: AI literacy under Article 4, compliance with the
+prohibitions under Article 5, oversight and log retention
+under Article 26, and the assessment of whether one
+becomes a provider oneself through a substantial
+modification all presuppose that the organization knows
+its own inventory.[17] Moreover, documented data
+lineage makes troubleshooting and fine-tuning traceable,
+and audit trails provide the transparency for effective
+Model Lifecycle Management.[8]
+This suggests that regulation should not become the
+sole driver of governance investments. Organizations
+pursuing governance for compliance reasons alone tend to
+produce bureaucratic shells without operational value.
+Value appears to arise only where compliance
+requirements are translated into architectural
+requirements.
+Enterprise Architecture is the discipline that can
+provide the architectural evidence that regulators expect.
+[4] The three-layer architecture from Chapter 3 forms the
+technical foundation: The Data & Knowledge Layer
+provides data lineage, the AI Platform Layer documents
+model lifecycles, and the Application Layer captures the
+integration into business processes. The governance layer
+permeates all three levels as a cross-cutting function.[6]
+An organization that has established this mapping cleanly
+can answer an audit request from its inventory rather than
+from memory.
+The three frameworks converge on largely the same
+items of evidence, even if they name them differently: an
+overview of the systems in use, a risk or impact
+assessment, the origin of the data, and event logging.
+Therefore, an organization that builds them once
+architecturally can serve them largely in common, instead
+of maintaining a separate evidence trail for each
+framework. This is the economic core of this investment,
+alongside better governance and scalability. When the
+obligations for high-risk systems take effect, companies
+1
+
+RN Working Paper • August 2026
+must provide evidence that cannot be delivered without
+architectural anchoring.
+A metamodel and governance, roles and regulation do
+not yet create a productive platform. What becomes of it in
+practice is decided by the sequence: the steps in which it is
+built and the result one step must deliver before the next
+can be supported.
+According to the position of this paper, Enterprise
+Architecture Management is the natural home for
+Enterprise AI Governance because, as a central discipline,
+it establishes the link between business strategy,
+technology landscape, and compliance. Whether an
+organization truly fulfills this role is shown by three
+sobering questions: Does the AI system register have an
+owner who keeps it up-to-date? Does the Governance
+Board meet monthly? Is at least one guideline available as
+an executable policy on the platform instead of as a
+document on the intranet? Where all three answers are
+missing, EAM remains a documentation function for AI as
+well—and the governance gap described in this chapter
+remains open.
+References
+[1] Alghamdi, H. (2024): Assessing the Impact of Enterprise
+Architecture on Digital Transformation Success: A Global
+Perspective. Sustainability, 16(20), 8865. DOI:
+10.3390/su16208865. Systematic review with meta-analysis.
+[2] Ross, J. W.; Weill, P.; Robertson, D. C. (2006): Enterprise
+Architecture as Strategy: Creating a Foundation for Business
+Execution. Harvard Business School Press.
+[3] Verhoef, P. C. et al. (2021): Digital transformation: A
+multidisciplinary reflection and research agenda. Journal of
+Business Research, 122, 889-901. DOI:
+10.1016/j.jbusres.2019.09.022.
+[4] Ettinger, A. (2025): Enterprise Architecture as a Dynamic
+Capability for Scalable and Sustainable Generative AI Adoption:
+Bridging Innovation and Governance in Large Organisations
+[Preprint]. arXiv:2505.06326. DOI: 10.48550/arxiv.2505.06326.
+[5] Bharadwaj, A. et al. (2013): Digital Business Strategy: Toward a
+Next Generation of Insights. MIS Quarterly, 37(2), 471-482. DOI:
+10.25300/misq/2013/37:2.3.
+[6] Kreuzberger, D.; Kühl, N.; Hirschl, S. (2023): Machine Learning
+Operations (MLOps): Overview, Definition, and Architecture.
+IEEE Access, 11, 31866-31879. DOI:
+10.1109/access.2023.3262138.
+[7] Aldoseri, A.; Al-Khalifa, K. N.; Hamouda, A. M. (2023): Re-
+Thinking Data Strategy and Integration for Artificial Intelligence:
+Concepts, Opportunities and Challenges. Applied Sciences,
+13(12), 7082. DOI: 10.3390/app13127082.
+[8] Díaz-Rodríguez, N. et al. (2023): Connecting the dots in trustworthy
+Artificial Intelligence: From AI principles to responsible AI
+systems. Information Fusion, 99, 101896. DOI:
+10.1016/j.inffus.2023.101896.
+[9] Jöhnk, J.; Weißert, M.; Wyrtki, K. (2021): Ready or Not, AI Comes
+- An Interview Study of Organizational AI Readiness Factors.
+Business & Information Systems Engineering, 63(1), 5-20. DOI:
+10.1007/s12599-020-00676-7.
+[10] Sunyaev, A. et al. (2025): High-Risk Artificial Intelligence.
+Business & Information Systems Engineering, 67(6), 981-994.
+DOI: 10.1007/s12599-025-00942-6.
+[11] Weber, M. et al. (2023): Organizational Capabilities for AI
+Implementation - Coping with Inscrutability and Data
+Dependency in AI. Information Systems Frontiers, 25(4), 1549-
+1569. DOI: 10.1007/s10796-022-10297-y.
+[12] Mom, T. J. M.; Van Den Bosch, F. A. J.; Volberda, H. W. (2009):
+Understanding Variation in Managers' Ambidexterity:
+Investigating Direct and Interaction Effects of Formal Structural
+and Personal Coordination Mechanisms. Organization Science,
+20(4), 812-828. DOI: 10.1287/orsc.1090.0427.
+[13] Regulation (EU) 2024/1689 of the European Parliament and of the
+Council of 13 June 2024 laying down harmonised rules on
+artificial intelligence (Artificial Intelligence Act), OJ L,
+2024/1689, 12.7.2024, ELI: data.europa.eu/eli/reg/2024/1689/oj -
+Art. 113 as amended by Regulation (EU) 2026/1744 of 8 July
+2026, OJ L, 2026/1744, 24.7.2026, ELI:
+18
+
+CTI Research Paper Series • SSR
+data.europa.eu/eli/reg/2026/1744/oj (in force since 27.7.2026). A
+consolidated version was not available on EUR-Lex at the date of
+access; the amending act is decisive. Accessed: 06.08.2026.
+[14] On the staggered obligations: Art. 113(a) and (b) of Regulation
+(EU) 2024/1689; on the transparency obligations Art. 50 ibid.
+[15] ISO/IEC 42001:2023: Information technology - Artificial
+intelligence - Management system. International Organization for
+Standardization, Geneva. Online: iso.org, Accessed: 06.08.2026.
+[16] National Institute of Standards and Technology (2023): Artificial
+Intelligence Risk Management Framework (AI RMF 1.0). NIST
+AI 100-1. DOI: 10.6028/nist.ai.100-1.
+[17] On registration: Art. 49 of Regulation (EU) 2024/1689 (providers
+and operators who are public authorities); on operator obligations
+Art. 4, 5, 25 and 26 ibid.
+VI. THE PATH - FROM STRATEGY TO
+A PRODUCTIVE AI PLATFORM
+Enterprise AI transformation follows a six-stage phase
+model—from strategic analysis to continuous
+optimization—that is traversed iteratively and not
+processed linearly. Quick wins and platform investments
+run in parallel, in a conscious dual-track strategy: Every
+quick value contribution builds upon the emerging
+platform. The ROI argumentation for AI platforms
+demands new logics beyond project ROI: Total Cost of
+Ownership, option value, risk reduction, and time-to-
+value for subsequent projects constitute the relevant key
+metrics.
+The conceptual foundation is in place. The open
+question is where a company specifically starts. The path
+Phase Core Result
+1 - Strategic Analysis AI vision, prioritized use cases
+2 - As-Is Analysis & Inventory Transparency of AI landscape,
+data maturity
+3 - Target Architecture Architectural decisions,
+compliance framework
+4 - Roadmap & Prioritization Investment case, prioritized
+roadmap
+5 - Implementation Productive platform, first scaled
+use cases
+6 - Continuous Optimization Performance monitoring,
+architectural evolution
+Table 9: Phase Model of the Enterprise AI Transformation
+Phase 1: Strategic Analysis (2-3 weeks). It begins with
+strategic positioning. Organizations define their AI vision,
+check its alignment with the corporate strategy, and
+prioritize potential use cases according to value
+contribution, feasibility, and strategic relevance.[2] Three
+to five use cases with high value potential are sufficient to
+start; a broader scope costs focus before the first one is
+even running.
+Already in Phase 1, it must be clarified who is
+responsible for what: the use case portfolio, the promised
+benefits, the data products, and the operating model.
+Technical feasibility is only one of several equally
+important criteria. ROI logic, ownership, and change
+effort count just as much, as do qualification needs, vendor
+and partner strategy, and security and legal requirements.
+This prevents the architectural perspective from becoming
+an end in itself; it structures the other success factors and
+makes them decidable.[2][3]
+1
+
+RN Working Paper • August 2026
+from strategy to a productive platform can be described in
+phases, and it requires that short-term value contribution
+and long-term platform development run in parallel rather
+than sequentially. One point deserves special attention
+here: Organizations that run AI pilots without
+accompanying platform development accumulate
+technical debt, which increases the subsequent
+consolidation effort.
+Dual-Track Strategy: In the context of Enterprise AI
+Transformation, a dual-track strategy refers to the parallel
+pursuit of two tracks of action: Track 1 delivers quick,
+visible value contributions through concrete AI use cases,
+while Track 2 simultaneously builds the architectural
+platform foundations. Both tracks are mutually dependent
+—quick wins generate acceptance and finance the
+platform, while the platform accelerates every subsequent
+quick win.
+A. Phase Model of Enterprise AI Transformation
+Companies that manage the transition from pilots to a
+platform go through six phases.[1] They build on one
+another without being strictly sequential: in practice, they
+overlap, and setbacks are normal. More important than the
+sequence is what results a phase must deliver before the
+next one becomes viable. The phase durations mentioned
+are consistently based on experience from transformation
+projects, not empirically collected mean values.
+Typical Duration Most Common Mistake
+2-3 weeks Starting too broadly
+3-4 weeks Ignoring shadow AI
+3-5 weeks Target architecture without as-is
+context
+2-3 weeks Wanting everything at once
+3-9 months Platform without business pull
+Ongoing Neglecting optimization
+Phase 2: As-Is Analysis and Inventory (3-4 weeks).
+Without transparency about the current state, the basis for
+realistic planning is missing. Phase 2 captures the existing
+AI landscape—explicitly including the shadow AI
+analyzed in Chapter 2—assesses data maturity, and
+reviews the maturity level of enterprise architecture
+management.[3] Anyone who excludes unofficial use is
+building the future target architecture on a foundation that
+does not exist.
+Phase 3: Target Architecture (3-5 weeks). Phase 3
+defines the target architectural structure, decides between
+a central, federated, and hybrid approach, and specifies the
+three layers for the specific corporate context.[4] The as-is
+state remains the benchmark here: an architecture at
+maturity level 5 is of little use to a company at maturity
+level 2.
+Phase 4: Roadmap and Prioritization (2-3 weeks). In
+Phase 4, the target architecture is transformed into an
+19
+
+CTI Research Paper Series • SSR
+actionable roadmap: quick wins that, based on experience,
+deliver value contributions within 30 to 90 days, plus a
+platform development plan with clear milestones. The
+interplay between the business department, data science,
+and operations must also be planned; a significant portion
+of the friction in ML projects arises at these interfaces.[5]
+Prioritizing here also means leaving things behind.
+Organizations that want to implement everything at once
+overstretch their capacities.
+A significant risk factor lies between Phase 4 and Phase
+5, in the transition from planning to implementation. A
+rule of thumb derived from transformation projects has
+proven serviceable here: the first productive use case
+should be live within 90 days of project start; this is not an
+empirically determined threshold. Organizations that
+substantially exceed this timeframe risk a loss of
+management sponsorship and organizational attention.
+Phase 5: Implementation (3-9 months). The
+implementation phase iteratively builds the AI platform
+and, in parallel, implements the prioritized use cases.
+Chapter 2 described how wide this range is: what can be
+achieved in about three months in a medium-sized
+business can extend over nine months or longer in a
+corporation with a complex legacy landscape. The
+development is driven by demand. A platform component
+that is not backed by a specific use case remains
+infrastructure in reserve.
+Phase 6: Continuous Optimization (ongoing). The
+sixth phase marks the beginning of continuous operation:
+performance monitoring, a growing use case pipeline, and
+architectural evolution. AI models are subject to
+phenomena like concept drift and therefore require
+permanent monitoring.[4]
+B. Balancing Quick Wins and Platform
+Investments
+Quick wins build organizational buy-in and secure funding
+for the platform. However, relying solely on them repeats
+the mistakes of the past: every isolated quick win created
+without a common platform generates a new siloed
+solution.
+The solution lies in a dual-track strategy. Track 1
+identifies use cases with high business value and short
+implementation times—typical candidates include the
+automation of repetitive back-office processes, AI-
+powered knowledge retrieval, or support for customer
+interactions. According to the MIT report, back-office
+automation, in particular, often achieves a higher return
+than the sales and marketing applications that are the focus
+of investment.[6] In parallel, Track 2 builds the
+architectural foundations—Data Foundation and MLOps
+pipeline, along with a governance framework and Model
+Registry.
+The crucial design principle is: Every quick win must
+run on the emerging platform, not alongside it.
+Organizations that successfully manage this transition
+define a minimal platform core as early as Phase 3, upon
+which all quick wins are built. Productive ML platforms
+have demonstrated for years that recurring building blocks
+—data preparation, model management, deployment—are
+worthwhile as shared components.[7] In our experience, a
+central LLM gateway is added for generative applications.
+2
+
+RN Working Paper • August 2026
+The cadence is a deliberate decision. In the first 90
+days, the emphasis is on Track 1—proving that AI
+generates tangible business value. From the third month
+onward, the focus increasingly shifts to Track 2. By month
+six, the platform should be sufficiently established for new
+use cases to be onboarded noticeably faster; this is
+precisely its value proposition compared to a series of
+individual projects.
+C. ROI Argumentation for Platform Investments
+Traditional ROI calculations measure the return of a single
+project against its costs. For platforms, this falls short:
+their value only emerges from the many use cases that are
+built on them over time.[8] Therefore, different key figures
+are needed when communicating with the CFO.
+Total Cost of Ownership (TCO). Consolidation on a
+platform lowers the total costs compared to decentralized
+tool sprawl. Chapter 2, with figures from the Torii survey,
+has shown how extensive a company's application
+landscape is on average and what proportion of it was
+procured without IT's involvement.[9] Every additional
+siloed AI solution adds to this tally - with licenses and
+integration at the beginning, and with maintenance and
+governance in the long run.
+Option Value. An AI platform creates the option to
+realize future use cases quickly and cost-effectively. The
+first use case rarely justifies the investment on its own;
+every subsequent one leverages the existing infrastructure.
+Chapter 3 introduced cloud migration as an analogy for
+this. In terms of platform economics, this is the standard
+case: the value of a platform lies in what is built upon it.
+[10]
+Risk Reduction. Operationally, the risk decreases
+because sanctioned self-service offerings displace Shadow
+AI. From a regulatory perspective, it decreases because
+compliance requirements can be embedded in the
+architecture.[11]
+Time-to-Value. The first use case on a new platform
+typically takes several months, while subsequent ones take
+significantly less time: data integration, model operations,
+and approval processes are already in place. This
+acceleration is the key figure that supports the platform
+approach with the CFO, and it can be measured in-house
+as soon as the second and third use cases are running.
+Reliable industry benchmarks are not available; internal
+measurement replaces them.
+D. Success Patterns and Transformation Traps
+Four patterns characterize organizations that succeed in
+scaling, and four traps characterize those that fail. Three
+pairs of these are described: AI as an enterprise-wide
+capability versus technical ambition without
+organizational preparation (Chapters 3 and 4), federated
+governance versus gatekeeping (Chapter 5), and the dual-
+track balance versus platform construction without
+demand from the business departments (Section 6.2 and
+the box in Chapter 3). A trap rarely occurs in isolation.
+The fourth success pattern concerns the external
+division of labor. The MIT report attributes a rate of
+productive deployments to projects with external partners
+that is roughly twice as high as that for purely internal
+development approaches.[6] Chapters 1 and 2 mention the
+reservations regarding this survey.
+20
+
+CTI Research Paper Series • SSR
+The fourth trap is mentioned less often: Tool selection
+takes the place of the architecture decision. Anyone who
+starts by comparing LLM providers and MLOps suites lets
+the product determine the platform's structure and usually
+only notices the lock-in with the second use case that
+doesn't fit. The target architecture comes first: It specifies
+which capabilities the platform must support and thus
+narrows down the pool of candidates. We do not have a
+reference in the literature for this; the observation stems
+from projects.
+E. The Role of External Expertise
+Chapter 4 has outlined the contribution of external
+experience: Those who know the path recognize the
+pitfalls sooner. This is particularly effective in phases 1 to
+4; with the implementation, the emphasis shifts inward,
+and in continuous operation, it lies there entirely. External
+assistance cannot substitute for the development of
+internal competence. The architectural governance
+capability must emerge within the company itself, and it is
+one of the factors that determine the success of digital
+transformations.[12] This paper does not establish criteria
+for selecting a partner—the authors themselves are
+consultants.
+F. From the Phase Model to Continuous
+Operation
+The Enterprise AI Transformation is not complete with the
+go-live; it transitions into continuous operation.
+Performance monitoring links technical metrics such as
+Model Accuracy and Data Drift with business metrics such
+as ROI per use case.[4] As technology evolves, the
+platform architecture must evolve accordingly.[12]
+Moreover, portfolio management maintains the balance
+between exploratory use cases, which open up new
+possibilities, and exploitative ones, which optimize
+existing processes.[8]
+The transition is successful when three conditions are
+met: The platform is actively used, the governance
+structures are functional, and the organization
+independently identifies and implements new use cases.
+Enterprise AI Transformation follows a structured
+phase model, the key to which lies in the dual-track
+strategy: Quick wins generate acceptance, while the
+platform accelerates every subsequent use case. External
+experience shortens the path to this goal; however, it does
+not replace internal competence building.
+References
+[1] Ettinger, A. (2025): Enterprise Architecture as a Dynamic
+Capability for Scalable and Sustainable Generative AI Adoption:
+Bridging Innovation and Governance in Large Organisations
+[Preprint]. arXiv:2505.06326. DOI: 10.48550/arxiv.2505.06326.
+[2] Kanbach, D. K. et al. (2024): The GenAI is out of the bottle:
+generative artificial intelligence from a business model innovation
+perspective. Review of Managerial Science, 18(4), 1189-1220.
+DOI: 10.1007/s11846-023-00696-z.
+[3] Jöhnk, J.; Weißert, M.; Wyrtki, K. (2021): Ready or Not, AI Comes
+- An Interview Study of Organizational AI Readiness Factors.
+Business & Information Systems Engineering, 63(1), 5-20. DOI:
+10.1007/s12599-020-00676-7.
+[4] Kreuzberger, D.; Kühl, N.; Hirschl, S. (2023): Machine Learning
+Operations (MLOps): Overview, Definition, and Architecture.
+IEEE Access, 11, 31866-31879. DOI:
+10.1109/access.2023.3262138.
+[5] Nahar, N. et al. (2022): Collaboration Challenges in Building ML-
+Enabled Systems: Communication, Documentation, Engineering,
+2
+
+RN Working Paper • August 2026
+and Process. In: Proceedings of the 44th International Conference
+on Software Engineering (ICSE), 413-425. DOI:
+10.1145/3510003.3510209.
+[6] Challapally, A. et al. (2025): The GenAI Divide - State of AI in
+Business 2025. Preliminary Findings, Project NANDA, MIT
+Media Lab. Research report, not peer-reviewed. The report was
+accessible at the retrieval date under nanda.media.mit.edu; the
+address now redirects to a project overview without a reference to
+the report. Copy with the authors. Retrieved: 26.03.2026.
+[7] Baylor, D. et al. (2017): TFX: A TensorFlow-Based Production-
+Scale Machine Learning Platform. In: Proceedings of the 23rd
+ACM SIGKDD International Conference on Knowledge
+Discovery and Data Mining, 1387-1395. DOI:
+10.1145/3097983.3098021.
+[8] Woerner, S. et al. (2025): Grow Enterprise AI Maturity for Bottom-
+Line Impact. MIT CISR Research Briefing, Vol. XXV, No. 8,
+21.08.2025. Methodology: MIT CISR 2025 Real-Time Business
+Survey, N = 152. Research report, not peer-reviewed. Online:
+cisr.mit.edu/publication/2025_0801_EnterpriseAIMaturityUpdate
+_WoernerSebastianWeillKaganer, Retrieved: 07.08.2026.
+[9] Torii (2026): The SaaS Benchmark Annual Report 2026. Press
+release “Torii 2026 Benchmark Report: AI Isn't Consolidating
+SaaS - It's Expanding Shadow IT” from 24.02.2026. Vendor
+survey, not peer-reviewed. Online: toriihq.com/saas-benchmark-
+annual-report-2026 and globenewswire.com, Retrieved:
+07.08.2026.
+[10] Tiwana, A. (2014): Platform Ecosystems: Aligning Architecture,
+Governance, and Strategy. Morgan Kaufmann.
+[11] Sunyaev, A. et al. (2025): High-Risk Artificial Intelligence.
+Business & Information Systems Engineering, 67(6), 981-994.
+DOI: 10.1007/s12599-025-00942-6.
+[12] Alghamdi, H. (2024): Assessing the Impact of Enterprise
+Architecture on Digital Transformation Success: A Global
+Perspective. Sustainability, 16(20), 8865. DOI:
+10.3390/su16208865. Systematic review with meta-analysis.
+VII. CONCLUSION AND OUTLOOK
+The paradox between AI investment and scaling success is
+resolved as soon as AI is understood as a matter of
+architecture and governance. Enterprise Architecture
+Management can assume governance if it moves beyond a
+mere documentation role to provide continuous steering—
+and if it incorporates the accompanying success factors:
+use cases, ownership, data, and others, all the way to
+security and compliance. With Agentic AI, the importance
+of architectural foundations continues to grow—those
+who invest today are creating strategic options for the
+next generation of technology.
+A. The Paradox - Resolved
+Many CIOs are familiar with the observation that opened
+this paper from their own organizations: Investments in
+Artificial Intelligence are increasing, yet the returns are
+falling short of expectations. The preceding chapters lead
+to a clear conclusion. The failure of AI initiatives is neither
+a coincidence nor purely a technology problem. Often, it is
+the direct, predictable result of a lack of architectural
+anchoring. This is compounded by unclear prioritization,
+weak ownership, and a lack of change capability, as well
+as non-integrated security and compliance requirements.
+The four anti-patterns—Shadow AI, Pilot Purgatory,
+Governance Vacuum, and Data Quality Deficits—are
+symptoms of a common deficit: the lack of architectural
+anchoring for AI within the enterprise landscape. Chapter
+2 diagnosed these patterns, while Chapter 3 developed the
+architectural responses. Thus, the initial paradox is
+resolved. Technology is not the primary constraint on AI
+success. What is missing are the structures to embed, scale,
+and govern it—including the organizational, security, and
+regulatory prerequisites required to sustainably support
+productive AI systems.
+21
+
+CTI Research Paper Series • SSR
+B. Three Messages for Practice
+First: AI scaling is primarily a matter of architectural
+thinking. Companies that successfully scale AI treat it as
+an Enterprise Capability within a well-conceived platform
+landscape. The three-layer architecture provides the
+orientation for this transformation by separating data
+management, model operations, and application
+integration into manageable areas of responsibility.
+Architectural thinking implies that every AI initiative is
+integrated into an overall structure from the first day, even
+where that structure initially consists of no more than a
+deliberate commitment to three architectural principles.
+Months of preliminary work on a target architecture are
+not a prerequisite.
+Second: Enterprise Architecture Management is the
+central discipline with the cross-functional mandate
+for this task. EAM connects business strategy, AI
+technology, and data, as well as security and compliance—
+but only as a Dynamic Capability. This role demands a
+transformation. AI becomes a First-Class Citizen in the
+metamodel, the central gatekeeper gives way to federated
+governance, and the static blueprint yields to continuous
+adaptation. The empirical validation of this connection—
+does the maturity level of Enterprise Architecture
+Management show a measurable effect on AI scaling
+success?—is a research desideratum that this paper
+formulates as a hypothesis and recommends for future
+investigation.
+Third: The journey begins with the next step. The
+phase model in Chapter 6 shows a structured path from
+strategic analysis to a productive platform. The dual-track
+strategy resolves the apparent contradiction between
+short-term expectations for results and long-term
+architectural investment: Quick Wins on Track 1, platform
+development on Track 2. Crucially, every Quick Win runs
+on the emerging platform.
+C. Outlook - why architecture is becoming more
+important now
+The foreseeable development towards Agentic AI and
+multi-agent systems increases the architectural
+requirements. Chapter 4 evaluated the Gartner forecast on
+this topic: a surge in proliferation and the abandonment
+rate stand side-by-side in the same analysis.[1]
+Expectation and viability are diverging. This is the same
+pattern that this paper has described for the AI wave to
+date.
+Agentic AI intensifies the requirements in several
+respects: Autonomous agents require more robust
+guardrails than assisting systems. Multi-agent
+architectures generate more complex interaction patterns.
+Moreover, the requirements for Observability increase
+when AI systems transition from recommending to acting.
+The hidden technical debt, which Chapter 3 introduced
+with Sculley et al.,[2] is particularly impactful in multi-
+agent architectures because the incorrect decision of one
+agent propagates to others. All of this presupposes the
+architectural foundations that this paper describes.
+The paradigm shift is already emerging: AI is evolving
+from a tool into an actor. This transformation requires
+more architecture. Those who invest in platform
+2
+
+RN Working Paper • August 2026
+foundations today are laying the groundwork for the next
+evolutionary stage.
+D. The Call to Action
+Better models, higher budgets, and more pilots do not
+close the gap between AI investment and AI value
+creation. What is often missing is the architectural
+integration that brings use cases, platform, and data into a
+viable overall structure—including Governance, Security,
+and Change.
+The first concrete step is to establish transparency over
+the current AI landscape. An AI system registry can be
+established in a few weeks, immediately generates
+information relevant for governance, and creates the
+foundation for any further governance measures. This is
+followed by a target architecture based on the three layers,
+conceived as a concrete organizational framework for
+current and future initiatives. Finally, federated
+governance structures with clear role assignments are
+implemented.
+According to the MIT report, those who work with
+external partners during scaling are significantly more
+likely to achieve productive deployment than those who go
+it alone.[3] Chapter 2 mentions the reservations about the
+survey; however, the direction aligns with the experience
+that initial runs are more expensive than repetitions.
+The coming one to two years may be characterized as a
+favorable window of opportunity for establishing
+foundational AI architecture. Technological maturity,
+regulatory requirements, and organizational readiness are
+currently converging, and the postponed deadlines of the
+EU AI Act afford the time required to build robust chains
+of evidence.
+The paradox from Chapter 1 has a resolution: The
+money is often tied to the wrong investment logic. Those
+who invest in technology while neglecting architecture,
+ownership, and the data foundation create fragmentation;
+the same applies to security and the capacity for change.
+Conversely, those who invest in architecture and build
+technology upon it generate scalable value creation. The
+difference is decided in mindset before it is reflected in the
+budget.
+AI scaling is primarily an architectural and governance
+decision, not purely a technological one. The three-layer
+architecture, Security by Design, and federated
+governance form the foundation for the journey from
+pilots to platforms—supported by an EAM in a governing
+role. In the coming wave of Agentic AI, these foundations
+will determine competitiveness.
+References
+[1] Verma, A. (2025): Gartner Predicts Over 40% of Agentic AI
+Projects Will Be Canceled by End of 2027. Gartner, Inc., press
+release from 06/25/2025. Analyst survey, not peer-reviewed.
+Online: gartner.com/en/newsroom/press-releases/2025-06-25-
+gartner-predicts-over-40-percent-of-agentic-ai-projects-will-be-
+canceled-by-end-of-2027, Retrieved: 03/26/2026.
+[2] Sculley, D. et al. (2015): Hidden Technical Debt in Machine
+Learning Systems. In: Advances in Neural Information Processing
+Systems 28, 2503-2511.
+[3] Challapally, A. et al. (2025): The GenAI Divide - State of AI in
+Business 2025. Preliminary Findings, Project NANDA, MIT
+Media Lab. Research report, not peer-reviewed. The report was
+accessible at nanda.media.mit.edu on the retrieval date; the
+address now redirects to a project overview without a link to the
+report. Copy on file with the authors. Retrieved: 03/26/2026.
+22
+
+CTI Research Paper Series • SSR
+Declaration of Generative AI and AI-Assisted Technologies in the Manusc
+During the preparation of this manuscript, the authors used generative
+August 2026: Claude Opus models (Anthropic), accessed through Clau
+The authors disclose this use and retain full responsibility for the manu
+The intellectual substance of the paper was developed by the autho
+interpretation and synthesis of the literature, conceptual framework, an
+authors. The paper is conceptual and reports no empirical data; gener
+results, or findings.
+Within this authorial framework, generative AI provided three forms of
+potentially relevant literature and candidate references. Every source
+against the original source by the authors. Second, generative AI supp
+authors’ ideas, arguments, notes, and source materials, and under the
+rounds of revision, including improvements to language, readability,
+grammatical and typographical issues and the suggestion of alternative
+of the manuscript into the present publication layout, including typesetti
+unchanged in this step.
+All AI-generated or AI-assisted content was critically reviewed by the au
+scholarly judgment. No AI-generated text was incorporated without
+throughout. No AI system is listed as an author. The authors take ful
+content of the manuscript.
+2
+
+RN Working Paper • August 2026
+cript Preparation Process
+e AI systems as research and writing support tools between March and
+ude Code, and GPT-5 series models (OpenAI), accessed through Codex.
+uscript and its contents.
+ors. The research question, theoretical argument, central construct,
+nd scholarly conclusions were conceived, evaluated, and decided by the
+rative AI was not used to generate, fabricate, manipulate, or alter data,
+f support. First, it supported the research process by helping to identify
+used in the manuscript was independently located, read, and verified
+ported the drafting and revision of the manuscript. Working from the
+direction of the authors, it produced and refined prose across multiple
+, clarity, coherence, and consistency, as well as the identification of
+e formulations. Third, generative AI assisted with the format conversion
+ing and the formatting of references; the substantive text was preserved
+uthors and was accepted, modified, or rejected on the basis of their own
+author review. Original sources, rather than AI systems, are cited
+ll responsibility for the originality, accuracy, integrity, and scientific
+23

@@ -1,6 +1,11 @@
 # Native Mini and historical prototype reference
 
-These archived instructions describe the existing native deployment and earlier prototypes. They are not a supported installation guide. Legacy Compose commands, provider requirements and status statements may be obsolete. For new installations use [the package guide](m1-package-usage.md). No Mini services or schedules were changed when these notes were moved.
+These archived instructions describe the pre-2026-09-24 native deployment and
+earlier prototypes. They are not the active Mini runbook or a supported
+installation guide. The production Mini now runs the app and Ollama in
+containers while host cron launches jobs through `scripts/mini_container_job.sh`;
+see [Mini production operations](mini-production-operations.md). Do not use the
+native systemd or direct `.venv` commands below for current production.
 
 ## Overview
 
@@ -406,7 +411,11 @@ Tail local Project Paper logs:
 scripts/tail_logs.sh
 ```
 
-The current intended Mac mini pipeline crontab has OpenAlex at 4:00 AM, arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, a biweekly Monday 2:00 AM Gemini profile rebuild comparison, and a Sunday 1:00 AM SQLite backup. The Semantic Scholar and profile comparison entries source `$HOME/.bashrc` so API/provider environment is available to cron. Each job uses a distinct non-blocking `flock` file under `/tmp` (override with `PAPER_AGENT_LOCK_DIR`) and exits successfully with a clear log message when a prior run is still active.
+Historically, the pre-cutover Mac mini crontab ran OpenAlex at 4:00 AM, arXiv at
+5:00 AM, Semantic Scholar at 6:00 AM, a biweekly Monday 2:00 AM Gemini profile
+comparison, and a Sunday 1:00 AM SQLite backup through native wrappers. These
+entries are retained only as historical reference; current production uses the
+same host scheduling authority with `scripts/mini_container_job.sh`.
 
 Cron jobs run the currently deployed checkout; they do not pull code while running. Deploy updates explicitly, then refresh the managed crontab if its template changed:
 
@@ -445,7 +454,7 @@ Override the OpenAlex topic for a one-off run:
 PAPER_AGENT_OPENALEX_TOPIC="AIOps root cause analysis cloud incidents" scripts/openalex_pipeline.sh
 ```
 
-Run the Review Queue web UI under systemd user supervision on the Mini:
+Historical pre-cutover systemd setup for the Review Queue web UI:
 
 ```bash
 mkdir -p ~/.config/systemd/user ~/.config/project-paper
