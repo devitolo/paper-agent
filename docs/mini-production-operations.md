@@ -63,10 +63,17 @@ holds the shared runtime lifecycle lease across preflight, writes, descendant
 cleanup, and completion. Cron remains the only scheduling authority; the parked
 container scheduler must remain disabled.
 
-The committed `deploy/project-paper.crontab` on `main` still contains the former
-direct `.venv` commands. Until migration assets are integrated and that template
-is corrected, do not run `scripts/install_project_paper_cron.sh --apply`. Inspect
-and preserve the working schedule with `crontab -l`.
+The committed `deploy/project-paper.crontab` uses the container launcher. The
+installer refuses templates that still contain native `.venv` pipeline commands.
+Inspect the live schedule with `crontab -l` before and after any change.
+
+## Releases
+
+Use [Mini release runbook](mini-release-runbook.md) for application updates. The
+release path is image-based: build and accept a `mini-production` image from a
+committed revision, then pull that immutable digest on the Mini and recreate the
+existing `app` service. Do not deploy application code by `git pull`, and do not
+rebuild on production.
 
 ## Acceptance evidence
 

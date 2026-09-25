@@ -70,4 +70,9 @@ RUN mkdir -p /opt/paper-gemini \
 LABEL org.projectpaper.runtime="migration-gemini-unqualified"
 USER paper
 
+# Mini production runtime. Build this target for the operator Mini release path.
+# The default `runtime` target below remains the public package runtime.
+FROM migration-gemini AS mini-production
+LABEL org.projectpaper.runtime="mini-production"
+
 FROM base AS runtime

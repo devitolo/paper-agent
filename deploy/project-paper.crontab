@@ -1,40 +1,31 @@
 # BEGIN PROJECT PAPER MANAGED JOBS
 
 SHELL=/bin/bash
-PAPER_AGENT_TELEMETRY=1
+PAPER_MIGRATION_ENV_FILE=$HOME/paper-mini-rehearsal/production-cutover/final-20260924-230636/production.env
+PAPER_MIGRATION_EXTRA_COMPOSE_FILES=$HOME/paper-mini-rehearsal/production-cutover/docker-compose.production.yml
 
 # Installed by scripts/install_project_paper_cron.sh.
 
 # Keep edits in this repo file so explicit deployment updates carry schedule changes.
 
-# Twice-daily OpenAlex Scout/Curator/Reviewer pipeline with rotating configured topics.
+# Containerized Project Paper jobs. Host cron owns the schedule; the launcher
+# enters the existing production app container. Do not replace these with
+# native host-runtime jobs while the Mini container runtime is authoritative.
 
-0 4 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+0 4 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh openalex >> logs/pipeline-openalex.log 2>&1
 
-# Paused afternoon: 0 16 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/openalex_pipeline.sh >> logs/pipeline-openalex.log 2>&1
+# Paused afternoon: 0 16 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh openalex >> logs/pipeline-openalex.log 2>&1
 
-# Twice-daily arXiv Scout/Curator/Reviewer pipeline.
+0 5 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh arxiv >> logs/pipeline-daily.log 2>&1
 
-0 5 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+# Paused afternoon: 0 17 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh arxiv >> logs/pipeline-daily.log 2>&1
 
-# Paused afternoon: 0 17 * * * cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/nightly_pipeline.sh >> logs/pipeline-daily.log 2>&1
+0 6 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh semantic >> logs/pipeline-semantic-scholar.log 2>&1
 
-# Twice-daily Semantic Scholar Scout/Curator/Reviewer pipeline; sources API key from bashrc.
+# Paused afternoon: 0 18 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh semantic >> logs/pipeline-semantic-scholar.log 2>&1
 
-0 6 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=0 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
+0 2 * * 1 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh profile >> logs/profile-rebuild-compare.log 2>&1
 
-# Paused afternoon: 0 18 * * * . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && PAPER_AGENT_TOPIC_SLOT=1 PAPER_AGENT_TELEMETRY=1 PATH="$HOME/workspace/paper-agent/.venv/bin:$PATH" scripts/semantic_scholar_pipeline.sh >> logs/pipeline-semantic-scholar.log 2>&1
-
-#
-
-# Biweekly Monday Gemini full feedback-profile rebuild comparison; dry-run only, never applies.
-
-0 2 * * 1 . "$HOME/.bashrc" && cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/biweekly_profile_rebuild_compare.sh >> logs/profile-rebuild-compare.log 2>&1
-
-#
-
-# Weekly SQLite backup with integrity check.
-
-0 1 * * 0 cd "$HOME/workspace/paper-agent" && mkdir -p logs && scripts/backup_db.sh >> logs/backup-db.log 2>&1
+0 1 * * 0 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh backup >> logs/backup-db.log 2>&1
 
 # END PROJECT PAPER MANAGED JOBS
