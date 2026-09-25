@@ -39,10 +39,12 @@ def schema(connection):
     return connection.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
 
 
-def trusted_schemas():
-    """Fresh schema plus the exact rendering from our historical score migration."""
+OPENALEX_SCHEMA_MARKER = '-- Versioned OpenAlex traversal state; enabled only by the cursor retrieval path.'
+OPENALEX_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(OPENALEX_SCHEMA_MARKER, 1)[1]
+
+
+def _schema_variants(sql):
     from .db import migrate_structured_feedback_score_to_real
-    sql = TRUSTED_SCHEMA.read_text()
     require(sql.count('score REAL,') == 1, 'Trusted score schema changed; review compatibility')
     variants = []
     for migrated in (False, True):
@@ -55,6 +57,37 @@ def trusted_schemas():
         finally:
             connection.close()
     return variants
+
+
+def trusted_schemas():
+    """Fresh schema plus exact historical score-migration renderings."""
+    return _schema_variants(TRUSTED_SCHEMA.read_text())
+
+
+def pre_openalex_schemas():
+    """Accepted production schema before approved OpenAlex cursor tables."""
+    sql = TRUSTED_SCHEMA.read_text().split(OPENALEX_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql)
+
+
+def apply_approved_post_import_schema_deltas(root):
+    """Apply reviewed additive schema growth to already accepted imports only."""
+    root = Path(root).absolute()
+    database = root/'data/paper_agent.db'
+    connection = sqlite3.connect(database)
+    try:
+        require(connection.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'Imported SQLite integrity failed')
+        require(not connection.execute('PRAGMA foreign_key_check').fetchall(), 'Imported foreign keys invalid')
+        actual_schema = schema(connection)
+        if actual_schema in trusted_schemas():
+            return False
+        require(actual_schema in pre_openalex_schemas(), 'Imported schema incompatible; no schema deltas approved')
+        with connection:
+            connection.executescript(OPENALEX_SCHEMA_SQL)
+        require(schema(connection) in trusted_schemas(), 'Approved schema delta did not produce trusted schema')
+        return True
+    finally:
+        connection.close()
 
 
 def logical_rows(connection):
@@ -184,15 +217,18 @@ def initialize(root, manifest_path):
     staging = staging_name(approved)
     temporary, destination = root/staging, root/RECEIPT
     require(staging not in approved['files'], 'Reserved receipt staging path collides with snapshot')
+    if destination.exists():
+        apply_approved_post_import_schema_deltas(root)
 
     def validate(ignore_staging=False):
         current = inspect(root, staging=staging if ignore_staging else None)
-        require(current['schema_sha256'] == approved['schema_sha256'], 'Import schema differs from manifest')
         if destination.exists():
             require(not destination.is_symlink() and json.loads(destination.read_text()) == receipt_value,
                     'Import receipt mismatch')
-            # Legitimate application writes after acceptance need not match the old snapshot.
+            # Legitimate application writes and approved post-import schema deltas need not match
+            # the original snapshot once the manifest-bound receipt exists.
         else:
+            require(current['schema_sha256'] == approved['schema_sha256'], 'Import schema differs from manifest')
             require(current == {k:approved[k] for k in ('files','schema_sha256','tables')},
                     'Imported state differs from manifest')
 

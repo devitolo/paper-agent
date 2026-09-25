@@ -189,6 +189,27 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
         self.assertEqual(files(self.source),self.originals)
 
 
+    def test_approved_openalex_delta_applies_after_import_receipt(self):
+        self.start()
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE openalex_page_dispositions')
+            c.execute('DROP TABLE openalex_search_state')
+            self.assertIn(import_state.schema(c), import_state.pre_openalex_schemas())
+            old_schema_sha = import_state.digest(import_state.schema(c))
+            old_tables = import_state.logical_rows(c)
+        old_manifest = {
+            'format': 1,
+            'compatibility': 'exact-schema-no-deltas',
+            'files': {relative: import_state.file_hash(self.copy/relative) for relative in self.approved['files']},
+            'schema_sha256': old_schema_sha,
+            'tables': old_tables,
+        }
+        self.manifest.write_text(json.dumps(old_manifest))
+        (self.copy/import_state.RECEIPT).write_text(json.dumps({
+            'format': 1,
+            'manifest_sha256': import_state.digest(old_manifest),
+        }, sort_keys=True))
+
 class ConfigurationAndModelTests(unittest.TestCase):
     def test_fresh_defaults_and_explicit_parity(self):
         with patch.dict(os.environ,{},clear=True):
