@@ -25,6 +25,8 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("pull_request:", workflow)
         self.assertIn("branches:\n      - mini-production", workflow)
         self.assertIn("platforms: linux/amd64", workflow)
+        self.assertIn("cache-from: type=gha,scope=mini-production", workflow)
+        self.assertIn("cache-to: type=gha,mode=max,scope=mini-production", workflow)
         self.assertIn("image_ref=${REGISTRY}/${IMAGE_NAME}@", workflow)
         self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/mini-production'", workflow)
         self.assertIn("- self-hosted", workflow)
@@ -85,6 +87,23 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('if [[ "$ollama_image" == sha256:* ]]; then', script)
         self.assertIn("docker image inspect \"$ollama_image\" --format '{{index .RepoDigests 0}}'", script)
         self.assertIn('PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}', script)
+
+    def test_production_update_records_deploy_phase_timings(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn('TIMING_FILE=$RELEASE_DIR/timing.tsv', script)
+        for phase in (
+            "image_pull",
+            "pre_deploy_drain",
+            "sqlite_backup",
+            "app_stop_and_lock_check",
+            "app_recreate",
+            "app_readiness",
+            "ui_check",
+            "qwen_check",
+            "deploy_total",
+        ):
+            self.assertIn(f'record_timing {phase} "$((SECONDS - ', script)
+        self.assertIn("awk -F '\\t' 'NR > 1", script)
 
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")

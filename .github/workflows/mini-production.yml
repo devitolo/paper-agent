@@ -39,6 +39,7 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
+          started=$SECONDS
           python3 -m unittest \
             tests.test_mini_release_pipeline \
             tests.test_migration_foundations \
@@ -48,6 +49,11 @@ jobs:
             tests.test_rehearsal_images \
             tests.test_import_legacy_schema \
             -v
+          {
+            echo "## Mini production test timing"
+            echo
+            echo "- Deployment safety tests: $((SECONDS - started))s"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: Build and publish Mini image
@@ -106,6 +112,8 @@ jobs:
             VCS_REF=${{ github.sha }}
             VERSION=mini-${{ github.sha }}
             SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.source_bundle_sha256 }}
+          cache-from: type=gha,scope=mini-production
+          cache-to: type=gha,mode=max,scope=mini-production
           provenance: mode=max
           sbom: true
 

@@ -2,6 +2,7 @@
 # User-run Mini production app image update. Does not rebuild on production.
 set -euo pipefail
 umask 077
+DEPLOY_STARTED=$SECONDS
 
 usage() {
   cat >&2 <<'EOF'
@@ -37,6 +38,14 @@ STAMP=$(date -u +%Y%m%d-%H%M%S)
 RELEASE_DIR=$MINI_ROOT/production-releases/$STAMP
 DEPLOYED_MARKER=$MINI_ROOT/production-current/app-image.ref
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+TIMING_FILE=$RELEASE_DIR/timing.tsv
+
+record_timing() {
+  local name=$1
+  local elapsed=$2
+  printf '%s\t%s\n' "$name" "$elapsed" >> "$TIMING_FILE"
+  printf 'timing_%s_seconds=%s\n' "$name" "$elapsed" >> "$RELEASE_DIR/update.env"
+}
 
 [[ -d "$CANDIDATE_DIR" ]] || { echo "Missing candidate dir: $CANDIDATE_DIR" >&2; exit 1; }
 [[ -f "$ENV_FILE" ]] || { echo "Missing production env file: $ENV_FILE" >&2; exit 1; }
@@ -86,6 +95,7 @@ install -m 0755 "$SOURCE_DIR/scripts/mini_production_update.sh" "$CANDIDATE_DIR/
   printf 'deploy_lock_file=%s\n' "$DEPLOY_LOCK_FILE"
   printf 'drain_timeout=%s\n' "$DRAIN_TIMEOUT"
 } > "$RELEASE_DIR/update.env"
+printf 'phase\tseconds\n' > "$TIMING_FILE"
 
 "${compose[@]}" ps > "$RELEASE_DIR/before-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/before-app-inspect.json" 2>/dev/null || true
@@ -126,7 +136,9 @@ if [[ "$old_env_image" == "$APP_IMAGE" ]]; then
   exit 0
 fi
 
+phase_started=$SECONDS
 docker pull "$APP_IMAGE"
+record_timing image_pull "$((SECONDS - phase_started))"
 docker image inspect "$APP_IMAGE" > "$RELEASE_DIR/new-app-image-inspect.json"
 python3 - "$RELEASE_DIR/new-app-image-inspect.json" <<'PY'
 from __future__ import annotations
@@ -215,6 +227,7 @@ fi
 "${compose[@]}" config --quiet
 
 echo "Waiting for active app jobs to finish before deployment."
+phase_started=$SECONDS
 deadline=$((SECONDS + DRAIN_TIMEOUT))
 until "${compose[@]}" exec -T app python - <<'PY'
 from pathlib import Path
@@ -249,10 +262,14 @@ do
   echo "Runtime worker lease is busy; waiting before deployment."
   sleep 10
 done
+record_timing pre_deploy_drain "$((SECONDS - phase_started))"
 
+phase_started=$SECONDS
 "${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent.db /backups \
   > "$RELEASE_DIR/pre-update-db-backup.log"
+record_timing sqlite_backup "$((SECONDS - phase_started))"
 
+phase_started=$SECONDS
 "${compose[@]}" stop app
 docker run --rm --volumes-from paper-mini-production-app-1 --user 10001:10001 --entrypoint python "$APP_IMAGE" - <<'PY'
 from pathlib import Path
@@ -261,9 +278,13 @@ from paper_agents.migration_lifecycle import lease
 with lease(Path("/runtime-control"), exclusive=True):
     pass
 PY
+record_timing app_stop_and_lock_check "$((SECONDS - phase_started))"
 
+phase_started=$SECONDS
 "${compose[@]}" up -d --no-deps --pull never --force-recreate app
+record_timing app_recreate "$((SECONDS - phase_started))"
 
+phase_started=$SECONDS
 deadline=$((SECONDS + 120))
 until "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-app >/dev/null 2>&1; do
   [[ "$SECONDS" -lt "$deadline" ]] || {
@@ -273,14 +294,21 @@ until "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-a
   }
   sleep 3
 done
+record_timing app_readiness "$((SECONDS - phase_started))"
 
+phase_started=$SECONDS
 curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.html"
+record_timing ui_check "$((SECONDS - phase_started))"
+
+phase_started=$SECONDS
 "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-model \
   > "$RELEASE_DIR/qwen-check.json"
+record_timing qwen_check "$((SECONDS - phase_started))"
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
 mkdir -p "$(dirname "$DEPLOYED_MARKER")"
 printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
+record_timing deploy_total "$((SECONDS - DEPLOY_STARTED))"
 
 {
   printf 'completed_at=%s\n' "$(date -u +%FT%TZ)"
@@ -299,5 +327,11 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- Image: \`$APP_IMAGE\`"
     echo "- Evidence: \`$RELEASE_DIR\`"
     echo "- Rollback: \`$RELEASE_DIR/rollback.sh\`"
+    echo
+    echo "### Timing"
+    echo
+    echo "| Phase | Seconds |"
+    echo "| --- | ---: |"
+    awk -F '\t' 'NR > 1 { printf "| `%s` | %s |\n", $1, $2 }' "$TIMING_FILE"
   } >> "$GITHUB_STEP_SUMMARY"
 fi

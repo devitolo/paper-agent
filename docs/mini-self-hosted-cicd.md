@@ -101,6 +101,8 @@ reboot.
 2. GitHub-hosted runners run tests only.
 3. Merge to `mini-production`.
 4. GitHub-hosted runner builds and publishes the Mini image for `linux/amd64`.
+   The workflow uses the GitHub Actions BuildKit cache for Docker layers; the
+   Docker build step log shows cache hits/misses and the build/push duration.
 5. The deploy job runs on the self-hosted runner labeled
    `project-paper-mini`.
 6. The deploy job:
@@ -113,6 +115,7 @@ reboot.
    - backs up SQLite;
    - recreates only the app service;
    - checks app readiness, UI reachability, and Qwen readiness;
+   - records phase timings in deployment evidence and the GitHub summary;
    - reports the evidence and rollback path in GitHub Actions.
 
 Overlapping deployments are serialized by GitHub Actions concurrency and a host
@@ -166,6 +169,11 @@ Deployment evidence is written under:
 ```text
 /home/devitolo/paper-mini-rehearsal/production-releases/<timestamp>
 ```
+
+Each deployment evidence directory includes `timing.tsv` with phase timings for
+image pull, pre-deploy drain, SQLite backup, app stop/lock check, app recreate,
+app readiness, UI check, Qwen check, and total deploy time. Use those timings
+before considering any safety tradeoff or larger Dockerfile/runtime redesign.
 
 ## Pause deployments
 
