@@ -255,3 +255,17 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 CREATE INDEX IF NOT EXISTS idx_feedback_paper_id ON feedback (paper_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback (status);
+
+
+-- Versioned OpenAlex traversal state; enabled only by the cursor retrieval path.
+CREATE TABLE IF NOT EXISTS openalex_search_state (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS openalex_page_dispositions (
+    id INTEGER PRIMARY KEY,
+    scout_run_id INTEGER NOT NULL REFERENCES scout_runs(id),
+    query_key TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    page_json TEXT NOT NULL
+);

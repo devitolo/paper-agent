@@ -646,6 +646,33 @@ class OpenAlexSource:
             raise last_error
         return []
 
+    def fetch_page(self, topic: str, *, cursor: str, cutoff: str,
+                   through: str, page_size: int) -> dict[str, Any]:
+        """One metadata-search attempt; the persistent coordinator owns budgets."""
+        params = urllib.parse.urlencode({
+            "search": openalex_search_query(topic), "cursor": cursor,
+            "per_page": page_size, "sort": "publication_date:desc",
+            "filter": f"from_publication_date:{cutoff},to_publication_date:{through},"
+                      "type:article|preprint|posted-content|report",
+        })
+        request = urllib.request.Request(f"{self.api_url}?{params}",
+                                         headers={"User-Agent": "paper-agent/0.1"})
+        with telemetry.span("source.http", "TOOL", source=self.name), urllib.request.urlopen(
+                request, timeout=self.timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if (not isinstance(payload, dict) or not isinstance(payload.get("results"), list)
+                or not isinstance(payload.get("meta"), dict)
+                or "next_cursor" not in payload["meta"]):
+            raise ValueError("OpenAlex page missing results or continuation metadata")
+        next_cursor = payload["meta"]["next_cursor"]
+        if next_cursor is not None and (not isinstance(next_cursor, str) or not next_cursor):
+            raise ValueError("OpenAlex returned an invalid continuation")
+        if any(not isinstance(work, dict) for work in payload["results"]):
+            raise ValueError("OpenAlex page contains an invalid work")
+        if len(payload["results"]) > page_size:
+            raise ValueError("OpenAlex exceeded requested page size")
+        return payload
+
     def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.isdigit():
             return float(retry_after)

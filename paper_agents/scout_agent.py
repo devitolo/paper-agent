@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
+import os
 from typing import Any
 
 from paper_agents import db, telemetry
@@ -12,6 +14,7 @@ from paper_agents.scout import (
     DEFAULT_FETCH_LIMIT,
     DEFAULT_FRESHNESS_MONTHS,
     ArxivSource,
+    OpenAlexSource,
     PaperSource,
     dedupe_candidates,
 )
@@ -40,6 +43,7 @@ class ScoutConfig:
     request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY
     retries: int = DEFAULT_ARXIV_RETRIES
     timeout: int = DEFAULT_ARXIV_TIMEOUT
+    openalex_cursor_enabled: bool = False
 
 
 class ScoutAgent:
@@ -106,106 +110,122 @@ class ScoutAgent:
 
         warnings: list[str] = []
         errors: list[str] = []
-        candidates, guided_candidates, refill_diagnostics, source_diagnostics = self._fetch_candidate_pool(
-            connection,
-            source=source,
-            source_topics=config.topics if source.name == "semantic_scholar" else guided_topics,
-            guidance=scout_guidance,
-            config=config,
-            errors=errors,
-        )
+        progress = None
+        if isinstance(source, OpenAlexSource) and (
+                config.openalex_cursor_enabled or os.getenv("PAPER_OPENALEX_CURSOR") == "1"):
+            from paper_agents.openalex_progress import OpenAlexProgress
+            progress = OpenAlexProgress(connection, source)
+            candidates = progress.fetch(guided_topics, freshness_months=config.freshness_months,
+                                        max_candidates=config.max_candidates, errors=errors)
+            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
+            source_diagnostics = progress.diagnostics
+            refill_diagnostics = {"stop_reason": source_diagnostics["stop_reason"],
+                                  "rounds": [], "mode": "cursor_v1"}
+        else:
+            candidates, guided_candidates, refill_diagnostics, source_diagnostics = self._fetch_candidate_pool(
+                connection,
+                source=source,
+                source_topics=config.topics if source.name == "semantic_scholar" else guided_topics,
+                guidance=scout_guidance,
+                config=config,
+                errors=errors,
+            )
+        # Cursor advancement, whole-page ledger and candidate dispositions are atomic.
+        with connection if progress else nullcontext():
+            if progress:
+                connection.execute("BEGIN IMMEDIATE")
+                progress.checkpoint(scout_run_id)
+            stored: list[dict[str, Any]] = []
+            for index, (candidate, guidance_diagnostics) in enumerate(guided_candidates, 1):
+                candidate_dict = sanitize_candidate(candidate.as_dict())
+                paper_id, is_new = db.upsert_paper(connection, candidate_dict)
+                seen_in_current_cycle = db.paper_has_scout_candidate_in_cycle(
+                    connection,
+                    paper_id=paper_id,
+                    workflow_cycle_id=workflow_cycle_id,
+                    before_scout_run_id=scout_run_id,
+                )
+                feedback_excluded = bool(guidance_diagnostics.get("feedback_guidance_excluded"))
+                already_recommended = db.paper_has_prior_recommendation(
+                    connection,
+                    paper_id=paper_id,
+                    before_scout_run_id=scout_run_id,
+                )
+                excluded = feedback_excluded or already_recommended or (not is_new and not seen_in_current_cycle)
+                exclusion_reason = None
+                if feedback_excluded:
+                    exclusion_reason = "feedback_avoid_terms"
+                elif already_recommended:
+                    exclusion_reason = "already_recommended"
+                elif excluded:
+                    exclusion_reason = "previously_discovered"
+                scout_candidate_id = db.insert_scout_candidate(
+                    connection,
+                    scout_run_id=scout_run_id,
+                    paper_id=paper_id,
+                    retrieval_order=index,
+                    is_new=is_new,
+                    excluded=excluded,
+                    exclusion_reason=exclusion_reason,
+                    source_query=(candidate.metadata or {}).get("query_topic"),
+                    source_diagnostics={
+                        "primary_category": candidate.primary_category,
+                        "feedback_guidance": guidance_diagnostics,
+                    },
+                )
+                stored.append(
+                    {
+                        **candidate_dict,
+                        "paper_id": paper_id,
+                        "scout_candidate_id": scout_candidate_id,
+                        "is_new": is_new,
+                        "excluded": excluded,
+                        "exclusion_reason": exclusion_reason,
+                        "retrieval_order": index,
+                    }
+                )
 
-        stored: list[dict[str, Any]] = []
-        for index, (candidate, guidance_diagnostics) in enumerate(guided_candidates, 1):
-            candidate_dict = sanitize_candidate(candidate.as_dict())
-            paper_id, is_new = db.upsert_paper(connection, candidate_dict)
-            seen_in_current_cycle = db.paper_has_scout_candidate_in_cycle(
+            db.complete_scout_run(
                 connection,
-                paper_id=paper_id,
-                workflow_cycle_id=workflow_cycle_id,
-                before_scout_run_id=scout_run_id,
-            )
-            feedback_excluded = bool(guidance_diagnostics.get("feedback_guidance_excluded"))
-            already_recommended = db.paper_has_prior_recommendation(
-                connection,
-                paper_id=paper_id,
-                before_scout_run_id=scout_run_id,
-            )
-            excluded = feedback_excluded or already_recommended or (not is_new and not seen_in_current_cycle)
-            exclusion_reason = None
-            if feedback_excluded:
-                exclusion_reason = "feedback_avoid_terms"
-            elif already_recommended:
-                exclusion_reason = "already_recommended"
-            elif excluded:
-                exclusion_reason = "previously_discovered"
-            scout_candidate_id = db.insert_scout_candidate(
-                connection,
-                scout_run_id=scout_run_id,
-                paper_id=paper_id,
-                retrieval_order=index,
-                is_new=is_new,
-                excluded=excluded,
-                exclusion_reason=exclusion_reason,
-                source_query=(candidate.metadata or {}).get("query_topic"),
-                source_diagnostics={
-                    "primary_category": candidate.primary_category,
-                    "feedback_guidance": guidance_diagnostics,
+                scout_run_id,
+                diagnostics={
+                    "fetched_count": len(candidates),
+                    "stored_count": len(stored),
+                    "scout_guidance": guidance_summary(scout_guidance),
+                    "base_topics": config.topics,
+                    "guided_topics": guided_topics,
+                    "source_topics": config.topics
+                    if source.name == "semantic_scholar"
+                    else guided_topics,
+                    "source_diagnostics": source_diagnostics,
+                    "refill": refill_diagnostics,
                 },
+                warnings=warnings,
+                errors=errors,
             )
-            stored.append(
-                {
-                    **candidate_dict,
-                    "paper_id": paper_id,
-                    "scout_candidate_id": scout_candidate_id,
-                    "is_new": is_new,
-                    "excluded": excluded,
-                    "exclusion_reason": exclusion_reason,
-                    "retrieval_order": index,
-                }
-            )
-
-        db.complete_scout_run(
-            connection,
-            scout_run_id,
-            diagnostics={
-                "fetched_count": len(candidates),
-                "stored_count": len(stored),
-                "scout_guidance": guidance_summary(scout_guidance),
+            db.update_workflow_state(connection, workflow_cycle_id, "scout_complete")
+            capture_report(connection, scout_run_id, phase="scout_complete")
+            telemetry.attributes(error_count=len(errors), warning_count=len(warnings))
+            if errors:
+                telemetry.failure()
+            return {
+                "scout_run_id": scout_run_id,
+                "source": source.name,
+                "attempt_number": attempt_number,
+                "guidance": guidance_summary(scout_guidance),
                 "base_topics": config.topics,
                 "guided_topics": guided_topics,
                 "source_topics": config.topics
                 if source.name == "semantic_scholar"
                 else guided_topics,
-                "source_diagnostics": source_diagnostics,
-                "refill": refill_diagnostics,
-            },
-            warnings=warnings,
-            errors=errors,
-        )
-        db.update_workflow_state(connection, workflow_cycle_id, "scout_complete")
-        capture_report(connection, scout_run_id, phase="scout_complete")
-        telemetry.attributes(error_count=len(errors), warning_count=len(warnings))
-        if errors:
-            telemetry.failure()
-        return {
-            "scout_run_id": scout_run_id,
-            "source": source.name,
-            "attempt_number": attempt_number,
-            "guidance": guidance_summary(scout_guidance),
-            "base_topics": config.topics,
-            "guided_topics": guided_topics,
-            "source_topics": config.topics
-            if source.name == "semantic_scholar"
-            else guided_topics,
-            "fetched_count": len(candidates),
-            "stored_count": len(stored),
-            "eligible_count": len([candidate for candidate in stored if not candidate["excluded"]]),
-            "warnings": warnings,
-            "errors": errors,
-            "source_degraded": source_diagnostics.get("coverage_mode") == "single_result_406_fallback",
-            "candidates": stored,
-        }
+                "fetched_count": len(candidates),
+                "stored_count": len(stored),
+                "eligible_count": len([candidate for candidate in stored if not candidate["excluded"]]),
+                "warnings": warnings,
+                "errors": errors,
+                "source_degraded": source_diagnostics.get("coverage_mode") == "single_result_406_fallback",
+                "candidates": stored,
+            }
 
     def _fetch_candidate_pool(
         self,
