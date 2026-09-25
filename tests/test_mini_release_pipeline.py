@@ -79,6 +79,13 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertLess(rollback, cron_mutation)
         self.assertLess(rollback, app_recreate)
 
+    def test_production_update_canonicalizes_ollama_image_digest(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn('old_ollama_image=$(sed -n', script)
+        self.assertIn('if [[ "$ollama_image" == sha256:* ]]; then', script)
+        self.assertIn("docker image inspect \"$ollama_image\" --format '{{index .RepoDigests 0}}'", script)
+        self.assertIn('PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}', script)
+
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")
         self.assertIn("Do not deploy application code by `git pull`", runbook)

@@ -111,10 +111,12 @@ chmod 700 "$RELEASE_DIR/rollback.sh"
 old_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1 2>/dev/null || true)
 old_config_id=$(docker inspect --format '{{.Image}}' paper-mini-production-app-1 2>/dev/null || true)
 old_env_image=$(sed -n 's/^PAPER_MIGRATION_APP_IMAGE=//p' "$ENV_FILE" | tail -1)
+old_ollama_image=$(sed -n 's/^PAPER_MIGRATION_OLLAMA_IMAGE=//p' "$ENV_FILE" | tail -1)
 {
   printf 'old_config_image=%s\n' "$old_image"
   printf 'old_config_id=%s\n' "$old_config_id"
   printf 'old_env_image=%s\n' "$old_env_image"
+  printf 'old_ollama_image=%s\n' "$old_ollama_image"
 } >> "$RELEASE_DIR/update.env"
 
 if [[ "$old_env_image" == "$APP_IMAGE" ]]; then
@@ -140,8 +142,16 @@ if labels.get("org.opencontainers.image.source") != "https://github.com/devitolo
     raise SystemExit("selected image is not from Project Paper")
 PY
 
+ollama_image="$old_ollama_image"
+if [[ "$ollama_image" == sha256:* ]]; then
+  ollama_image=$(docker image inspect "$ollama_image" --format '{{index .RepoDigests 0}}')
+fi
+[[ "$ollama_image" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*@sha256:[a-f0-9]{64}$ ]] \
+  || { echo "PAPER_MIGRATION_OLLAMA_IMAGE must resolve to image@sha256:digest" >&2; exit 64; }
+printf 'next_ollama_image=%s\n' "$ollama_image" >> "$RELEASE_DIR/update.env"
+
 tmp_env=$RELEASE_DIR/production.env.next
-python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" <<'PY'
+python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" <<'PY'
 from __future__ import annotations
 
 import sys
@@ -150,8 +160,10 @@ from pathlib import Path
 source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
 image = sys.argv[3]
+ollama_image = sys.argv[4]
 lines = source.read_text(encoding="utf-8").splitlines()
 found = False
+found_ollama = False
 out: list[str] = []
 drop_prefixes = ("PAPER_REHEARSAL_SOURCE_SHA256=", "PAPER_REHEARSAL_IDENTITY_FILE=")
 for line in lines:
@@ -160,10 +172,15 @@ for line in lines:
     if line.startswith("PAPER_MIGRATION_APP_IMAGE="):
         out.append(f"PAPER_MIGRATION_APP_IMAGE={image}")
         found = True
+    elif line.startswith("PAPER_MIGRATION_OLLAMA_IMAGE="):
+        out.append(f"PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}")
+        found_ollama = True
     else:
         out.append(line)
 if not found:
     out.append(f"PAPER_MIGRATION_APP_IMAGE={image}")
+if not found_ollama:
+    out.append(f"PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}")
 destination.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 
