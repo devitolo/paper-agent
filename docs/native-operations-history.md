@@ -417,7 +417,9 @@ comparison, and a Sunday 1:00 AM SQLite backup through native wrappers. These
 entries are retained only as historical reference; current production uses the
 same host scheduling authority with `scripts/mini_container_job.sh`.
 
-Cron jobs run the currently deployed checkout; they do not pull code while running. Deploy updates explicitly, then refresh the managed crontab if its template changed:
+Cron jobs run the currently deployed checkout; they do not pull code while
+running. Deploy updates explicitly, then refresh the managed crontab if its
+template changed:
 
 ```bash
 git pull --ff-only
@@ -431,7 +433,12 @@ scripts/install_project_paper_cron.sh --dry-run
 scripts/install_project_paper_cron.sh --apply
 ```
 
-The installer preserves unrelated cron entries, removes older Project Paper cron lines, and installs the managed block from `deploy/project-paper.crontab`.
+The installer preserves unrelated cron entries, removes older Project Paper cron
+lines, and installs the managed block from `deploy/project-paper.crontab`. The
+scheduled wrappers use distinct nonblocking lock files under
+`${PAPER_AGENT_LOCK_DIR:-/tmp}` and exit successfully with a skip message when a
+previous run is still active. Runtime self-update is disabled by default; set
+`PAPER_AGENT_SELF_UPDATE=1` only for a deliberate one-off wrapper invocation.
 
 ```cron
 # Daily OpenAlex Scout/Curator/Reviewer pipeline with rotating configured topics.
@@ -454,7 +461,7 @@ Override the OpenAlex topic for a one-off run:
 PAPER_AGENT_OPENALEX_TOPIC="AIOps root cause analysis cloud incidents" scripts/openalex_pipeline.sh
 ```
 
-Historical pre-cutover systemd setup for the Review Queue web UI:
+Systemd user setup for the native Review Queue web UI:
 
 ```bash
 mkdir -p ~/.config/systemd/user ~/.config/project-paper
@@ -467,7 +474,11 @@ systemctl --user status project-paper-web.service
 journalctl --user -u project-paper-web.service -f
 ```
 
-After a code update, restart only the web UI with `systemctl --user restart project-paper-web.service`.
+The unit runs `python3 -m paper_agents.cli web --host 127.0.0.1 --port 8000`
+from `$HOME/workspace/paper-agent`, reads optional environment values from
+`~/.config/project-paper/project-paper.env`, writes logs to journald, and
+restarts on failure. After a code update, restart only the web UI with
+`systemctl --user restart project-paper-web.service`.
 
 
 Stable local output folders:

@@ -241,9 +241,12 @@ crontab -l
 ```
 
 During the post-cutover soak, this live crontab is authoritative. The committed
-`deploy/project-paper.crontab` still contains the former direct `.venv` entries;
-do **not** run `scripts/install_project_paper_cron.sh --apply` until the migration
-launcher and template are integrated into the canonical repository.
+`deploy/project-paper.crontab` is the canonical native-checkout template for
+operators who still run the legacy host checkout path. It uses `$HOME`-relative
+paths, aborts chained setup steps on failure, and calls wrappers that take
+nonblocking per-job locks before doing work. Cron jobs run the currently
+deployed checkout; deploy updates are explicit rather than hidden inside a
+scheduled job.
 
 The old direct `.venv` and one-off OpenAlex entries are no longer the production
 path. The launcher selects the existing wrapper inside the app container; it
