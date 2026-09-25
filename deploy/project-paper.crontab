@@ -3,6 +3,7 @@
 SHELL=/bin/bash
 PAPER_MIGRATION_ENV_FILE=$HOME/paper-mini-rehearsal/production-cutover/final-20260924-230636/production.env
 PAPER_MIGRATION_EXTRA_COMPOSE_FILES=$HOME/paper-mini-rehearsal/production-cutover/docker-compose.production.yml
+PAPER_MIGRATION_DEPLOY_LOCK_FILE=$HOME/paper-mini-rehearsal/production-cutover/deploy.lock
 
 # Installed by scripts/install_project_paper_cron.sh.
 

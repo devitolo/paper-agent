@@ -69,11 +69,12 @@ Inspect the live schedule with `crontab -l` before and after any change.
 
 ## Releases
 
-Use [Mini release runbook](mini-release-runbook.md) for application updates. The
-release path is image-based: build and accept a `mini-production` image from a
-committed revision, then pull that immutable digest on the Mini and recreate the
-existing `app` service. Do not deploy application code by `git pull`, and do not
-rebuild on production.
+Use [Mini self-hosted CI/CD](mini-self-hosted-cicd.md) for the preferred
+application deployment path. Use [Mini release runbook](mini-release-runbook.md)
+for manual fallback. Both paths are image-based: build and accept a
+`mini-production` image from a committed revision, then pull that immutable
+digest on the Mini and recreate the existing `app` service. Do not deploy
+application code by `git pull`, and do not rebuild on production.
 
 ## Acceptance evidence
 

@@ -5,6 +5,10 @@ hoc `git pull` or production rebuilds.
 
 Do not deploy application code by `git pull`.
 
+For the automated GitHub Actions path with a self-hosted Mini deployment runner,
+use [Mini self-hosted CI/CD](mini-self-hosted-cicd.md). The manual commands in
+this file remain the fallback procedure.
+
 ## Policy
 
 - Deploy application changes by building a tested `mini-production` image from a

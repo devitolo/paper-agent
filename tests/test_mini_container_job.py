@@ -78,6 +78,28 @@ class HostCronTests(unittest.TestCase):
                                     env=env, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 64)
 
+    def test_deploy_lock_skips_job_before_container_exec(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root/'docker'
+            executable.write_text('#!'+sys.executable+'\nraise SystemExit("docker should not run")\n')
+            executable.chmod(0o700)
+            envfile = root/'private.env'; envfile.write_text('x=y\n')
+            lock = root/'deploy.lock'
+            held = lock.open('w')
+            try:
+                import fcntl
+                fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                env = {**os.environ, 'PATH':str(root)+':'+os.environ['PATH'],
+                       'PAPER_MIGRATION_ENV_FILE':str(envfile),
+                       'PAPER_MIGRATION_DEPLOY_LOCK_FILE':str(lock)}
+                result = subprocess.run(['bash', str(ROOT/'scripts/mini_container_job.sh'), 'arxiv'],
+                                        env=env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('deployment is in progress', result.stdout)
+            finally:
+                held.close()
+
 
 class JobLeaseTests(unittest.TestCase):
     def test_every_job_fails_busy_before_launch(self):

@@ -14,6 +14,9 @@ Optional:
   PAPER_MINI_FINAL_ROOT=/home/devitolo/paper-mini-rehearsal/production-cutover/final-...
   PAPER_MINI_PRODUCTION_OVERLAY=/home/devitolo/paper-mini-rehearsal/production-cutover/docker-compose.production.yml
   PAPER_MINI_CANDIDATE_DIR=/home/devitolo/paper-mini-rehearsal/candidate
+  PAPER_MINI_DEPLOY_LOCK_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock
+  PAPER_MINI_DRAIN_TIMEOUT=1800
+  PAPER_MINI_DEPLOY_BRANCH=mini-production
 EOF
 }
 
@@ -27,12 +30,18 @@ FINAL_ROOT=${PAPER_MINI_FINAL_ROOT:-$MINI_ROOT/production-cutover/final-20260924
 ENV_FILE=${PAPER_MINI_ENV_FILE:-$FINAL_ROOT/production.env}
 OVERLAY=${PAPER_MINI_PRODUCTION_OVERLAY:-$MINI_ROOT/production-cutover/docker-compose.production.yml}
 CANDIDATE_DIR=${PAPER_MINI_CANDIDATE_DIR:-$MINI_ROOT/candidate}
+DEPLOY_LOCK_FILE=${PAPER_MINI_DEPLOY_LOCK_FILE:-$MINI_ROOT/production-cutover/deploy.lock}
+DRAIN_TIMEOUT=${PAPER_MINI_DRAIN_TIMEOUT:-1800}
+DEPLOY_BRANCH=${PAPER_MINI_DEPLOY_BRANCH:-mini-production}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 RELEASE_DIR=$MINI_ROOT/production-releases/$STAMP
+DEPLOYED_MARKER=$MINI_ROOT/production-current/app-image.ref
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 [[ -d "$CANDIDATE_DIR" ]] || { echo "Missing candidate dir: $CANDIDATE_DIR" >&2; exit 1; }
 [[ -f "$ENV_FILE" ]] || { echo "Missing production env file: $ENV_FILE" >&2; exit 1; }
 [[ -f "$OVERLAY" ]] || { echo "Missing production overlay: $OVERLAY" >&2; exit 1; }
+[[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ && "$DRAIN_TIMEOUT" -gt 0 ]] || { echo "PAPER_MINI_DRAIN_TIMEOUT must be a positive integer" >&2; exit 64; }
 
 cd "$CANDIDATE_DIR"
 
@@ -43,7 +52,30 @@ compose=(
   -f "$OVERLAY"
 )
 
+mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
+exec 9>"$DEPLOY_LOCK_FILE"
+if ! flock -n -x 9; then
+  echo "Another Project Paper deployment is already running." >&2
+  exit 75
+fi
+
+if [[ -n "${GITHUB_SHA:-}" && -n "${GITHUB_REF_NAME:-}" && "$GITHUB_REF_NAME" == "$DEPLOY_BRANCH" ]]; then
+  if git -C "$SOURCE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$SOURCE_DIR" fetch --quiet origin "$DEPLOY_BRANCH"
+    latest=$(git -C "$SOURCE_DIR" rev-parse "origin/$DEPLOY_BRANCH")
+    if [[ "$latest" != "$GITHUB_SHA" ]]; then
+      echo "Skipping stale deployment: $GITHUB_SHA is no longer origin/$DEPLOY_BRANCH ($latest)."
+      exit 0
+    fi
+  fi
+fi
+
 mkdir -p "$RELEASE_DIR"
+mkdir -p "$CANDIDATE_DIR/scripts"
+install -m 0644 "$SOURCE_DIR/docker-compose.mini-migration.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
+install -m 0644 "$SOURCE_DIR/docker-compose.mini-rehearsal.yml" "$CANDIDATE_DIR/docker-compose.mini-rehearsal.yml"
+install -m 0755 "$SOURCE_DIR/scripts/mini_container_job.sh" "$CANDIDATE_DIR/scripts/mini_container_job.sh"
+install -m 0755 "$SOURCE_DIR/scripts/mini_production_update.sh" "$CANDIDATE_DIR/scripts/mini_production_update.sh"
 {
   printf 'started_at=%s\n' "$(date -u +%FT%TZ)"
   printf 'candidate_dir=%s\n' "$CANDIDATE_DIR"
@@ -51,6 +83,8 @@ mkdir -p "$RELEASE_DIR"
   printf 'env_file=%s\n' "$ENV_FILE"
   printf 'overlay=%s\n' "$OVERLAY"
   printf 'new_app_image=%s\n' "$APP_IMAGE"
+  printf 'deploy_lock_file=%s\n' "$DEPLOY_LOCK_FILE"
+  printf 'drain_timeout=%s\n' "$DRAIN_TIMEOUT"
 } > "$RELEASE_DIR/update.env"
 
 "${compose[@]}" ps > "$RELEASE_DIR/before-ps.txt"
@@ -76,10 +110,19 @@ chmod 700 "$RELEASE_DIR/rollback.sh"
 
 old_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1 2>/dev/null || true)
 old_config_id=$(docker inspect --format '{{.Image}}' paper-mini-production-app-1 2>/dev/null || true)
+old_env_image=$(sed -n 's/^PAPER_MIGRATION_APP_IMAGE=//p' "$ENV_FILE" | tail -1)
 {
   printf 'old_config_image=%s\n' "$old_image"
   printf 'old_config_id=%s\n' "$old_config_id"
+  printf 'old_env_image=%s\n' "$old_env_image"
 } >> "$RELEASE_DIR/update.env"
+
+if [[ "$old_env_image" == "$APP_IMAGE" ]]; then
+  echo "Desired image is already configured: $APP_IMAGE"
+  mkdir -p "$(dirname "$DEPLOYED_MARKER")"
+  printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
+  exit 0
+fi
 
 docker pull "$APP_IMAGE"
 docker image inspect "$APP_IMAGE" > "$RELEASE_DIR/new-app-image-inspect.json"
@@ -153,6 +196,24 @@ PY
 fi
 
 "${compose[@]}" config --quiet
+
+echo "Waiting for active app jobs to finish before deployment."
+deadline=$((SECONDS + DRAIN_TIMEOUT))
+until "${compose[@]}" exec -T app python - <<'PY'
+from pathlib import Path
+from paper_agents.migration_lifecycle import lease
+import os
+with lease(Path(os.environ["PAPER_AGENT_LIFECYCLE_DIR"]), exclusive=True):
+    pass
+PY
+do
+  [[ "$SECONDS" -lt "$deadline" ]] || {
+    echo "Timed out waiting for active Project Paper jobs to finish. No container replacement attempted." >&2
+    exit 75
+  }
+  sleep 10
+done
+
 "${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent.db /backups \
   > "$RELEASE_DIR/pre-update-db-backup.log"
 
@@ -173,6 +234,8 @@ curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.ht
   > "$RELEASE_DIR/qwen-check.json"
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
+mkdir -p "$(dirname "$DEPLOYED_MARKER")"
+printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
 
 {
   printf 'completed_at=%s\n' "$(date -u +%FT%TZ)"
@@ -183,3 +246,13 @@ docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.jso
 echo "Mini production app update complete."
 echo "Evidence: $RELEASE_DIR"
 echo "Rollback script: $RELEASE_DIR/rollback.sh"
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  {
+    echo "## Project Paper Mini deployment"
+    echo
+    echo "- Result: success"
+    echo "- Image: \`$APP_IMAGE\`"
+    echo "- Evidence: \`$RELEASE_DIR\`"
+    echo "- Rollback: \`$RELEASE_DIR/rollback.sh\`"
+  } >> "$GITHUB_STEP_SUMMARY"
+fi

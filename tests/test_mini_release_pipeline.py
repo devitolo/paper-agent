@@ -20,6 +20,18 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("SOURCE_BUNDLE_SHA256=", workflow)
         self.assertIn("image_ref=${REGISTRY}/${IMAGE_NAME}@", workflow)
 
+    def test_mini_production_workflow_uses_hosted_build_and_self_hosted_deploy(self):
+        workflow = (ROOT / ".github/workflows/mini-production.yml").read_text(encoding="utf-8")
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("branches:\n      - mini-production", workflow)
+        self.assertIn("platforms: linux/amd64", workflow)
+        self.assertIn("image_ref=${REGISTRY}/${IMAGE_NAME}@", workflow)
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/mini-production'", workflow)
+        self.assertIn("- self-hosted", workflow)
+        self.assertIn("- project-paper-mini", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("bash scripts/mini_production_update.sh", workflow)
+
     def test_dockerfile_keeps_public_and_mini_targets_explicit(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("FROM migration-gemini AS mini-production", dockerfile)

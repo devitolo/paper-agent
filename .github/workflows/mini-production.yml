@@ -1,0 +1,166 @@
+name: Mini Production
+
+on:
+  pull_request:
+    branches:
+      - mini-production
+  push:
+    branches:
+      - mini-production
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DEPLOY_BRANCH: mini-production
+  MINI_TARGET: mini-production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mini-production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Run deployment safety tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 -m unittest \
+            tests.test_mini_release_pipeline \
+            tests.test_migration_foundations \
+            tests.test_migration_gemini \
+            tests.test_migration_scheduler \
+            tests.test_mini_container_job \
+            tests.test_rehearsal_images \
+            tests.test_import_legacy_schema \
+            -v
+
+  build:
+    name: Build and publish Mini image
+    needs: tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_ref: ${{ steps.ref.outputs.image_ref }}
+      digest: ${{ steps.build.outputs.digest }}
+      source_bundle_sha256: ${{ steps.source.outputs.source_bundle_sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Compute source bundle hash
+        id: source
+        shell: bash
+        run: |
+          git archive --format=tar HEAD | sha256sum | awk '{ print "source_bundle_sha256=" $1 }' >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=mini-sha-
+            type=raw,value=mini-${{ github.sha }}
+
+      - name: Build and publish amd64 Mini production image
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          target: ${{ env.MINI_TARGET }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+            VERSION=mini-${{ github.sha }}
+            SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.source_bundle_sha256 }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Export immutable image reference
+        id: ref
+        shell: bash
+        run: |
+          echo "image_ref=${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Mini image"
+            echo
+            echo "- Image: \`${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- Platform: \`linux/amd64\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to Mini
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/mini-production'
+    runs-on:
+      - self-hosted
+      - project-paper-mini
+      - linux
+      - x64
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: mini-production
+    steps:
+      - name: Checkout trusted deployment branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Confirm production runner identity
+        shell: bash
+        run: |
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          docker version
+          docker compose version
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy exact image to Mini
+        shell: bash
+        env:
+          PAPER_MINI_APP_IMAGE: ${{ needs.build.outputs.image_ref }}
+          PAPER_MINI_DEPLOY_BRANCH: ${{ env.DEPLOY_BRANCH }}
+          PAPER_MINI_DRAIN_TIMEOUT: "1800"
+        run: bash scripts/mini_production_update.sh

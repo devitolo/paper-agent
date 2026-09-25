@@ -9,6 +9,16 @@ if [[ $# -ne 1 ]]; then echo 'Exactly one job name required' >&2; exit 64; fi
 : "${PAPER_MIGRATION_ENV_FILE:?Set absolute private migration env-file path}"
 case "$PAPER_MIGRATION_ENV_FILE" in /*) ;; *) echo 'Absolute env-file path required' >&2; exit 64 ;; esac
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+deploy_lock_file="${PAPER_MIGRATION_DEPLOY_LOCK_FILE:-}"
+if [[ -n "$deploy_lock_file" ]]; then
+  case "$deploy_lock_file" in /*) ;; *) echo 'Deploy lock file must be absolute' >&2; exit 64 ;; esac
+  mkdir -p "$(dirname "$deploy_lock_file")"
+  exec 8>"$deploy_lock_file"
+  if ! flock -n -s 8; then
+    echo 'Skipping Project Paper job: deployment is in progress.'
+    exit 0
+  fi
+fi
 compose=(docker compose --env-file "$PAPER_MIGRATION_ENV_FILE" -f "$repo/docker-compose.mini-migration.yml")
 if [[ -n "${PAPER_MIGRATION_EXTRA_COMPOSE_FILES:-}" ]]; then
   IFS=':' read -r -a extra_compose_files <<< "$PAPER_MIGRATION_EXTRA_COMPOSE_FILES"
