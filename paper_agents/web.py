@@ -455,7 +455,6 @@ def render_review_queue(
   <main>
     {render_app_header("Review Queue", f"{result['total']} papers | {escape(filter_label(filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}", controls, "review")}
     {saved_banner}
-    {render_manual_scout_panel(db_path)}
     {pagination}
     <div class="cards">{card_html}</div>
     {pagination}
@@ -704,6 +703,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 <body>
   <main>
     {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
+    {render_manual_scout_panel(db_path)}
     {warning_html}
     <div class="health-cards">{card_html}</div>
     {render_profile_maintenance(summary["profile_maintenance"])}

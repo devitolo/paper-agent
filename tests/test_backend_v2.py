@@ -2212,6 +2212,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("arXiv", html)
         self.assertIn('href="/topics"', html)
         self.assertIn('href="/health"', html)
+        self.assertNotIn('id="run-scout"', html)
+        self.assertNotIn('Local Qwen:', html)
+        self.assertNotIn('Status unavailable. Refresh this page to reconnect', html)
         self.assertIn('class="source-badge source-badge-arxiv"', html)
         self.assertIn('class="action-rail"', html)
         self.assertIn('<h1 class="brand-title">', html)
@@ -3856,7 +3859,8 @@ class BackendV2Tests(unittest.TestCase):
         self._seed_scout_candidate(source="openalex", excluded=True, exclusion_reason="history")
         self.connection.commit()
 
-        html = web.render_health_page(self.db_path, days=21, source_value="openalex")
+        with patch.object(web, "packaged", return_value=True):
+            html = web.render_health_page(self.db_path, days=21, source_value="openalex")
 
         self.assertIn("Project Paper Health", html)
         self.assertIn('<form method="get" action="/health"', html)
@@ -3873,6 +3877,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Recommendation Gap", html)
         self.assertIn("Feedback/Profile Activity", html)
         self.assertIn('href="/topics">Topics</a>', html)
+        self.assertIn('id="run-scout"', html)
+        self.assertIn('Local Qwen:', html)
 
     def test_topics_page_renders_source_topic_inventory(self):
         html = web.render_topics_page()
