@@ -22,6 +22,7 @@ x-environment: &environment
   PAPER_AGENT_JOB_TIMEOUT: ${PAPER_AGENT_JOB_TIMEOUT:-1800}
   PAPER_AGENT_REPO: /app
   PAPER_AGENT_LOCK_DIR: /runtime-control
+  PAPER_OPENALEX_CURSOR: ${PAPER_OPENALEX_CURSOR:-0}
   TZ: America/Los_Angeles
   SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:?Provision source credential privately}
 x-volumes: &state-mounts

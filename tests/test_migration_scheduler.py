@@ -223,6 +223,8 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(value['services']['prepare-model']['profiles'],['model-verification'])
         self.assertEqual(app['image'],scheduled['image'])
         self.assertEqual(app['volumes'],scheduled['volumes'])
+        self.assertEqual(app['environment']['PAPER_OPENALEX_CURSOR'], '0')
+        self.assertEqual(scheduled['environment']['PAPER_OPENALEX_CURSOR'], '0')
         self.assertEqual(scheduled['environment']['PAPER_AGENT_SCHEDULER_ENABLED'],'0')
         self.assertEqual(app['ports'][0]['host_ip'],'127.0.0.1')
         self.assertNotIn('ports',value['services']['ollama'])
