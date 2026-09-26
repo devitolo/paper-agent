@@ -6,7 +6,7 @@ started_at=$(date -u +%FT%TZ)
 started_epoch=$(date +%s)
 printf 'MiniLM Eval started_at=%s\n' "$started_at"
 report_completion() {
-  status=$?
+  status=$1
   completed_at=$(date -u +%FT%TZ)
   elapsed_seconds=$(($(date +%s) - started_epoch))
   if [[ "$status" == 0 ]]; then
@@ -19,7 +19,7 @@ report_completion() {
   trap - EXIT
   exit "$status"
 }
-trap report_completion EXIT
+trap 'report_completion $?' EXIT
 
 if [[ $# -ne 3 ]]; then
   echo "Usage: minilm_eval_after_pipeline.sh SOURCE APP_CONTAINER REPO" >&2
@@ -46,9 +46,15 @@ runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/paper-minilm-eval.XXXXXXXX")
 cleanup_runtime() {
   rm -rf "$runtime_dir"
 }
-trap 'cleanup_runtime; report_completion' EXIT
+finish_with_cleanup() {
+  status=$?
+  cleanup_runtime
+  report_completion "$status"
+}
+trap finish_with_cleanup EXIT
 docker cp "$app_container:/app/paper_agents" "$runtime_dir/paper_agents"
 docker cp "$app_container:/app/sql" "$runtime_dir/sql"
+chmod -R a+rX "$runtime_dir"
 
 docker run --rm --pull=never --network=none --read-only \
   --cpus=2 --memory=4g --memory-swap=4g --pids-limit=128 \

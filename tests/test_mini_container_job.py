@@ -49,6 +49,26 @@ class HostCronTests(unittest.TestCase):
                 '--source', 'openalex',
             ])
 
+    def test_minilm_eval_runner_preserves_container_failure_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root/'docker'
+            executable.write_text('#!'+sys.executable+'\nimport sys\n'
+                'if sys.argv[1:3] == ["image", "inspect"]:\n'
+                ' print("sha256:7d8b960220e3c6f60292e6d40a8f300ff19c5ee05cd97cf5f725a76673e2d5c2")\n'
+                'elif sys.argv[1] == "run": raise SystemExit(23)\n')
+            executable.chmod(0o700)
+            env = {**os.environ, 'PATH':str(root)+':'+os.environ['PATH']}
+            result = subprocess.run(
+                ['bash', str(ROOT/'scripts/minilm_eval_after_pipeline.sh'), 'openalex', 'app-id', str(ROOT)],
+                env=env, capture_output=True, text=True, timeout=5,
+            )
+            self.assertEqual(result.returncode, 23)
+            self.assertRegex(
+                result.stdout,
+                r'MiniLM Eval completed_at=.* status=failed elapsed_seconds=\d+',
+            )
+
     def test_fixed_commands_enter_owned_job_without_sourcing_env(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
