@@ -2750,8 +2750,7 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_review_queue(self.db_path)
         self.assertIn('data-field-name="approach" aria-pressed="true"', html)
         self.assertIn('data-field-name="research_problem" aria-pressed="false"', html)
-        self.assertIn('<svg aria-hidden="true" viewBox="0 0 24 24"', html)
-        self.assertNotIn(">👎</button>", html)
+        self.assertIn(">👎</button>", html)
 
         result = web.toggle_summary_field_feedback(
             self.db_path,

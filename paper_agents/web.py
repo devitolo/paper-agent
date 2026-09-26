@@ -1780,11 +1780,7 @@ def render_summary_feedback_button(
         f'<button type="button" class="summary-feedback-button{selected}" '
         f'data-paper-id="{paper_id}" data-artifact-id="{artifact["id"]}" '
         f'data-field-name="{field_name}" aria-pressed="{pressed}" '
-        f'aria-label="{title}" title="{title}">'
-        '<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">'
-        '<path d="M7.5 14.5H4.8A1.8 1.8 0 0 1 3 12.7V5.8A1.8 1.8 0 0 1 4.8 4h2.7v10.5Z"/>'
-        '<path d="M7.5 5.2 11 3.5c1.3-.6 2.8.3 2.8 1.8v2.1h4.4c1.7 0 2.8 1.7 2.1 3.2l-3.1 6.8a2.8 2.8 0 0 1-2.5 1.6h-1.2c-.9 0-1.6-.7-1.6-1.6v-2.9H7.5V5.2Z"/>'
-        '</svg></button>'
+        f'aria-label="{title}" title="{title}">👎</button>'
     )
 
 
@@ -2670,11 +2666,10 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .summary-grid section { min-width: 0; }
 .summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
 .summary-heading h3 { margin-bottom: 0; }
-.summary-feedback-button { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 22px; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 2px 4px; color: var(--muted); background: transparent; opacity: 0.12; line-height: 1; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease, background 120ms ease; }
-.summary-feedback-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
+.summary-feedback-button { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 22px; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 2px 4px; background: transparent; opacity: 0.12; filter: grayscale(1); line-height: 1; transition: opacity 120ms ease, filter 120ms ease, border-color 120ms ease, background 120ms ease; }
 .summary-grid section:hover .summary-feedback-button { opacity: 0.28; }
 .summary-feedback-button:hover, .summary-feedback-button:focus-visible { opacity: 0.72; border-color: var(--border-strong); background: rgba(148, 163, 184, 0.05); }
-.summary-feedback-button.selected { opacity: 1; color: #fecaca; border-color: rgba(248, 113, 113, 0.62); background: rgba(248, 113, 113, 0.16); }
+.summary-feedback-button.selected { opacity: 1; filter: none; border-color: rgba(248, 113, 113, 0.52); background: rgba(248, 113, 113, 0.12); }
 .summary-feedback-button:disabled { cursor: wait; opacity: 0.45; }
 .summary-grid p, .source-summary p, .compact-summary { color: var(--muted-strong); font-size: 12px; }
 .source-summary { margin: 8px 0; }
