@@ -804,12 +804,7 @@ def render_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> s
         cards = "".join(render_minilm_eval_card(item) for item in data["items"])
         if not cards:
             cards = '<section class="empty">No papers are available in this MiniLM Eval run.</section>'
-        content = (
-            '<div class="banner minilm-eval-notice">Temporary MiniLM experiment only. These labels do not change the production '
-            'Review Queue, Curator, paper ranking, feedback profile, or recommendation flow.</div>'
-            '<div class="banner minilm-eval-notice">This view is blind by default: MiniLM scores, buckets, and lane labels are hidden while you label.</div>'
-            f'<div class="minilm-eval-cards">{cards}</div>'
-        )
+        content = f'<div class="minilm-eval-cards">{cards}</div>'
         subtitle = (
             f'{source_display_name(selected["source"])} Scout run #{selected["source_run_id"]} | '
             f'{selected["decided_count"]}/{selected["paper_count"]} papers decided'
@@ -2875,7 +2870,6 @@ button.primary { background: linear-gradient(180deg, #7dd3fc, var(--accent)); co
 button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong); }
 .banner { padding: 7px 9px; border: 1px solid rgba(52, 211, 153, 0.42); background: rgba(52, 211, 153, 0.12); border-radius: var(--radius-sm); margin-bottom: 8px; }
 .banner.warning { border-color: rgba(251, 191, 36, 0.48); background: rgba(251, 191, 36, 0.12); }
-.minilm-eval-notice { color: var(--muted-strong); border-color: var(--border); background: rgba(17, 26, 38, 0.72); }
 .minilm-eval-cards { display: grid; gap: 10px; }
 .minilm-eval-card { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); }
 .minilm-eval-card-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
