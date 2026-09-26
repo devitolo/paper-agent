@@ -192,6 +192,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_openalex_delta_applies_after_import_receipt(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE summary_field_feedback')
             c.execute('DROP TABLE openalex_page_dispositions')
             c.execute('DROP TABLE openalex_search_state')
             self.assertIn(import_state.schema(c), import_state.pre_openalex_schemas())
@@ -219,6 +220,20 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
             self.assertIn(import_state.schema(c), import_state.trusted_schemas())
             self.assertEqual(c.execute('SELECT COUNT(*) FROM papers').fetchone()[0], 1)
         self.assertEqual(files(self.source), self.originals)
+
+    def test_approved_summary_feedback_delta_applies_to_current_production_schema(self):
+        self.start()
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE summary_field_feedback')
+            self.assertIn(import_state.schema(c), import_state.pre_summary_feedback_schemas())
+
+        self.assertTrue(import_state.apply_approved_post_import_schema_deltas(self.copy))
+
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            tables = {row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn('summary_field_feedback', tables)
+            self.assertIn(import_state.schema(c), import_state.trusted_schemas())
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM papers').fetchone()[0], 1)
 
 class ConfigurationAndModelTests(unittest.TestCase):
     def test_fresh_defaults_and_explicit_parity(self):

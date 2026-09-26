@@ -269,3 +269,19 @@ CREATE TABLE IF NOT EXISTS openalex_page_dispositions (
     topic TEXT NOT NULL,
     page_json TEXT NOT NULL
 );
+
+-- Versioned summary-field quality feedback; additive after the OpenAlex traversal state.
+CREATE TABLE IF NOT EXISTS summary_field_feedback (
+    id INTEGER PRIMARY KEY,
+    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    artifact_id INTEGER NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    field_name TEXT NOT NULL CHECK (field_name IN ('research_problem', 'why_it_matters', 'approach')),
+    field_text TEXT NOT NULL,
+    model TEXT,
+    artifact_metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (artifact_id, field_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_summary_field_feedback_paper
+ON summary_field_feedback (paper_id);

@@ -65,6 +65,12 @@ VIEWS = [
     ("compact", "Condensed"),
 ]
 
+SUMMARY_FEEDBACK_FIELDS = {
+    "research_problem": "Problem",
+    "why_it_matters": "Why it matters",
+    "approach": "Approach",
+}
+
 
 def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEFAULT_DB_PATH) -> None:
     init_db(db_path)
@@ -231,6 +237,33 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self.send_response(HTTPStatus.SEE_OTHER)
                 self.send_header("Location", redirect_to)
                 self.end_headers()
+                return
+
+            if parsed.path == "/summary-field-feedback":
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Save feedback from Project Paper")
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    result = toggle_summary_field_feedback(
+                        db_path,
+                        paper_id=int(form.get("paper_id", [""])[0]),
+                        artifact_id=int(form.get("artifact_id", [""])[0]),
+                        field_name=form.get("field_name", [""])[0],
+                    )
+                except (ValueError, sqlite3.IntegrityError) as error:
+                    payload = json.dumps({"error": str(error)}).encode("utf-8")
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                else:
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
                 return
 
             if parsed.path != "/feedback":
@@ -479,6 +512,39 @@ def render_review_queue(
           setTimeout(() => {{ button.textContent = originalText; }}, 1400);
         }});
       }});
+      document.querySelectorAll(".summary-feedback-button").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          button.disabled = true;
+          const data = new URLSearchParams({{
+            paper_id: button.dataset.paperId,
+            artifact_id: button.dataset.artifactId,
+            field_name: button.dataset.fieldName,
+          }});
+          try {{
+            const response = await fetch("/summary-field-feedback", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body: data,
+            }});
+            if (!response.ok) throw new Error("Unable to save");
+            const result = await response.json();
+            button.classList.toggle("selected", result.active);
+            button.setAttribute("aria-pressed", result.active ? "true" : "false");
+            button.title = result.active ? "Marked insufficient; click to undo" : "Mark this field as insufficient";
+            const notice = button.closest(".paper-form").querySelector(".submit-state");
+            if (notice) {{
+              notice.textContent = result.active ? `${{result.field_label}} marked insufficient.` : `${{result.field_label}} signal removed.`;
+              setTimeout(() => {{ notice.textContent = ""; }}, 1800);
+            }}
+          }} catch (error) {{
+            const notice = button.closest(".paper-form").querySelector(".submit-state");
+            if (notice) notice.textContent = "Could not save the quality signal. Try again.";
+          }} finally {{
+            button.disabled = false;
+          }}
+        }});
+      }});
       document.querySelectorAll(".paper-form").forEach((form) => {{
         form.addEventListener("submit", (event) => {{
           const submitter = event.submitter;
@@ -513,7 +579,14 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
     title_html = render_title_link(card)
     compact_class = " compact" if view_value == "compact" else ""
-    summary_html = render_summary(summary, compact=view_value == "compact")
+    summary_artifact = card.get("artifacts", {}).get("triage_summary")
+    summary_html = render_summary(
+        summary,
+        compact=view_value == "compact",
+        paper_id=card["id"],
+        artifact=summary_artifact,
+        feedback_fields=card.get("summary_feedback_fields", set()),
+    )
     rationale_html = render_match_rationale(card, signal_tags)
     feedback_summary = "View/edit feedback" if card.get("has_feedback") else "Add feedback"
 
@@ -1649,7 +1722,14 @@ def render_pulled_date(card: dict[str, Any]) -> str:
     )
 
 
-def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
+def render_summary(
+    summary: dict[str, Any],
+    *,
+    compact: bool,
+    paper_id: int | None = None,
+    artifact: dict[str, Any] | None = None,
+    feedback_fields: set[str] | None = None,
+) -> str:
     has_extracted_summary = any(summary.get(key) for key in ["research_problem", "why_it_matters", "approach"])
     source_abstract = summary.get("source_abstract")
     if not has_extracted_summary and source_abstract:
@@ -1663,11 +1743,45 @@ def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
     problem = escape(summary_display_text(summary.get("research_problem")))
     if compact:
         return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
+    feedback_fields = feedback_fields or set()
+    sections = []
+    for field_name, heading in SUMMARY_FEEDBACK_FIELDS.items():
+        text = escape(summary_display_text(summary.get(field_name)))
+        control = render_summary_feedback_button(
+            paper_id=paper_id,
+            artifact=artifact,
+            field_name=field_name,
+            active=field_name in feedback_fields,
+        )
+        if control:
+            sections.append(
+                f'<section><div class="summary-heading"><h3>{heading}</h3>{control}</div><p>{text}</p></section>'
+            )
+        else:
+            sections.append(f'<section><h3>{heading}</h3><p>{text}</p></section>')
     return f"""<div class="summary-grid">
-    <section><h3>Problem</h3><p>{problem}</p></section>
-    <section><h3>Why it matters</h3><p>{escape(summary_display_text(summary.get("why_it_matters")))}</p></section>
-    <section><h3>Approach</h3><p>{escape(summary_display_text(summary.get("approach")))}</p></section>
+    {''.join(sections)}
   </div>"""
+
+
+def render_summary_feedback_button(
+    *,
+    paper_id: int | None,
+    artifact: dict[str, Any] | None,
+    field_name: str,
+    active: bool,
+) -> str:
+    if paper_id is None or not artifact or artifact.get("id") is None:
+        return ""
+    selected = " selected" if active else ""
+    pressed = "true" if active else "false"
+    title = "Marked insufficient; click to undo" if active else "Mark this field as insufficient"
+    return (
+        f'<button type="button" class="summary-feedback-button{selected}" '
+        f'data-paper-id="{paper_id}" data-artifact-id="{artifact["id"]}" '
+        f'data-field-name="{field_name}" aria-pressed="{pressed}" '
+        f'aria-label="{title}" title="{title}">👎</button>'
+    )
 
 
 def summary_display_text(value: Any, *, max_chars: int = 520) -> str:
@@ -1919,6 +2033,7 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
         for row in rows:
             paper_id = row[0]
             artifacts = load_artifacts_for_paper(connection, paper_id)
+            summary_artifact = artifacts.get("triage_summary")
             lightweight_score = parse_lightweight_feedback_score(row[14])
             user_score = row[16] if row[16] is not None else lightweight_score
             has_feedback = bool(
@@ -1949,7 +2064,11 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                     "feedback_status": row[13],
                     "feedback_notes": row[20] or row[14],
                     "artifacts": artifacts,
-                    "summary": with_source_abstract(load_summary(artifacts.get("triage_summary")), row[7]),
+                    "summary": with_source_abstract(load_summary(summary_artifact), row[7]),
+                    "summary_feedback_fields": load_summary_feedback_fields(
+                        connection,
+                        summary_artifact.get("id") if summary_artifact else None,
+                    ),
                 }
             )
     finally:
@@ -2162,6 +2281,18 @@ def load_artifacts_for_paper(connection: sqlite3.Connection, paper_id: int) -> d
     return artifacts
 
 
+def load_summary_feedback_fields(connection: sqlite3.Connection, artifact_id: int | None) -> set[str]:
+    if artifact_id is None:
+        return set()
+    return {
+        row[0]
+        for row in connection.execute(
+            "SELECT field_name FROM summary_field_feedback WHERE artifact_id = ?",
+            (artifact_id,),
+        )
+    }
+
+
 def load_artifact(db_path: Path, artifact_id: int) -> dict[str, Any] | None:
     init_db(db_path)
     with connect_db(db_path) as connection:
@@ -2284,6 +2415,65 @@ def save_feedback(
         result["profile_apply_error"] = str(error)
         print(f"feedback profile auto-apply failed: {error}")
     return result
+
+
+def toggle_summary_field_feedback(
+    db_path: Path,
+    *,
+    paper_id: int,
+    artifact_id: int,
+    field_name: str,
+) -> dict[str, Any]:
+    if field_name not in SUMMARY_FEEDBACK_FIELDS:
+        raise ValueError("Invalid summary field")
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id, path, model, metadata_json
+            FROM artifacts
+            WHERE id = ? AND paper_id = ? AND artifact_type = 'triage_summary'
+            """,
+            (artifact_id, paper_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Summary artifact does not belong to this paper")
+        existing = connection.execute(
+            "SELECT id FROM summary_field_feedback WHERE artifact_id = ? AND field_name = ?",
+            (artifact_id, field_name),
+        ).fetchone()
+        if existing:
+            connection.execute("DELETE FROM summary_field_feedback WHERE id = ?", (existing[0],))
+            active = False
+        else:
+            artifact = {
+                "id": row[0],
+                "path": row[1],
+                "model": row[2],
+                "metadata": decode_json(row[3], {}),
+            }
+            summary = load_summary(artifact)
+            connection.execute(
+                """
+                INSERT INTO summary_field_feedback (
+                    paper_id, artifact_id, field_name, field_text, model, artifact_metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    paper_id,
+                    artifact_id,
+                    field_name,
+                    summary_field_text(summary.get(field_name)),
+                    row[2],
+                    json.dumps(decode_json(row[3], {}), sort_keys=True),
+                ),
+            )
+            active = True
+    return {
+        "active": active,
+        "field_name": field_name,
+        "field_label": SUMMARY_FEEDBACK_FIELDS[field_name],
+    }
 
 
 def start_profile_apply_worker(
@@ -2474,6 +2664,12 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .source-badge-unknown::before { content: "?"; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
 .summary-grid section { min-width: 0; }
+.summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
+.summary-heading h3 { margin-bottom: 0; }
+.summary-feedback-button { min-width: 26px; min-height: 24px; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 0 5px; color: var(--muted); background: transparent; opacity: 0.62; line-height: 1; }
+.summary-feedback-button:hover { opacity: 1; border-color: var(--border-strong); background: var(--surface-raised); }
+.summary-feedback-button.selected { opacity: 1; color: #fecaca; border-color: rgba(248, 113, 113, 0.62); background: rgba(248, 113, 113, 0.16); }
+.summary-feedback-button:disabled { cursor: wait; opacity: 0.45; }
 .summary-grid p, .source-summary p, .compact-summary { color: var(--muted-strong); font-size: 12px; }
 .source-summary { margin: 8px 0; }
 .source-summary p {

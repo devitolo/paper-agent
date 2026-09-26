@@ -41,6 +41,8 @@ def schema(connection):
 
 OPENALEX_SCHEMA_MARKER = '-- Versioned OpenAlex traversal state; enabled only by the cursor retrieval path.'
 OPENALEX_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(OPENALEX_SCHEMA_MARKER, 1)[1]
+SUMMARY_FEEDBACK_SCHEMA_MARKER = '-- Versioned summary-field quality feedback; additive after the OpenAlex traversal state.'
+SUMMARY_FEEDBACK_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SUMMARY_FEEDBACK_SCHEMA_MARKER, 1)[1]
 
 
 def _schema_variants(sql):
@@ -70,6 +72,12 @@ def pre_openalex_schemas():
     return _schema_variants(sql)
 
 
+def pre_summary_feedback_schemas():
+    """Accepted production schema before summary-field quality feedback."""
+    sql = TRUSTED_SCHEMA.read_text().split(SUMMARY_FEEDBACK_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql)
+
+
 def apply_approved_post_import_schema_deltas(root):
     """Apply reviewed additive schema growth to already accepted imports only."""
     root = Path(root).absolute()
@@ -81,9 +89,13 @@ def apply_approved_post_import_schema_deltas(root):
         actual_schema = schema(connection)
         if actual_schema in trusted_schemas():
             return False
-        require(actual_schema in pre_openalex_schemas(), 'Imported schema incompatible; no schema deltas approved')
+        if actual_schema in pre_summary_feedback_schemas():
+            delta_sql = SUMMARY_FEEDBACK_SCHEMA_SQL
+        else:
+            require(actual_schema in pre_openalex_schemas(), 'Imported schema incompatible; no schema deltas approved')
+            delta_sql = OPENALEX_SCHEMA_SQL
         with connection:
-            connection.executescript(OPENALEX_SCHEMA_SQL)
+            connection.executescript(delta_sql)
         require(schema(connection) in trusted_schemas(), 'Approved schema delta did not produce trusted schema')
         return True
     finally:

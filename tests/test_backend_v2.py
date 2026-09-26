@@ -2704,6 +2704,85 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("<h3>Approach</h3><p>Not extracted yet.</p>", formula_html)
         self.assertNotIn("RLCR", formula_html)
 
+    def test_summary_field_feedback_toggles_and_preserves_displayed_qwen_context(self):
+        paper_id, _ = self._seed_review_recommendation()
+        summary_path = Path(self.tmp.name) / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "merged": {
+                        "research_problem": "Diagnosing production incidents.",
+                        "why_it_matters": "Failures delay recovery.",
+                        "approach": "A named framework without enough detail.",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        artifact_id = db.insert_artifact(
+            self.connection,
+            paper_id,
+            artifact_type="triage_summary",
+            path=summary_path,
+            model="qwen2.5:1.5b-instruct",
+            metadata={"extractor_version": "qwen-triage-v1"},
+        )
+        self.connection.commit()
+
+        result = web.toggle_summary_field_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            artifact_id=artifact_id,
+            field_name="approach",
+        )
+
+        self.assertTrue(result["active"])
+        row = self.connection.execute(
+            """
+            SELECT field_name, field_text, model, artifact_metadata_json
+            FROM summary_field_feedback
+            """
+        ).fetchone()
+        self.assertEqual(row[0], "approach")
+        self.assertEqual(row[1], "A named framework without enough detail.")
+        self.assertEqual(row[2], "qwen2.5:1.5b-instruct")
+        self.assertEqual(json.loads(row[3]), {"extractor_version": "qwen-triage-v1"})
+        html = web.render_review_queue(self.db_path)
+        self.assertIn('data-field-name="approach" aria-pressed="true"', html)
+        self.assertIn('data-field-name="research_problem" aria-pressed="false"', html)
+
+        result = web.toggle_summary_field_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            artifact_id=artifact_id,
+            field_name="approach",
+        )
+
+        self.assertFalse(result["active"])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM summary_field_feedback").fetchone()[0], 0)
+
+    def test_summary_field_feedback_rejects_mismatched_artifact(self):
+        paper_id, _ = self._seed_review_recommendation()
+        other_paper, _ = self._seed_review_recommendation(source_id="2607.other")
+        summary_path = Path(self.tmp.name) / "other-summary.json"
+        summary_path.write_text('{"merged":{"approach":"Other approach"}}', encoding="utf-8")
+        artifact_id = db.insert_artifact(
+            self.connection,
+            other_paper,
+            artifact_type="triage_summary",
+            path=summary_path,
+            model="qwen-test",
+        )
+        self.connection.commit()
+
+        with self.assertRaisesRegex(ValueError, "does not belong"):
+            web.toggle_summary_field_feedback(
+                self.db_path,
+                paper_id=paper_id,
+                artifact_id=artifact_id,
+                field_name="approach",
+            )
+
     def test_topics_page_renders_editable_topic_manager(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
         save_topic_config(
