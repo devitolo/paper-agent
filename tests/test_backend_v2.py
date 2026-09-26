@@ -3877,8 +3877,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Recommendation Gap", html)
         self.assertIn("Feedback/Profile Activity", html)
         self.assertIn('href="/topics">Topics</a>', html)
-        self.assertIn('id="run-scout"', html)
-        self.assertIn('Local Qwen:', html)
+        self.assertNotIn('id="run-scout"', html)
+        self.assertNotIn('Local Qwen:', html)
 
     def test_topics_page_renders_source_topic_inventory(self):
         html = web.render_topics_page()

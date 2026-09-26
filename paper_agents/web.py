@@ -703,7 +703,6 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 <body>
   <main>
     {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
-    {render_manual_scout_panel(db_path)}
     {warning_html}
     <div class="health-cards">{card_html}</div>
     {render_profile_maintenance(summary["profile_maintenance"])}
