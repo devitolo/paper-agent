@@ -29,6 +29,11 @@ class HostCronTests(unittest.TestCase):
                 env=env, capture_output=True, text=True, timeout=5,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('MiniLM Eval started_at=', result.stdout)
+            self.assertRegex(
+                result.stdout,
+                r'MiniLM Eval completed_at=.* status=success elapsed_seconds=\d+',
+            )
             calls = [json.loads(line) for line in capture.read_text().splitlines()]
             run = next(call for call in calls if call and call[0] == 'run')
             self.assertIn('--network=none', run)

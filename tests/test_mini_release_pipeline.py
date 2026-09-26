@@ -118,6 +118,9 @@ class MiniReleasePipelineTests(unittest.TestCase):
     def test_production_update_reports_post_deploy_verification(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         self.assertIn('post-deploy-verification.txt', script)
+        self.assertIn('scripts/minilm_eval_after_pipeline.sh', script)
+        self.assertIn('minilm_runner_sha256=', script)
+        self.assertIn('PAPER_MINILM_EVAL_ENABLED=1', script)
         self.assertIn('verification_revision=$(docker inspect', script)
         self.assertIn('verification_status=$(docker inspect', script)
         self.assertIn('verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc', script)

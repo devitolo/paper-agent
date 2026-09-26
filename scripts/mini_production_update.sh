@@ -78,6 +78,7 @@ mkdir -p "$CANDIDATE_DIR/scripts"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-migration.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-rehearsal.yml" "$CANDIDATE_DIR/docker-compose.mini-rehearsal.yml"
 install -m 0755 "$SOURCE_DIR/scripts/mini_container_job.sh" "$CANDIDATE_DIR/scripts/mini_container_job.sh"
+install -m 0755 "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh"
 install -m 0755 "$SOURCE_DIR/scripts/mini_production_update.sh" "$CANDIDATE_DIR/scripts/mini_production_update.sh"
 {
   printf 'started_at=%s\n' "$(date -u +%FT%TZ)"
@@ -278,14 +279,26 @@ destination = Path(sys.argv[2])
 overlay = sys.argv[3]
 out: list[str] = []
 found = False
+found_minilm_eval = False
 for line in source.read_text(encoding="utf-8").splitlines():
     if line.startswith("PAPER_MIGRATION_EXTRA_COMPOSE_FILES="):
         out.append(f"PAPER_MIGRATION_EXTRA_COMPOSE_FILES={overlay}")
         found = True
+    elif line.startswith("PAPER_MINILM_EVAL_ENABLED="):
+        out.append("PAPER_MINILM_EVAL_ENABLED=1")
+        found_minilm_eval = True
     else:
         out.append(line)
 if not found:
     raise SystemExit("managed cron is missing PAPER_MIGRATION_EXTRA_COMPOSE_FILES")
+if not found_minilm_eval:
+    insert_at = next(
+        (index + 1 for index, line in enumerate(out) if line.startswith("PAPER_MIGRATION_EXTRA_COMPOSE_FILES=")),
+        None,
+    )
+    if insert_at is None:
+        raise SystemExit("cannot place PAPER_MINILM_EVAL_ENABLED in managed cron")
+    out.insert(insert_at, "PAPER_MINILM_EVAL_ENABLED=1")
 destination.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
   crontab "$RELEASE_DIR/crontab.next"
@@ -375,14 +388,27 @@ verification_revision=$(docker inspect --format '{{ index .Config.Labels "org.op
 verification_status=$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' paper-mini-production-app-1)
 verification_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1)
 verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_OPENALEX_CURSOR:-unset}"')
+verification_minilm_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
+expected_minilm_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
+verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=1$' "$RELEASE_DIR/crontab.next")
 {
   printf 'revision=%s\n' "$verification_revision"
   printf 'status=%s\n' "$verification_status"
   printf 'PAPER_OPENALEX_CURSOR=%s\n' "$verification_openalex_cursor"
   printf 'image=%s\n' "$verification_image"
+  printf 'minilm_runner_sha256=%s\n' "$verification_minilm_runner"
+  printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 1 || printf invalid)"
 } | tee "$RELEASE_DIR/post-deploy-verification.txt"
 if [[ -n "$OPENALEX_CURSOR" && "$verification_openalex_cursor" != "$OPENALEX_CURSOR" ]]; then
   echo "Post-deploy verification failed: PAPER_OPENALEX_CURSOR=$verification_openalex_cursor, expected $OPENALEX_CURSOR" >&2
+  exit 1
+fi
+if [[ "$verification_minilm_runner" != "$expected_minilm_runner" ]]; then
+  echo "Post-deploy verification failed: MiniLM evaluation runner mismatch" >&2
+  exit 1
+fi
+if [[ "$verification_minilm_cron" != 1 ]]; then
+  echo "Post-deploy verification failed: PAPER_MINILM_EVAL_ENABLED=1 is missing or duplicated" >&2
   exit 1
 fi
 
@@ -395,6 +421,8 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_revision=%s\n' "$verification_revision"
   printf 'verified_status=%s\n' "$verification_status"
   printf 'verified_openalex_cursor=%s\n' "$verification_openalex_cursor"
+  printf 'verified_minilm_runner_sha256=%s\n' "$verification_minilm_runner"
+  printf 'verified_minilm_eval_enabled=1\n'
   printf 'rollback_script=%s\n' "$RELEASE_DIR/rollback.sh"
 } >> "$RELEASE_DIR/update.env"
 DEPLOYMENT_SUCCESS=1
@@ -411,6 +439,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- Revision: \`$verification_revision\`"
     echo "- Status: \`$verification_status\`"
     echo "- PAPER_OPENALEX_CURSOR: \`$verification_openalex_cursor\`"
+    echo "- PAPER_MINILM_EVAL_ENABLED: \`1\`"
+    echo "- MiniLM runner SHA256: \`$verification_minilm_runner\`"
     echo "- Evidence: \`$RELEASE_DIR\`"
     echo "- Rollback: \`$RELEASE_DIR/rollback.sh\`"
   } >> "$GITHUB_STEP_SUMMARY"

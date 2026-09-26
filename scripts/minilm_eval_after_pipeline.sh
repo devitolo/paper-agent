@@ -2,6 +2,25 @@
 # Run isolated MiniLM evaluation after a successful production Scout pipeline.
 set -euo pipefail
 
+started_at=$(date -u +%FT%TZ)
+started_epoch=$(date +%s)
+printf 'MiniLM Eval started_at=%s\n' "$started_at"
+report_completion() {
+  status=$?
+  completed_at=$(date -u +%FT%TZ)
+  elapsed_seconds=$(($(date +%s) - started_epoch))
+  if [[ "$status" == 0 ]]; then
+    result=success
+  else
+    result=failed
+  fi
+  printf 'MiniLM Eval completed_at=%s status=%s elapsed_seconds=%s\n' \
+    "$completed_at" "$result" "$elapsed_seconds"
+  trap - EXIT
+  exit "$status"
+}
+trap report_completion EXIT
+
 if [[ $# -ne 3 ]]; then
   echo "Usage: minilm_eval_after_pipeline.sh SOURCE APP_CONTAINER REPO" >&2
   exit 64
