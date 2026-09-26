@@ -29,8 +29,24 @@ if [[ -n "${PAPER_MIGRATION_EXTRA_COMPOSE_FILES:-}" ]]; then
   done
 fi
 # Never source an env file or interpolate its values as shell commands.
-exec "${compose[@]}" exec -T app \
+"${compose[@]}" exec -T app \
   env PAPER_AGENT_REPO=/app PAPER_AGENT_LOCK_DIR=/runtime-control \
   PAPER_AGENT_SELF_UPDATE=0 PAPER_AGENT_TOPIC_SLOT=0 \
   PAPER_AGENT_PROFILE_REBUILD_ANCHOR=2026-09-07 TZ=America/Los_Angeles \
   python -m paper_agents.migration_job "$1"
+
+if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" ]]; then
+  case "$1" in
+    arxiv) eval_source=arxiv ;;
+    openalex) eval_source=openalex ;;
+    semantic) eval_source=semantic_scholar ;;
+    *) exit 0 ;;
+  esac
+  if ! app_container=$("${compose[@]}" ps -q app); then
+    echo "MiniLM Eval skipped after successful $1 pipeline: app container lookup failed." >&2
+  elif [[ -z "$app_container" ]]; then
+    echo "MiniLM Eval skipped after successful $1 pipeline: app container was not found." >&2
+  elif ! bash "$repo/scripts/minilm_eval_after_pipeline.sh" "$eval_source" "$app_container" "$repo"; then
+    echo "MiniLM Eval failed after successful $1 pipeline; production results are unchanged." >&2
+  fi
+fi

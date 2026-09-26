@@ -285,3 +285,46 @@ CREATE TABLE IF NOT EXISTS summary_field_feedback (
 
 CREATE INDEX IF NOT EXISTS idx_summary_field_feedback_paper
 ON summary_field_feedback (paper_id);
+
+-- Temporary MiniLM Eval experiment; isolated from production ranking and feedback/profile learning.
+CREATE TABLE IF NOT EXISTS minilm_eval_runs (
+    id INTEGER PRIMARY KEY,
+    source_run_id INTEGER NOT NULL UNIQUE REFERENCES scout_runs(id) ON DELETE CASCADE,
+    candidate_pool_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    minilm_query_version TEXT NOT NULL,
+    minilm_model_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS minilm_eval_queue (
+    id INTEGER PRIMARY KEY,
+    eval_run_id INTEGER NOT NULL REFERENCES minilm_eval_runs(id) ON DELETE CASCADE,
+    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    recommendation_mode TEXT NOT NULL CHECK (recommendation_mode IN ('baseline', 'minilm_assisted')),
+    rank_position INTEGER NOT NULL CHECK (rank_position > 0),
+    minilm_raw_logit REAL,
+    minilm_bucket TEXT,
+    title_snapshot TEXT NOT NULL,
+    abstract_snapshot TEXT,
+    problem_snapshot TEXT,
+    why_it_matters_snapshot TEXT,
+    approach_snapshot TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (eval_run_id, recommendation_mode, paper_id),
+    UNIQUE (eval_run_id, recommendation_mode, rank_position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_minilm_eval_queue_run_mode
+ON minilm_eval_queue (eval_run_id, recommendation_mode, rank_position);
+
+CREATE TABLE IF NOT EXISTS minilm_eval_decisions (
+    id INTEGER PRIMARY KEY,
+    eval_run_id INTEGER NOT NULL REFERENCES minilm_eval_runs(id) ON DELETE CASCADE,
+    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    representative_queue_item_id INTEGER REFERENCES minilm_eval_queue(id) ON DELETE SET NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('send_to_curator', 'maybe', 'skip')),
+    decided_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (eval_run_id, paper_id)
+);

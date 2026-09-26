@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import mimetypes
 import re
@@ -161,6 +162,20 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     )
                 )
                 return
+            if parsed.path == "/minilm-eval":
+                params = urllib.parse.parse_qs(parsed.query)
+                self.respond_html(
+                    render_minilm_eval_page(
+                        db_path,
+                        run_value=params.get("run", [None])[0],
+                    )
+                )
+                return
+            if parsed.path == "/scout-eval":
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", "/minilm-eval")
+                self.end_headers()
+                return
             if parsed.path == "/topics":
                 params = urllib.parse.parse_qs(parsed.query)
                 self.respond_html(
@@ -264,6 +279,36 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
+                return
+
+            if parsed.path == "/minilm-eval/decision":
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Save evaluation from Project Paper")
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    from paper_agents.minilm_eval import save_eval_decision
+                    result = save_eval_decision(
+                        db_path,
+                        queue_item_id=int(form.get("queue_item_id", [""])[0]),
+                        decision=form.get("decision", [""])[0],
+                    )
+                except (ValueError, sqlite3.IntegrityError) as error:
+                    payload = json.dumps({"error": str(error)}).encode("utf-8")
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                else:
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if parsed.path == "/scout-eval/decision":
+                self.send_error(HTTPStatus.GONE, "Use /minilm-eval/decision")
                 return
 
             if parsed.path != "/feedback":
@@ -735,6 +780,207 @@ def discussion_summary_lines(summary: dict[str, Any]) -> list[str]:
 
 def format_user_score(score: float) -> str:
     return f"{float(score):.2f}".rstrip("0").rstrip(".")
+
+
+def render_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> str:
+    data = load_minilm_eval_page(db_path, run_value=run_value)
+    runs = data["runs"]
+    selected = data["selected_run"]
+    options = "".join(
+        f'<option value="{run["id"]}"{" selected" if selected and run["id"] == selected["id"] else ""}>'
+        f'#{run["id"]} · {escape(source_display_name(run["source"]))} · {escape(run["created_at"])}</option>'
+        for run in runs
+    )
+    controls = ""
+    if runs:
+        controls = f"""
+        <form method="get" action="/minilm-eval" class="queue-controls">
+          <label><span class="visually-hidden">Evaluation run</span><select name="run" onchange="this.form.submit()">{options}</select></label>
+        </form>"""
+    if selected is None:
+        content = '<section class="empty">No MiniLM Eval queue has been generated yet.</section>'
+        subtitle = "Waiting for the next scheduled Scout evaluation"
+    else:
+        cards = "".join(render_minilm_eval_card(item) for item in data["items"])
+        if not cards:
+            cards = '<section class="empty">No papers are available in this MiniLM Eval run.</section>'
+        content = (
+            '<div class="banner minilm-eval-notice">Temporary MiniLM experiment only. These labels do not change the production '
+            'Review Queue, Curator, paper ranking, feedback profile, or recommendation flow.</div>'
+            '<div class="banner minilm-eval-notice">This view is blind by default: MiniLM scores, buckets, and lane labels are hidden while you label.</div>'
+            f'<div class="minilm-eval-cards">{cards}</div>'
+        )
+        subtitle = (
+            f'{source_display_name(selected["source"])} Scout run #{selected["source_run_id"]} | '
+            f'{selected["decided_count"]}/{selected["paper_count"]} papers decided'
+        )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Paper MiniLM Eval</title>
+  <style>{page_css()}</style>
+</head>
+<body>
+  <main>
+    {render_app_header("MiniLM Eval", subtitle, controls, "minilm_eval")}
+    {content}
+    <script>
+      document.querySelectorAll(".minilm-eval-decision").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          const card = button.closest(".minilm-eval-card");
+          const buttons = card.querySelectorAll(".minilm-eval-decision");
+          buttons.forEach((item) => item.disabled = true);
+          const body = new URLSearchParams({{
+            queue_item_id: button.dataset.queueItemId,
+            decision: button.dataset.decision,
+          }});
+          try {{
+            const response = await fetch("/minilm-eval/decision", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body,
+            }});
+            if (!response.ok) throw new Error("save failed");
+            buttons.forEach((item) => {{
+              const selected = item === button;
+              item.classList.toggle("selected", selected);
+              item.setAttribute("aria-pressed", selected ? "true" : "false");
+            }});
+            const state = card.querySelector(".minilm-eval-state");
+            if (state) state.textContent = "Saved";
+          }} catch (error) {{
+            const state = card.querySelector(".minilm-eval-state");
+            if (state) state.textContent = "Could not save. Try again.";
+          }} finally {{
+            buttons.forEach((item) => item.disabled = false);
+          }}
+        }});
+      }});
+    </script>
+  </main>
+</body>
+</html>"""
+
+
+def render_minilm_eval_card(item: dict[str, Any]) -> str:
+    decision_buttons = []
+    for value, label in (("send_to_curator", "Send to Curator"), ("maybe", "Maybe"), ("skip", "Skip")):
+        selected = item["decision"] == value
+        decision_buttons.append(
+            f'<button type="button" class="minilm-eval-decision{" selected" if selected else ""}" '
+            f'data-queue-item-id="{item["id"]}" data-decision="{value}" '
+            f'aria-pressed="{"true" if selected else "false"}">{label}</button>'
+        )
+    summary = "".join(
+        f'<section><h3>{label}</h3><p>{escape(value)}</p></section>'
+        for label, value in (
+            ("Problem", item.get("problem")),
+            ("Why it matters", item.get("why_it_matters")),
+            ("Approach", item.get("approach")),
+        )
+        if value
+    )
+    return f"""<article class="minilm-eval-card">
+      <div class="minilm-eval-card-head">
+        <span class="minilm-eval-rank">Paper {item['display_rank']} of {item['paper_count']}</span>
+        <span class="minilm-eval-bucket">Unreviewed means unknown</span>
+      </div>
+      <h2>{escape(item['title'])}</h2>
+      <details class="minilm-eval-abstract" open><summary>Abstract</summary><p>{escape(item['abstract'] or 'No abstract available.')}</p></details>
+      {f'<div class="summary-grid minilm-eval-summary">{summary}</div>' if summary else ''}
+      <div class="minilm-eval-actions" role="group" aria-label="MiniLM Eval decision">{''.join(decision_buttons)}</div>
+      <span class="minilm-eval-state" aria-live="polite">{'Saved' if item['decision'] else ''}</span>
+    </article>"""
+
+
+def load_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> dict[str, Any]:
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        run_rows = connection.execute(
+            """
+            SELECT er.id, er.source_run_id, sr.source, er.created_at,
+                   COUNT(DISTINCT q.paper_id), COUNT(DISTINCT d.paper_id)
+            FROM minilm_eval_runs er
+            JOIN scout_runs sr ON sr.id = er.source_run_id
+            LEFT JOIN minilm_eval_queue q ON q.eval_run_id = er.id
+            LEFT JOIN minilm_eval_decisions d ON d.eval_run_id = er.id
+            GROUP BY er.id
+            ORDER BY er.id DESC LIMIT 30
+            """
+        ).fetchall()
+        runs = [
+            {"id": row[0], "source_run_id": row[1], "source": row[2], "created_at": row[3],
+             "paper_count": row[4], "item_count": row[4], "decided_count": row[5]}
+            for row in run_rows
+        ]
+        selected_id = None
+        if run_value and run_value.isascii() and run_value.isdigit():
+            requested = int(run_value)
+            if any(run["id"] == requested for run in runs):
+                selected_id = requested
+        if selected_id is None and runs:
+            selected_id = next((run["id"] for run in reversed(runs) if run["decided_count"] < run["item_count"]), runs[0]["id"])
+        selected = next((run for run in runs if run["id"] == selected_id), None)
+        items = []
+        if selected:
+            rows = connection.execute(
+                """
+                SELECT
+                    MIN(q.id) AS representative_queue_item_id,
+                    q.paper_id,
+                    q.title_snapshot,
+                    q.abstract_snapshot,
+                    MAX(q.problem_snapshot),
+                    MAX(q.why_it_matters_snapshot),
+                    MAX(q.approach_snapshot),
+                    MIN(CASE q.recommendation_mode WHEN 'baseline' THEN q.rank_position END) AS baseline_rank,
+                    MIN(CASE q.recommendation_mode WHEN 'minilm_assisted' THEN q.rank_position END) AS minilm_rank,
+                    MAX(q.minilm_raw_logit),
+                    MAX(q.minilm_bucket),
+                    d.decision
+                FROM minilm_eval_queue q
+                LEFT JOIN minilm_eval_decisions d
+                  ON d.eval_run_id = q.eval_run_id AND d.paper_id = q.paper_id
+                WHERE q.eval_run_id = ?
+                GROUP BY q.paper_id
+                ORDER BY
+                    COALESCE(MIN(CASE q.recommendation_mode WHEN 'baseline' THEN q.rank_position END), 999999),
+                    COALESCE(MIN(CASE q.recommendation_mode WHEN 'minilm_assisted' THEN q.rank_position END), 999999),
+                    q.paper_id
+                """,
+                (selected_id,),
+            ).fetchall()
+            items = [
+                {
+                    "id": row[0],
+                    "paper_id": row[1],
+                    "display_rank": 0,
+                    "paper_count": len(rows),
+                    "title": row[2],
+                    "abstract": row[3],
+                    "problem": row[4],
+                    "why_it_matters": row[5],
+                    "approach": row[6],
+                    "baseline_rank": row[7],
+                    "minilm_rank": row[8],
+                    "minilm_raw_logit": row[9],
+                    "minilm_bucket": row[10],
+                    "decision": row[11],
+                }
+                for row in rows
+            ]
+            # Use a stable experiment-specific order that reveals neither lane.
+            items.sort(
+                key=lambda item: hashlib.sha256(
+                    f"minilm-eval:{selected_id}:{item['paper_id']}".encode("utf-8")
+                ).digest()
+            )
+            for index, item in enumerate(items, 1):
+                item["display_rank"] = index
+    return {"runs": runs, "selected_run": selected, "items": items}
 
 
 def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:
@@ -2148,6 +2394,7 @@ def render_primary_nav(current_page: str) -> str:
     links = [
         ("review", "/", "Review Queue"),
         ("topics", "/topics", "Topics"),
+        ("minilm_eval", "/minilm-eval", "MiniLM Eval"),
         ("health", "/health", "Health"),
     ]
     return "".join(
@@ -2628,6 +2875,20 @@ button.primary { background: linear-gradient(180deg, #7dd3fc, var(--accent)); co
 button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong); }
 .banner { padding: 7px 9px; border: 1px solid rgba(52, 211, 153, 0.42); background: rgba(52, 211, 153, 0.12); border-radius: var(--radius-sm); margin-bottom: 8px; }
 .banner.warning { border-color: rgba(251, 191, 36, 0.48); background: rgba(251, 191, 36, 0.12); }
+.minilm-eval-notice { color: var(--muted-strong); border-color: var(--border); background: rgba(17, 26, 38, 0.72); }
+.minilm-eval-cards { display: grid; gap: 10px; }
+.minilm-eval-card { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); }
+.minilm-eval-card-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
+.minilm-eval-abstract { margin-top: 9px; color: var(--muted-strong); }
+.minilm-eval-abstract summary { cursor: pointer; color: var(--muted); font-size: 11px; font-weight: 720; text-transform: uppercase; }
+.minilm-eval-abstract p { margin-top: 5px; }
+.minilm-eval-summary { padding-top: 3px; border-top: 1px solid rgba(51, 70, 95, 0.55); }
+.minilm-eval-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.minilm-eval-decision { min-height: 38px; font-weight: 700; color: var(--muted-strong); }
+.minilm-eval-decision:hover { border-color: var(--accent); color: var(--text); }
+.minilm-eval-decision.selected { color: var(--accent-ink); border-color: var(--accent); background: var(--accent); }
+.minilm-eval-decision:disabled { cursor: wait; opacity: 0.55; }
+.minilm-eval-state { display: block; min-height: 17px; margin-top: 5px; color: var(--muted); font-size: 11px; text-align: right; }
 .cards { display: grid; gap: 8px; }
 .paper-card, .empty { background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.035); }
 .paper-card:hover { border-color: var(--border-strong); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(56, 189, 248, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.045); }
@@ -2859,6 +3120,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .header-controls { justify-content: flex-start; }
   .queue-controls, .primary-nav { justify-content: flex-start; }
   .summary-grid { grid-template-columns: 1fr; }
+  .minilm-eval-actions { grid-template-columns: 1fr; }
   .pulled-date { margin-left: 0; text-align: left; }
   .feedback-state { text-align: left; grid-column: 1 / -1; }
   .health-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }

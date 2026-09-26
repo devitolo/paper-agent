@@ -14,6 +14,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class HostCronTests(unittest.TestCase):
+    def test_minilm_eval_runner_is_pinned_offline_and_calls_experiment_module(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root/'docker'
+            executable.write_text('#!'+sys.executable+'\nimport json,os,sys\n'
+                'with open(os.environ["CAPTURE"],"a") as stream: stream.write(json.dumps(sys.argv[1:])+"\\n")\n'
+                'if sys.argv[1:3] == ["image", "inspect"]: print("sha256:7d8b960220e3c6f60292e6d40a8f300ff19c5ee05cd97cf5f725a76673e2d5c2")\n')
+            executable.chmod(0o700)
+            capture = root/'calls'
+            env = {**os.environ, 'PATH':str(root)+':'+os.environ['PATH'], 'CAPTURE':str(capture)}
+            result = subprocess.run(
+                ['bash', str(ROOT/'scripts/minilm_eval_after_pipeline.sh'), 'openalex', 'app-id', str(ROOT)],
+                env=env, capture_output=True, text=True, timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [json.loads(line) for line in capture.read_text().splitlines()]
+            run = next(call for call in calls if call and call[0] == 'run')
+            self.assertIn('--network=none', run)
+            self.assertIn('--read-only', run)
+            self.assertIn('paper-agent-minilm-model-cache', ' '.join(run))
+            self.assertEqual(run[-6:], [
+                '-m', 'paper_agents.minilm_eval', '--db', '/app/data/paper_agent.db',
+                '--source', 'openalex',
+            ])
+
     def test_fixed_commands_enter_owned_job_without_sourcing_env(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
