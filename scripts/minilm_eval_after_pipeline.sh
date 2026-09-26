@@ -40,13 +40,23 @@ if [[ "$image_id" != "$expected_image" ]]; then
 fi
 docker volume inspect "$model_volume" >/dev/null
 
+# Use the exact deployed application source instead of the host candidate checkout,
+# which intentionally contains only selected deployment files.
+runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/paper-minilm-eval.XXXXXXXX")
+cleanup_runtime() {
+  rm -rf "$runtime_dir"
+}
+trap 'cleanup_runtime; report_completion' EXIT
+docker cp "$app_container:/app/paper_agents" "$runtime_dir/paper_agents"
+docker cp "$app_container:/app/sql" "$runtime_dir/sql"
+
 docker run --rm --pull=never --network=none --read-only \
   --cpus=2 --memory=4g --memory-swap=4g --pids-limit=128 \
   --cap-drop=ALL --security-opt=no-new-privileges \
   --user 10001:10001 --workdir /workspace \
   --tmpfs /tmp:rw,nosuid,nodev,size=64m \
   --volumes-from "$app_container" \
-  --mount "type=bind,src=$repo,dst=/workspace,readonly" \
+  --mount "type=bind,src=$runtime_dir,dst=/workspace,readonly" \
   --mount "type=volume,src=$model_volume,dst=/models,readonly" \
   --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
   --env HF_HOME=/tmp/huggingface --env TOKENIZERS_PARALLELISM=false \

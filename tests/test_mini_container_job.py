@@ -35,10 +35,15 @@ class HostCronTests(unittest.TestCase):
                 r'MiniLM Eval completed_at=.* status=success elapsed_seconds=\d+',
             )
             calls = [json.loads(line) for line in capture.read_text().splitlines()]
+            copies = [call for call in calls if call and call[0] == 'cp']
+            self.assertEqual([call[1] for call in copies], [
+                'app-id:/app/paper_agents', 'app-id:/app/sql',
+            ])
             run = next(call for call in calls if call and call[0] == 'run')
             self.assertIn('--network=none', run)
             self.assertIn('--read-only', run)
             self.assertIn('paper-agent-minilm-model-cache', ' '.join(run))
+            self.assertNotIn(f'src={ROOT},dst=/workspace,readonly', run)
             self.assertEqual(run[-6:], [
                 '-m', 'paper_agents.minilm_eval', '--db', '/app/data/paper_agent.db',
                 '--source', 'openalex',
