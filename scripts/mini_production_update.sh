@@ -17,6 +17,7 @@ Optional:
   PAPER_MINI_DEPLOY_LOCK_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock
   PAPER_MINI_DRAIN_TIMEOUT=1800
   PAPER_MINI_DEPLOY_BRANCH=mini-production
+  PAPER_MINI_ARXIV_PROGRESS=0|1   # optional persistent production flag update
   PAPER_MINI_OPENALEX_CURSOR=0|1   # optional persistent production flag update
   PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS=0|1   # optional persistent production flag update
 EOF
@@ -35,6 +36,7 @@ CANDIDATE_DIR=${PAPER_MINI_CANDIDATE_DIR:-$MINI_ROOT/candidate}
 DEPLOY_LOCK_FILE=${PAPER_MINI_DEPLOY_LOCK_FILE:-$MINI_ROOT/production-cutover/deploy.lock}
 DRAIN_TIMEOUT=${PAPER_MINI_DRAIN_TIMEOUT:-1800}
 DEPLOY_BRANCH=${PAPER_MINI_DEPLOY_BRANCH:-mini-production}
+ARXIV_PROGRESS=${PAPER_MINI_ARXIV_PROGRESS:-}
 OPENALEX_CURSOR=${PAPER_MINI_OPENALEX_CURSOR:-}
 SEMANTIC_SCHOLAR_PROGRESS=${PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS:-}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
@@ -69,6 +71,7 @@ phase_end() {
 [[ -f "$ENV_FILE" ]] || { echo "Missing production env file: $ENV_FILE" >&2; exit 1; }
 [[ -f "$OVERLAY" ]] || { echo "Missing production overlay: $OVERLAY" >&2; exit 1; }
 [[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ && "$DRAIN_TIMEOUT" -gt 0 ]] || { echo "PAPER_MINI_DRAIN_TIMEOUT must be a positive integer" >&2; exit 64; }
+[[ -z "$ARXIV_PROGRESS" || "$ARXIV_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_ARXIV_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$OPENALEX_CURSOR" || "$OPENALEX_CURSOR" =~ ^[01]$ ]] || { echo "PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$SEMANTIC_SCHOLAR_PROGRESS" || "$SEMANTIC_SCHOLAR_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
 
@@ -117,6 +120,7 @@ install -m 0755 "$SOURCE_DIR/scripts/mini_production_update.sh" "$CANDIDATE_DIR/
   printf 'new_app_image=%s\n' "$APP_IMAGE"
   printf 'deploy_lock_file=%s\n' "$DEPLOY_LOCK_FILE"
   printf 'drain_timeout=%s\n' "$DRAIN_TIMEOUT"
+  printf 'arxiv_progress=%s\n' "${ARXIV_PROGRESS:-preserve}"
   printf 'openalex_cursor=%s\n' "${OPENALEX_CURSOR:-preserve}"
   printf 'semantic_scholar_progress=%s\n' "${SEMANTIC_SCHOLAR_PROGRESS:-preserve}"
 } > "$RELEASE_DIR/update.env"
@@ -259,7 +263,7 @@ fi
 printf 'next_ollama_image=%s\n' "$ollama_image" >> "$RELEASE_DIR/update.env"
 
 tmp_env=$RELEASE_DIR/production.env.next
-python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" "$OPENALEX_CURSOR" "$SEMANTIC_SCHOLAR_PROGRESS" <<'PY'
+python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" "$ARXIV_PROGRESS" "$OPENALEX_CURSOR" "$SEMANTIC_SCHOLAR_PROGRESS" <<'PY'
 from __future__ import annotations
 
 import sys
@@ -269,11 +273,13 @@ source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
 image = sys.argv[3]
 ollama_image = sys.argv[4]
-openalex_cursor = sys.argv[5]
-semantic_scholar_progress = sys.argv[6]
+arxiv_progress = sys.argv[5]
+openalex_cursor = sys.argv[6]
+semantic_scholar_progress = sys.argv[7]
 lines = source.read_text(encoding="utf-8").splitlines()
 found = False
 found_ollama = False
+found_arxiv_progress = False
 found_openalex_cursor = False
 found_semantic_scholar_progress = False
 out: list[str] = []
@@ -287,6 +293,9 @@ for line in lines:
     elif line.startswith("PAPER_MIGRATION_OLLAMA_IMAGE="):
         out.append(f"PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}")
         found_ollama = True
+    elif line.startswith("PAPER_ARXIV_PROGRESS=") and arxiv_progress:
+        out.append(f"PAPER_ARXIV_PROGRESS={arxiv_progress}")
+        found_arxiv_progress = True
     elif line.startswith("PAPER_OPENALEX_CURSOR=") and openalex_cursor:
         out.append(f"PAPER_OPENALEX_CURSOR={openalex_cursor}")
         found_openalex_cursor = True
@@ -299,6 +308,8 @@ if not found:
     out.append(f"PAPER_MIGRATION_APP_IMAGE={image}")
 if not found_ollama:
     out.append(f"PAPER_MIGRATION_OLLAMA_IMAGE={ollama_image}")
+if arxiv_progress and not found_arxiv_progress:
+    out.append(f"PAPER_ARXIV_PROGRESS={arxiv_progress}")
 if openalex_cursor and not found_openalex_cursor:
     out.append(f"PAPER_OPENALEX_CURSOR={openalex_cursor}")
 if semantic_scholar_progress and not found_semantic_scholar_progress:
@@ -447,6 +458,7 @@ docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.jso
 verification_revision=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' paper-mini-production-app-1)
 verification_status=$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' paper-mini-production-app-1)
 verification_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1)
+verification_arxiv_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_ARXIV_PROGRESS:-unset}"')
 verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_OPENALEX_CURSOR:-unset}"')
 verification_semantic_scholar_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_SEMANTIC_SCHOLAR_PROGRESS:-unset}"')
 verification_minilm_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
@@ -455,12 +467,17 @@ verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=1$' "$RELEASE_DIR
 {
   printf 'revision=%s\n' "$verification_revision"
   printf 'status=%s\n' "$verification_status"
+  printf 'PAPER_ARXIV_PROGRESS=%s\n' "$verification_arxiv_progress"
   printf 'PAPER_OPENALEX_CURSOR=%s\n' "$verification_openalex_cursor"
   printf 'PAPER_SEMANTIC_SCHOLAR_PROGRESS=%s\n' "$verification_semantic_scholar_progress"
   printf 'image=%s\n' "$verification_image"
   printf 'minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 1 || printf invalid)"
 } | tee "$RELEASE_DIR/post-deploy-verification.txt"
+if [[ -n "$ARXIV_PROGRESS" && "$verification_arxiv_progress" != "$ARXIV_PROGRESS" ]]; then
+  echo "Post-deploy verification failed: PAPER_ARXIV_PROGRESS=$verification_arxiv_progress, expected $ARXIV_PROGRESS" >&2
+  exit 1
+fi
 if [[ -n "$OPENALEX_CURSOR" && "$verification_openalex_cursor" != "$OPENALEX_CURSOR" ]]; then
   echo "Post-deploy verification failed: PAPER_OPENALEX_CURSOR=$verification_openalex_cursor, expected $OPENALEX_CURSOR" >&2
   exit 1
@@ -487,6 +504,7 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'result=pass\n'
   printf 'verified_revision=%s\n' "$verification_revision"
   printf 'verified_status=%s\n' "$verification_status"
+  printf 'verified_arxiv_progress=%s\n' "$verification_arxiv_progress"
   printf 'verified_openalex_cursor=%s\n' "$verification_openalex_cursor"
   printf 'verified_semantic_scholar_progress=%s\n' "$verification_semantic_scholar_progress"
   printf 'verified_minilm_runner_sha256=%s\n' "$verification_minilm_runner"
@@ -507,6 +525,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- Image: \`$APP_IMAGE\`"
     echo "- Revision: \`$verification_revision\`"
     echo "- Status: \`$verification_status\`"
+    echo "- PAPER_ARXIV_PROGRESS: \`$verification_arxiv_progress\`"
     echo "- PAPER_OPENALEX_CURSOR: \`$verification_openalex_cursor\`"
     echo "- PAPER_SEMANTIC_SCHOLAR_PROGRESS: \`$verification_semantic_scholar_progress\`"
     echo "- PAPER_MINILM_EVAL_ENABLED: \`1\`"

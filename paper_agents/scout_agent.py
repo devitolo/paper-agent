@@ -44,6 +44,7 @@ class ScoutConfig:
     request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY
     retries: int = DEFAULT_ARXIV_RETRIES
     timeout: int = DEFAULT_ARXIV_TIMEOUT
+    arxiv_progress_enabled: bool = False
     openalex_cursor_enabled: bool = False
     semantic_scholar_progress_enabled: bool = False
 
@@ -113,7 +114,25 @@ class ScoutAgent:
         warnings: list[str] = []
         errors: list[str] = []
         progress = None
-        if isinstance(source, SemanticScholarSource) and (
+        if isinstance(source, ArxivSource) and (
+                config.arxiv_progress_enabled
+                or os.getenv("PAPER_ARXIV_PROGRESS") == "1"):
+            from paper_agents.arxiv_progress import ArxivProgress
+            progress = ArxivProgress(connection, source)
+            candidates = progress.fetch(
+                guided_topics,
+                freshness_months=config.freshness_months,
+                max_candidates=config.max_candidates,
+                errors=errors,
+            )
+            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
+            source_diagnostics = progress.diagnostics
+            refill_diagnostics = {
+                "stop_reason": source_diagnostics["stop_reason"],
+                "rounds": [],
+                "mode": "offset_v1",
+            }
+        elif isinstance(source, SemanticScholarSource) and (
                 config.semantic_scholar_progress_enabled
                 or os.getenv("PAPER_SEMANTIC_SCHOLAR_PROGRESS") == "1"):
             from paper_agents.semantic_scholar_progress import SemanticScholarProgress

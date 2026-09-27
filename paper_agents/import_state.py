@@ -49,6 +49,8 @@ SEMANTIC_PROGRESS_SCHEMA_MARKER = '-- Versioned Semantic Scholar offset traversa
 SEMANTIC_PROGRESS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SEMANTIC_PROGRESS_SCHEMA_MARKER, 1)[1]
 SUMMARY_QUALITY_SIGNALS_SCHEMA_MARKER = '-- Versioned bidirectional summary-field quality signals; legacy feedback rows remain down signals.'
 SUMMARY_QUALITY_SIGNALS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SUMMARY_QUALITY_SIGNALS_SCHEMA_MARKER, 1)[1]
+ARXIV_PROGRESS_SCHEMA_MARKER = '-- Versioned arXiv offset traversal state; enabled only by the progressive retrieval path.'
+ARXIV_PROGRESS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(ARXIV_PROGRESS_SCHEMA_MARKER, 1)[1]
 
 
 def _schema_variants(sql):
@@ -102,6 +104,12 @@ def pre_summary_quality_signals_schemas():
     return _schema_variants(sql)
 
 
+def pre_arxiv_progress_schemas():
+    """Accepted production schema before arXiv progressive retrieval."""
+    sql = TRUSTED_SCHEMA.read_text().split(ARXIV_PROGRESS_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql)
+
+
 def apply_approved_post_import_schema_deltas(root):
     """Apply reviewed additive schema growth to already accepted imports only."""
     root = Path(root).absolute()
@@ -113,7 +121,9 @@ def apply_approved_post_import_schema_deltas(root):
         actual_schema = schema(connection)
         if actual_schema in trusted_schemas():
             return False
-        if actual_schema in pre_summary_quality_signals_schemas():
+        if actual_schema in pre_arxiv_progress_schemas():
+            delta_sql = ARXIV_PROGRESS_SCHEMA_SQL
+        elif actual_schema in pre_summary_quality_signals_schemas():
             delta_sql = SUMMARY_QUALITY_SIGNALS_SCHEMA_SQL
         elif actual_schema in pre_semantic_progress_schemas():
             delta_sql = SEMANTIC_PROGRESS_SCHEMA_SQL

@@ -218,12 +218,21 @@ class ArxivSource:
             )
         return dedupe_candidates(candidates)[:max_results]
 
-    def _fetch_topic(self, topic: str, max_results: int) -> list[ET.Element]:
+    def fetch_page(self, topic: str, *, offset: int, page_size: int) -> dict[str, Any]:
+        entries = self._fetch_topic(topic, page_size, start=offset)
+        effective_size = 1 if self.single_result_mode else page_size
+        return {
+            "entries": entries,
+            "offset": offset,
+            "next": None if len(entries) < effective_size else offset + len(entries),
+        }
+
+    def _fetch_topic(self, topic: str, max_results: int, *, start: int = 0) -> list[ET.Element]:
         requested_results = 1 if self.single_result_mode else max_results
         params = urllib.parse.urlencode(
             {
                 "search_query": f'all:"{topic}"',
-                "start": 0,
+                "start": start,
                 "max_results": requested_results,
                 "sortBy": "submittedDate",
                 "sortOrder": "descending",
@@ -256,7 +265,7 @@ class ArxivSource:
                     )
                     self._record("degraded_mode", topic=topic, from_max_results=requested_results,
                                  to_max_results=1, reason="HTTP 406")
-                    return self._fetch_topic(topic, 1)
+                    return self._fetch_topic(topic, 1, start=start)
                 if error.code != 429 or attempt >= self.retries:
                     raise
                 delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After") if error.headers else None)

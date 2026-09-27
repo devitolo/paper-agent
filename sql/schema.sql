@@ -360,3 +360,17 @@ CREATE TABLE IF NOT EXISTS summary_field_quality_signals (
 
 CREATE INDEX IF NOT EXISTS idx_summary_field_quality_signals_paper
 ON summary_field_quality_signals (paper_id);
+
+-- Versioned arXiv offset traversal state; enabled only by the progressive retrieval path.
+CREATE TABLE IF NOT EXISTS arxiv_search_state (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS arxiv_page_dispositions (
+    id INTEGER PRIMARY KEY,
+    scout_run_id INTEGER NOT NULL REFERENCES scout_runs(id),
+    query_key TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    page_json TEXT NOT NULL
+);
