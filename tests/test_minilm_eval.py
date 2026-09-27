@@ -108,7 +108,7 @@ class MiniLMEvalTests(unittest.TestCase):
         page = web.render_minilm_eval_page(self.db_path)
         self.assertEqual(page.count('<article class="minilm-eval-card">'), 3)
         self.assertIn("Send to Curator", page)
-        self.assertIn("Unreviewed means unknown", page)
+        self.assertNotIn("Unreviewed means unknown", page)
         self.assertIn("No abstract available.", page)
         self.assertNotIn("Prioritize", page)
         self.assertNotIn("minilm_assisted", page)

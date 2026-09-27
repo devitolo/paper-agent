@@ -881,7 +881,6 @@ def render_minilm_eval_card(item: dict[str, Any]) -> str:
     return f"""<article class="minilm-eval-card">
       <div class="minilm-eval-card-head">
         <span class="minilm-eval-rank">Paper {item['display_rank']} of {item['paper_count']}</span>
-        <span class="minilm-eval-bucket">Unreviewed means unknown</span>
       </div>
       <h2>{escape(item['title'])}</h2>
       <details class="minilm-eval-abstract" open><summary>Abstract</summary><p>{escape(item['abstract'] or 'No abstract available.')}</p></details>
