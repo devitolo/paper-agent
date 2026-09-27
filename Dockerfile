@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 ARG PYTHON_BASE_IMAGE=python:3.12-slim
 ARG NODE_BASE_IMAGE=node:22.23.2-bookworm-slim
 FROM ${NODE_BASE_IMAGE} AS gemini-node
@@ -23,7 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils \
     && chown paper:paper /app/data /app/config
 
 COPY requirements.txt ./
-RUN if [ -s requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -s requirements.txt ]; then pip install -r requirements.txt; fi
 
 COPY LICENSE NOTICE ./
 COPY paper_agents ./paper_agents
@@ -47,7 +49,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     curl ca-certificates bash util-linux coreutils tzdata \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements-telemetry.txt ./
-RUN pip install --no-cache-dir -r requirements-telemetry.txt \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-telemetry.txt \
     && python scripts/image_runtime_inventory.py "${PYTHON_BASE_IMAGE}" /app/image-runtime-inputs.json "${SOURCE_BUNDLE_SHA256}" "${VCS_REF}"
 LABEL org.projectpaper.runtime="migration-foundations-unqualified"
 USER paper
@@ -59,7 +62,8 @@ COPY --from=gemini-node /usr/local/bin/node /usr/local/bin/node
 COPY --from=gemini-node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 # Exact top-level version; first build resolves transitive dependencies into the
 # retained lock, then installs that lock. Capture/review it before reproducible rebuilds.
-RUN mkdir -p /opt/paper-gemini \
+RUN --mount=type=cache,target=/root/.npm \
+    mkdir -p /opt/paper-gemini \
     && cd /opt/paper-gemini \
     && printf '%s\n' '{"name":"paper-gemini-runtime","private":true,"dependencies":{"@google/gemini-cli":"0.52.0"}}' > package.json \
     && node /usr/local/lib/node_modules/npm/bin/npm-cli.js install --package-lock-only --ignore-scripts --no-audit --no-fund \

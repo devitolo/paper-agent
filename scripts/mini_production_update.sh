@@ -41,6 +41,29 @@ STAMP=$(date -u +%Y%m%d-%H%M%S)
 RELEASE_DIR=$MINI_ROOT/production-releases/$STAMP
 DEPLOYED_MARKER=$MINI_ROOT/production-current/app-image.ref
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+DEPLOY_STARTED_EPOCH=$(date +%s)
+CURRENT_PHASE=
+CURRENT_PHASE_STARTED_EPOCH=0
+
+phase_key() {
+  printf '%s' "$1" | tr '[:upper:] -' '[:lower:]__' | tr -cd 'a-z0-9_'
+}
+
+phase_start() {
+  CURRENT_PHASE=$1
+  CURRENT_PHASE_STARTED_EPOCH=$(date +%s)
+  echo "Starting deploy phase: $CURRENT_PHASE"
+}
+
+phase_end() {
+  local ended duration key
+  ended=$(date +%s)
+  duration=$((ended - CURRENT_PHASE_STARTED_EPOCH))
+  key=$(phase_key "$CURRENT_PHASE")
+  printf '%s\t%s\n' "$CURRENT_PHASE" "$duration" >> "$RELEASE_DIR/timing.tsv"
+  printf 'timing_%s_seconds=%s\n' "$key" "$duration" >> "$RELEASE_DIR/update.env"
+  echo "Finished deploy phase: $CURRENT_PHASE (${duration}s)"
+}
 
 [[ -d "$CANDIDATE_DIR" ]] || { echo "Missing candidate dir: $CANDIDATE_DIR" >&2; exit 1; }
 [[ -f "$ENV_FILE" ]] || { echo "Missing production env file: $ENV_FILE" >&2; exit 1; }
@@ -77,6 +100,8 @@ if [[ -n "${GITHUB_SHA:-}" && -n "${GITHUB_REF_NAME:-}" && "$GITHUB_REF_NAME" ==
 fi
 
 mkdir -p "$RELEASE_DIR"
+printf 'phase\tseconds\n' > "$RELEASE_DIR/timing.tsv"
+phase_start "prepare release files"
 mkdir -p "$CANDIDATE_DIR/scripts"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-migration.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-rehearsal.yml" "$CANDIDATE_DIR/docker-compose.mini-rehearsal.yml"
@@ -194,6 +219,7 @@ old_ollama_image=$(sed -n 's/^PAPER_MIGRATION_OLLAMA_IMAGE=//p' "$ENV_FILE" | ta
   printf 'old_env_image=%s\n' "$old_env_image"
   printf 'old_ollama_image=%s\n' "$old_ollama_image"
 } >> "$RELEASE_DIR/update.env"
+phase_end
 
 if [[ "$old_env_image" == "$APP_IMAGE" ]]; then
   echo "Desired image is already configured: $APP_IMAGE"
@@ -202,7 +228,11 @@ if [[ "$old_env_image" == "$APP_IMAGE" ]]; then
   exit 0
 fi
 
+phase_start "pull image"
 docker pull "$APP_IMAGE"
+phase_end
+
+phase_start "inspect image"
 docker image inspect "$APP_IMAGE" > "$RELEASE_DIR/new-app-image-inspect.json"
 python3 - "$RELEASE_DIR/new-app-image-inspect.json" <<'PY'
 from __future__ import annotations
@@ -217,7 +247,9 @@ if labels.get("org.projectpaper.runtime") != "mini-production":
 if labels.get("org.opencontainers.image.source") != "https://github.com/devitolo/paper-agent":
     raise SystemExit("selected image is not from Project Paper")
 PY
+phase_end
 
+phase_start "prepare env"
 ollama_image="$old_ollama_image"
 if [[ "$ollama_image" == sha256:* ]]; then
   ollama_image=$(docker image inspect "$ollama_image" --format '{{index .RepoDigests 0}}')
@@ -314,9 +346,13 @@ destination.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
   crontab "$RELEASE_DIR/crontab.next"
 fi
+phase_end
 
+phase_start "compose config"
 "${compose[@]}" config --quiet
+phase_end
 
+phase_start "drain jobs"
 echo "Waiting for active app jobs to finish before deployment."
 if "${compose[@]}" exec -T app true >/dev/null 2>&1; then
   deadline=$((SECONDS + DRAIN_TIMEOUT))
@@ -357,7 +393,9 @@ else
   echo "Existing app container is unavailable; skipping in-container runtime lease drain." \
     | tee "$RELEASE_DIR/drain-skipped.log"
 fi
+phase_end
 
+phase_start "backup database"
 if ! "${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent.db /backups \
   > "$RELEASE_DIR/pre-update-db-backup.log" 2>&1; then
   echo "Existing app container backup command unavailable; using one-shot image backup." \
@@ -366,9 +404,14 @@ if ! "${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent
     --entrypoint bash "$APP_IMAGE" scripts/backup_db.sh /app/data/paper_agent.db /backups \
     >> "$RELEASE_DIR/pre-update-db-backup.log" 2>&1
 fi
+phase_end
 
+phase_start "stop app"
 "${compose[@]}" stop app
 APP_REPLACEMENT_STARTED=1
+phase_end
+
+phase_start "verify exclusive runtime"
 docker run --rm --volumes-from paper-mini-production-app-1 --user 10001:10001 --entrypoint python "$APP_IMAGE" - <<'PY'
 from pathlib import Path
 from paper_agents.migration_lifecycle import lease
@@ -376,9 +419,13 @@ from paper_agents.migration_lifecycle import lease
 with lease(Path("/runtime-control"), exclusive=True):
     pass
 PY
+phase_end
 
+phase_start "recreate app"
 "${compose[@]}" up -d --no-deps --pull never --force-recreate app
+phase_end
 
+phase_start "readiness"
 deadline=$((SECONDS + 120))
 until "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-app >/dev/null 2>&1; do
   [[ "$SECONDS" -lt "$deadline" ]] || {
@@ -388,7 +435,9 @@ until "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-a
   }
   sleep 3
 done
+phase_end
 
+phase_start "post deploy checks"
 curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.html"
 "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-model \
   > "$RELEASE_DIR/qwen-check.json"
@@ -428,6 +477,7 @@ if [[ "$verification_minilm_cron" != 1 ]]; then
   echo "Post-deploy verification failed: PAPER_MINILM_EVAL_ENABLED=1 is missing or duplicated" >&2
   exit 1
 fi
+phase_end
 
 mkdir -p "$(dirname "$DEPLOYED_MARKER")"
 printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
@@ -441,6 +491,7 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_semantic_scholar_progress=%s\n' "$verification_semantic_scholar_progress"
   printf 'verified_minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'verified_minilm_eval_enabled=1\n'
+  printf 'total_deploy_seconds=%s\n' "$(( $(date +%s) - DEPLOY_STARTED_EPOCH ))"
   printf 'rollback_script=%s\n' "$RELEASE_DIR/rollback.sh"
 } >> "$RELEASE_DIR/update.env"
 DEPLOYMENT_SUCCESS=1
@@ -462,5 +513,13 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- MiniLM runner SHA256: \`$verification_minilm_runner\`"
     echo "- Evidence: \`$RELEASE_DIR\`"
     echo "- Rollback: \`$RELEASE_DIR/rollback.sh\`"
+    echo
+    echo "### Deploy phase timing"
+    echo
+    echo "| Phase | Seconds |"
+    echo "| --- | ---: |"
+    awk -F '\t' 'NR > 1 { printf "| `%s` | %s |\n", $1, $2 }' "$RELEASE_DIR/timing.tsv"
+    echo
+    echo "- Total deploy script time: \`$(( $(date +%s) - DEPLOY_STARTED_EPOCH ))s\`"
   } >> "$GITHUB_STEP_SUMMARY"
 fi

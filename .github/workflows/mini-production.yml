@@ -106,6 +106,8 @@ jobs:
             VCS_REF=${{ github.sha }}
             VERSION=mini-${{ github.sha }}
             SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.source_bundle_sha256 }}
+          cache-from: type=gha,scope=mini-production
+          cache-to: type=gha,mode=max,scope=mini-production
           provenance: mode=max
           sbom: true
 

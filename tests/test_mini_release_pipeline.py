@@ -33,9 +33,14 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("bash scripts/mini_production_update.sh", workflow)
         self.assertIn('PAPER_MINI_OPENALEX_CURSOR: "1"', workflow)
         self.assertIn('PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS: "1"', workflow)
+        self.assertIn("cache-from: type=gha,scope=mini-production", workflow)
+        self.assertIn("cache-to: type=gha,mode=max,scope=mini-production", workflow)
 
     def test_dockerfile_keeps_public_and_mini_targets_explicit(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("# syntax=docker/dockerfile:", dockerfile)
+        self.assertIn("--mount=type=cache,target=/root/.cache/pip", dockerfile)
+        self.assertIn("--mount=type=cache,target=/root/.npm", dockerfile)
         self.assertIn("FROM migration-gemini AS mini-production", dockerfile)
         self.assertIn('LABEL org.projectpaper.runtime="mini-production"', dockerfile)
         self.assertRegex(dockerfile, r"FROM base AS runtime\s*$")
@@ -119,6 +124,11 @@ class MiniReleasePipelineTests(unittest.TestCase):
     def test_production_update_reports_post_deploy_verification(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         self.assertIn('post-deploy-verification.txt', script)
+        self.assertIn('timing.tsv', script)
+        self.assertIn('phase_start "pull image"', script)
+        self.assertIn('phase_start "recreate app"', script)
+        self.assertIn('phase_start "readiness"', script)
+        self.assertIn('### Deploy phase timing', script)
         self.assertIn('scripts/minilm_eval_after_pipeline.sh', script)
         self.assertIn('minilm_runner_sha256=', script)
         self.assertIn('PAPER_MINILM_EVAL_ENABLED=1', script)
