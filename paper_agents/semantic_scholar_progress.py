@@ -6,6 +6,7 @@ from email.utils import parsedate_to_datetime
 import hashlib
 import json
 import random
+import re
 import time
 import urllib.error
 
@@ -17,6 +18,21 @@ ATTEMPT_BUDGET = 3
 PAGE_SIZE = 10
 REFRESH_SECONDS = 7 * 86400
 TRAVERSAL_SECONDS = 30 * 86400
+PROVIDER_ERROR_BODY_READ_LIMIT = 4096
+PROVIDER_ERROR_BODY_REPORT_LIMIT = 1000
+PROVIDER_ERROR_HEADERS = {
+    "retry-after",
+    "ratelimit-limit",
+    "ratelimit-remaining",
+    "ratelimit-reset",
+    "x-ratelimit-limit",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+    "request-id",
+    "x-request-id",
+    "cf-ray",
+}
+SAFE_PROVIDER_ERROR_FIELDS = {"code", "detail", "error", "message", "status", "type"}
 
 
 class SemanticScholarProgress:
@@ -151,6 +167,7 @@ class SemanticScholarProgress:
                     deep["offset"] = payload["next"]
                     deep["exhausted"] = payload["next"] is None
             except urllib.error.HTTPError as error:
+                provider_error = sanitized_provider_error(error, api_key=self.source.api_key)
                 if error.code == 429:
                     delay = cooldown_seconds(
                         error.headers.get("Retry-After") if error.headers else None, self.now
@@ -158,11 +175,15 @@ class SemanticScholarProgress:
                     control["not_before"] = clock + delay
                     self._persist_cooldown(control["not_before"])
                     self.diagnostics.update(
-                        stop_reason="source_cooldown", not_before=control["not_before"]
+                        stop_reason="source_cooldown",
+                        not_before=control["not_before"],
+                        provider_error=provider_error,
                     )
                     break
                 errors.append(f"Semantic Scholar HTTP {error.code}: {topic}")
-                self.diagnostics["stop_reason"] = "source_error"
+                self.diagnostics.update(
+                    stop_reason="source_error", provider_error=provider_error
+                )
                 break
             except (OSError, ValueError, KeyError, TypeError) as error:
                 errors.append(f"Semantic Scholar page failed ({type(error).__name__}): {topic}")
@@ -250,3 +271,54 @@ def cooldown_seconds(value, now):
             return max(0, (parsed - now).total_seconds())
         except (ValueError, TypeError, OverflowError):
             return 60 + random.uniform(0, 30)
+
+
+def sanitized_provider_error(error, *, api_key=None):
+    """Return bounded HTTP diagnostics without request headers or credentials."""
+    headers = {
+        name.lower(): str(value)[:256]
+        for name, value in (error.headers.items() if error.headers else [])
+        if name.lower() in PROVIDER_ERROR_HEADERS
+    }
+    raw = error.read(PROVIDER_ERROR_BODY_READ_LIMIT + 1)
+    truncated = len(raw) > PROVIDER_ERROR_BODY_READ_LIMIT
+    text = raw[:PROVIDER_ERROR_BODY_READ_LIMIT].decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        body = " ".join(text.split())
+    else:
+        parsed = safe_provider_payload(parsed)
+        body = json.dumps(parsed, ensure_ascii=True, separators=(",", ":"))
+    if api_key:
+        body = body.replace(api_key, "[REDACTED]")
+    body = re.sub(r"(?i)\bbearer\s+[a-z0-9._~+/=-]+", "Bearer [REDACTED]", body)
+    body = re.sub(
+        r'''(?i)\b(x-api-key|api[_ -]?key|authorization)\b\s*[:=]\s*["']?[^\s,}"']+''',
+        r"\1=[REDACTED]",
+        body,
+    )
+    if len(body) > PROVIDER_ERROR_BODY_REPORT_LIMIT:
+        body = body[:PROVIDER_ERROR_BODY_REPORT_LIMIT]
+        truncated = True
+    return {
+        "http_status": error.code,
+        "reason": str(error.reason)[:256],
+        "headers": headers,
+        "body": body,
+        "body_truncated": truncated,
+    }
+
+
+def safe_provider_payload(value):
+    if isinstance(value, dict):
+        return {
+            str(key): safe_provider_payload(item)
+            for key, item in value.items()
+            if str(key).lower() in SAFE_PROVIDER_ERROR_FIELDS
+        }
+    if isinstance(value, list):
+        return [safe_provider_payload(item) for item in value[:10]]
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)

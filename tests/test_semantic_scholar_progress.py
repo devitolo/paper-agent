@@ -146,15 +146,56 @@ class SemanticScholarProgressTests(unittest.TestCase):
     def test_429_cooldown_persists_and_honors_retry_after(self):
         headers = Message()
         headers["Retry-After"] = "120"
-        error = urllib.error.HTTPError("url", 429, "rate", headers, io.BytesIO())
+        headers["X-RateLimit-Remaining"] = "0"
+        headers["X-Request-ID"] = "request-123"
+        headers["X-Api-Key"] = "must-not-leak"
+        headers["Set-Cookie"] = "also-must-not-leak"
+        self.source.api_key = "secret-key"
+        error = urllib.error.HTTPError(
+            "url",
+            429,
+            "rate",
+            headers,
+            io.BytesIO(json.dumps({
+                "message": "Rate limited; api_key=secret-key",
+                "debug": "internal detail must not leak",
+                "error": {
+                    "code": "RATE_LIMITED",
+                    "debug": "nested detail must not leak",
+                },
+            }).encode()),
+        )
         progress = self.progress()
         _, fetch = self.fetch(progress, [error], topics=list("abc"))
         self.assertEqual(fetch.call_count, 1)
         self.assertEqual(progress.diagnostics["stop_reason"], "source_cooldown")
+        provider_error = progress.diagnostics["provider_error"]
+        self.assertEqual(provider_error["http_status"], 429)
+        self.assertEqual(provider_error["headers"], {
+            "retry-after": "120",
+            "x-ratelimit-remaining": "0",
+            "x-request-id": "request-123",
+        })
+        self.assertIn("[REDACTED]", provider_error["body"])
+        self.assertNotIn("secret-key", provider_error["body"])
+        self.assertNotIn("internal detail", provider_error["body"])
+        self.assertNotIn("nested detail", provider_error["body"])
+        self.assertIn("RATE_LIMITED", provider_error["body"])
+        self.assertNotIn("must-not-leak", json.dumps(provider_error))
         progress = self.progress(self.now + timedelta(seconds=60))
         _, fetch = self.fetch(progress, [], topics=list("abc"))
         self.assertEqual(fetch.call_count, 0)
         self.assertEqual(progress.diagnostics["stop_reason"], "source_cooldown")
+
+    def test_provider_error_body_is_bounded_and_handles_invalid_utf8(self):
+        error = urllib.error.HTTPError(
+            "url", 429, "rate", Message(), io.BytesIO(b"\xff" + b"x" * 5000)
+        )
+        progress = self.progress()
+        self.fetch(progress, [error])
+        provider_error = progress.diagnostics["provider_error"]
+        self.assertTrue(provider_error["body_truncated"])
+        self.assertLessEqual(len(provider_error["body"]), 1000)
 
     def test_changed_query_and_freshness_start_at_zero(self):
         progress = self.progress()
