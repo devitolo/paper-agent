@@ -166,4 +166,5 @@ jobs:
           PAPER_MINI_DEPLOY_BRANCH: ${{ env.DEPLOY_BRANCH }}
           PAPER_MINI_DRAIN_TIMEOUT: "1800"
           PAPER_MINI_OPENALEX_CURSOR: "1"
+          PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS: "1"
         run: bash scripts/mini_production_update.sh

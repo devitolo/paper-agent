@@ -518,6 +518,46 @@ class SemanticScholarSource:
             headers["x-api-key"] = self.api_key
         return headers
 
+    def fetch_page(self, topic: str, *, offset: int, cutoff: str, page_size: int) -> dict[str, Any]:
+        """Fetch one normal-search page; progressive orchestration owns retries and state."""
+        params = urllib.parse.urlencode(
+            {
+                "query": topic,
+                "offset": offset,
+                "limit": page_size,
+                "publicationDateOrYear": f"{cutoff}:",
+                "fields": ",".join(
+                    [
+                        "paperId", "title", "abstract", "authors", "year",
+                        "publicationDate", "url", "openAccessPdf", "externalIds",
+                        "fieldsOfStudy", "publicationTypes", "venue",
+                    ]
+                ),
+            }
+        )
+        request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
+        self._record("request", topic=topic, offset=offset)
+        with telemetry.span("source.http", "TOOL", source=self.name), urllib.request.urlopen(
+            request, timeout=self.timeout
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError("Semantic Scholar page missing data")
+        returned_offset = payload.get("offset")
+        if not isinstance(returned_offset, int) or returned_offset != offset:
+            raise ValueError("Semantic Scholar returned an unexpected offset")
+        next_offset = payload.get("next")
+        if next_offset is not None and (
+            not isinstance(next_offset, int) or next_offset <= offset or next_offset > 1000
+        ):
+            raise ValueError("Semantic Scholar returned an invalid next offset")
+        if any(not isinstance(paper, dict) for paper in payload["data"]):
+            raise ValueError("Semantic Scholar page contains an invalid paper")
+        if len(payload["data"]) > page_size:
+            raise ValueError("Semantic Scholar exceeded requested page size")
+        self._record("success", topic=topic, offset=offset, entries=len(payload["data"]), next=next_offset)
+        return {"offset": offset, "next": next_offset, "data": payload["data"]}
+
     def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.isdigit():
             return float(retry_after)

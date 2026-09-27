@@ -328,3 +328,17 @@ CREATE TABLE IF NOT EXISTS minilm_eval_decisions (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (eval_run_id, paper_id)
 );
+
+-- Versioned Semantic Scholar offset traversal state; enabled only by the progressive retrieval path.
+CREATE TABLE IF NOT EXISTS semantic_scholar_search_state (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS semantic_scholar_page_dispositions (
+    id INTEGER PRIMARY KEY,
+    scout_run_id INTEGER NOT NULL REFERENCES scout_runs(id),
+    query_key TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    page_json TEXT NOT NULL
+);

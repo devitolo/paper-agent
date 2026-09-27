@@ -23,6 +23,7 @@ x-environment: &environment
   PAPER_AGENT_REPO: /app
   PAPER_AGENT_LOCK_DIR: /runtime-control
   PAPER_OPENALEX_CURSOR: ${PAPER_OPENALEX_CURSOR:-0}
+  PAPER_SEMANTIC_SCHOLAR_PROGRESS: ${PAPER_SEMANTIC_SCHOLAR_PROGRESS:-0}
   TZ: America/Los_Angeles
   SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:?Provision source credential privately}
 x-volumes: &state-mounts

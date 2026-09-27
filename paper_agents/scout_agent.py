@@ -16,6 +16,7 @@ from paper_agents.scout import (
     ArxivSource,
     OpenAlexSource,
     PaperSource,
+    SemanticScholarSource,
     dedupe_candidates,
 )
 from paper_agents.scout_guidance import (
@@ -44,6 +45,7 @@ class ScoutConfig:
     retries: int = DEFAULT_ARXIV_RETRIES
     timeout: int = DEFAULT_ARXIV_TIMEOUT
     openalex_cursor_enabled: bool = False
+    semantic_scholar_progress_enabled: bool = False
 
 
 class ScoutAgent:
@@ -111,7 +113,25 @@ class ScoutAgent:
         warnings: list[str] = []
         errors: list[str] = []
         progress = None
-        if isinstance(source, OpenAlexSource) and (
+        if isinstance(source, SemanticScholarSource) and (
+                config.semantic_scholar_progress_enabled
+                or os.getenv("PAPER_SEMANTIC_SCHOLAR_PROGRESS") == "1"):
+            from paper_agents.semantic_scholar_progress import SemanticScholarProgress
+            progress = SemanticScholarProgress(connection, source)
+            candidates = progress.fetch(
+                config.topics,
+                freshness_months=config.freshness_months,
+                max_candidates=config.max_candidates,
+                errors=errors,
+            )
+            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
+            source_diagnostics = progress.diagnostics
+            refill_diagnostics = {
+                "stop_reason": source_diagnostics["stop_reason"],
+                "rounds": [],
+                "mode": "offset_v1",
+            }
+        elif isinstance(source, OpenAlexSource) and (
                 config.openalex_cursor_enabled or os.getenv("PAPER_OPENALEX_CURSOR") == "1"):
             from paper_agents.openalex_progress import OpenAlexProgress
             progress = OpenAlexProgress(connection, source)

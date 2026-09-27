@@ -32,6 +32,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("bash scripts/mini_production_update.sh", workflow)
         self.assertIn('PAPER_MINI_OPENALEX_CURSOR: "1"', workflow)
+        self.assertIn('PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS: "1"', workflow)
 
     def test_dockerfile_keeps_public_and_mini_targets_explicit(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -127,6 +128,9 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('Post-deploy verification failed: PAPER_OPENALEX_CURSOR=', script)
         self.assertIn('verified_openalex_cursor=%s', script)
         self.assertIn('PAPER_OPENALEX_CURSOR: \\`', script)
+        self.assertIn('SEMANTIC_SCHOLAR_PROGRESS=${PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS:-}', script)
+        self.assertIn('Post-deploy verification failed: PAPER_SEMANTIC_SCHOLAR_PROGRESS=', script)
+        self.assertIn('verified_semantic_scholar_progress=%s', script)
 
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")

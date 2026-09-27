@@ -45,6 +45,8 @@ SUMMARY_FEEDBACK_SCHEMA_MARKER = '-- Versioned summary-field quality feedback; a
 SUMMARY_FEEDBACK_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SUMMARY_FEEDBACK_SCHEMA_MARKER, 1)[1]
 MINILM_EVAL_SCHEMA_MARKER = '-- Temporary MiniLM Eval experiment; isolated from production ranking and feedback/profile learning.'
 MINILM_EVAL_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(MINILM_EVAL_SCHEMA_MARKER, 1)[1]
+SEMANTIC_PROGRESS_SCHEMA_MARKER = '-- Versioned Semantic Scholar offset traversal state; enabled only by the progressive retrieval path.'
+SEMANTIC_PROGRESS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SEMANTIC_PROGRESS_SCHEMA_MARKER, 1)[1]
 
 
 def _schema_variants(sql):
@@ -86,6 +88,12 @@ def pre_minilm_eval_schemas():
     return _schema_variants(sql)
 
 
+def pre_semantic_progress_schemas():
+    """Accepted production schema before Semantic Scholar progressive retrieval."""
+    sql = TRUSTED_SCHEMA.read_text().split(SEMANTIC_PROGRESS_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql)
+
+
 def apply_approved_post_import_schema_deltas(root):
     """Apply reviewed additive schema growth to already accepted imports only."""
     root = Path(root).absolute()
@@ -97,7 +105,9 @@ def apply_approved_post_import_schema_deltas(root):
         actual_schema = schema(connection)
         if actual_schema in trusted_schemas():
             return False
-        if actual_schema in pre_minilm_eval_schemas():
+        if actual_schema in pre_semantic_progress_schemas():
+            delta_sql = SEMANTIC_PROGRESS_SCHEMA_SQL
+        elif actual_schema in pre_minilm_eval_schemas():
             delta_sql = MINILM_EVAL_SCHEMA_SQL
         elif actual_schema in pre_summary_feedback_schemas():
             delta_sql = SUMMARY_FEEDBACK_SCHEMA_SQL
