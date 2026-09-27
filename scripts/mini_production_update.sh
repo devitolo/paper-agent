@@ -238,19 +238,30 @@ phase_end
 
 phase_start "inspect image"
 docker image inspect "$APP_IMAGE" > "$RELEASE_DIR/new-app-image-inspect.json"
-python3 - "$RELEASE_DIR/new-app-image-inspect.json" <<'PY'
+python3 - "$RELEASE_DIR/new-app-image-inspect.json" "$RELEASE_DIR/image-metadata.env" <<'PY'
 from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 value = json.loads(open(sys.argv[1], encoding="utf-8").read())
-labels = value[0].get("Config", {}).get("Labels", {}) or {}
+image = value[0]
+labels = image.get("Config", {}).get("Labels", {}) or {}
 if labels.get("org.projectpaper.runtime") != "mini-production":
     raise SystemExit("selected image is not the Mini production runtime")
 if labels.get("org.opencontainers.image.source") != "https://github.com/devitolo/paper-agent":
     raise SystemExit("selected image is not from Project Paper")
+size_bytes = int(image.get("Size") or 0)
+layers = image.get("RootFS", {}).get("Layers") or []
+Path(sys.argv[2]).write_text(
+    f"image_size_bytes={size_bytes}\n"
+    f"image_size_mib={size_bytes / 1024 / 1024:.1f}\n"
+    f"image_layer_count={len(layers)}\n",
+    encoding="utf-8",
+)
 PY
+cat "$RELEASE_DIR/image-metadata.env" >> "$RELEASE_DIR/update.env"
 phase_end
 
 phase_start "prepare env"
@@ -464,6 +475,8 @@ verification_semantic_scholar_progress=$("${compose[@]}" exec -T app sh -lc 'pri
 verification_minilm_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
 expected_minilm_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
 verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=1$' "$RELEASE_DIR/crontab.next")
+image_size_mib=$(sed -n 's/^image_size_mib=//p' "$RELEASE_DIR/image-metadata.env")
+image_layer_count=$(sed -n 's/^image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
 {
   printf 'revision=%s\n' "$verification_revision"
   printf 'status=%s\n' "$verification_status"
@@ -471,6 +484,8 @@ verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=1$' "$RELEASE_DIR
   printf 'PAPER_OPENALEX_CURSOR=%s\n' "$verification_openalex_cursor"
   printf 'PAPER_SEMANTIC_SCHOLAR_PROGRESS=%s\n' "$verification_semantic_scholar_progress"
   printf 'image=%s\n' "$verification_image"
+  printf 'image_size_mib=%s\n' "$image_size_mib"
+  printf 'image_layer_count=%s\n' "$image_layer_count"
   printf 'minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 1 || printf invalid)"
 } | tee "$RELEASE_DIR/post-deploy-verification.txt"
@@ -507,6 +522,8 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_arxiv_progress=%s\n' "$verification_arxiv_progress"
   printf 'verified_openalex_cursor=%s\n' "$verification_openalex_cursor"
   printf 'verified_semantic_scholar_progress=%s\n' "$verification_semantic_scholar_progress"
+  printf 'verified_image_size_mib=%s\n' "$image_size_mib"
+  printf 'verified_image_layer_count=%s\n' "$image_layer_count"
   printf 'verified_minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'verified_minilm_eval_enabled=1\n'
   printf 'total_deploy_seconds=%s\n' "$(( $(date +%s) - DEPLOY_STARTED_EPOCH ))"
@@ -525,6 +542,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- Image: \`$APP_IMAGE\`"
     echo "- Revision: \`$verification_revision\`"
     echo "- Status: \`$verification_status\`"
+    echo "- Image size: \`${image_size_mib} MiB\`"
+    echo "- Image layers: \`$image_layer_count\`"
     echo "- PAPER_ARXIV_PROGRESS: \`$verification_arxiv_progress\`"
     echo "- PAPER_OPENALEX_CURSOR: \`$verification_openalex_cursor\`"
     echo "- PAPER_SEMANTIC_SCHOLAR_PROGRESS: \`$verification_semantic_scholar_progress\`"

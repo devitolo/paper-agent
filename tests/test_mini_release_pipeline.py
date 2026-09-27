@@ -35,7 +35,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('PAPER_MINI_OPENALEX_CURSOR: "1"', workflow)
         self.assertIn('PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS: "1"', workflow)
         self.assertIn("cache-from: type=gha,scope=mini-production", workflow)
-        self.assertIn("cache-to: type=gha,mode=max,scope=mini-production", workflow)
+        self.assertIn("cache-to: type=gha,mode=min,scope=mini-production", workflow)
 
     def test_dockerfile_keeps_public_and_mini_targets_explicit(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -158,6 +158,9 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('PAPER_MINILM_EVAL_ENABLED=1', script)
         self.assertIn('verification_revision=$(docker inspect', script)
         self.assertIn('verification_status=$(docker inspect', script)
+        self.assertIn('image-metadata.env', script)
+        self.assertIn('image_size_mib=', script)
+        self.assertIn('image_layer_count=', script)
         self.assertIn('verification_arxiv_progress=$("${compose[@]}" exec -T app sh -lc', script)
         self.assertIn('Post-deploy verification failed: PAPER_ARXIV_PROGRESS=', script)
         self.assertIn('verified_arxiv_progress=%s', script)
@@ -168,6 +171,9 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('SEMANTIC_SCHOLAR_PROGRESS=${PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS:-}', script)
         self.assertIn('Post-deploy verification failed: PAPER_SEMANTIC_SCHOLAR_PROGRESS=', script)
         self.assertIn('verified_semantic_scholar_progress=%s', script)
+        self.assertIn('verified_image_size_mib=%s', script)
+        self.assertIn('Image size: \\`', script)
+        self.assertIn('Image layers: \\`', script)
 
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")
