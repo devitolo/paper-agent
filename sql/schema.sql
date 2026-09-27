@@ -342,3 +342,21 @@ CREATE TABLE IF NOT EXISTS semantic_scholar_page_dispositions (
     topic TEXT NOT NULL,
     page_json TEXT NOT NULL
 );
+
+-- Versioned bidirectional summary-field quality signals; legacy feedback rows remain down signals.
+CREATE TABLE IF NOT EXISTS summary_field_quality_signals (
+    id INTEGER PRIMARY KEY,
+    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    artifact_id INTEGER NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    field_name TEXT NOT NULL CHECK (field_name IN ('research_problem', 'why_it_matters', 'approach')),
+    signal TEXT NOT NULL CHECK (signal IN ('up', 'down')),
+    field_text TEXT NOT NULL,
+    model TEXT,
+    artifact_metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (artifact_id, field_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_summary_field_quality_signals_paper
+ON summary_field_quality_signals (paper_id);

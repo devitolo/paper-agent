@@ -267,6 +267,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         paper_id=int(form.get("paper_id", [""])[0]),
                         artifact_id=int(form.get("artifact_id", [""])[0]),
                         field_name=form.get("field_name", [""])[0],
+                        signal=form.get("signal", ["down"])[0],
                     )
                 except (ValueError, sqlite3.IntegrityError) as error:
                     payload = json.dumps({"error": str(error)}).encode("utf-8")
@@ -565,6 +566,7 @@ def render_review_queue(
             paper_id: button.dataset.paperId,
             artifact_id: button.dataset.artifactId,
             field_name: button.dataset.fieldName,
+            signal: button.dataset.signal,
           }});
           try {{
             const response = await fetch("/summary-field-feedback", {{
@@ -574,12 +576,23 @@ def render_review_queue(
             }});
             if (!response.ok) throw new Error("Unable to save");
             const result = await response.json();
-            button.classList.toggle("selected", result.active);
-            button.setAttribute("aria-pressed", result.active ? "true" : "false");
-            button.title = result.active ? "Marked insufficient; click to undo" : "Mark this field as insufficient";
+            const group = button.closest(".summary-feedback-controls");
+            if (group) {{
+              group.querySelectorAll(".summary-feedback-button").forEach((peer) => {{
+                const selected = result.active && peer.dataset.signal === result.signal;
+                peer.classList.toggle("selected", selected);
+                peer.setAttribute("aria-pressed", selected ? "true" : "false");
+                const positive = peer.dataset.signal === "up";
+                peer.title = selected
+                  ? `${{positive ? "Marked enough information" : "Marked insufficient"}}; click to undo`
+                  : `${{positive ? "Mark this field as enough information" : "Mark this field as insufficient"}}`;
+                peer.setAttribute("aria-label", peer.title);
+              }});
+            }}
             const notice = button.closest(".paper-form").querySelector(".submit-state");
             if (notice) {{
-              notice.textContent = result.active ? `${{result.field_label}} marked insufficient.` : `${{result.field_label}} signal removed.`;
+              const label = result.signal === "up" ? "enough information" : "insufficient";
+              notice.textContent = result.active ? `${{result.field_label}} marked ${{label}}.` : `${{result.field_label}} signal removed.`;
               setTimeout(() => {{ notice.textContent = ""; }}, 1800);
             }}
           }} catch (error) {{
@@ -1963,7 +1976,7 @@ def render_summary(
     compact: bool,
     paper_id: int | None = None,
     artifact: dict[str, Any] | None = None,
-    feedback_fields: set[str] | None = None,
+    feedback_fields: dict[str, str] | None = None,
 ) -> str:
     has_extracted_summary = any(summary.get(key) for key in ["research_problem", "why_it_matters", "approach"])
     source_abstract = summary.get("source_abstract")
@@ -1978,7 +1991,7 @@ def render_summary(
     problem = escape(summary_display_text(summary.get("research_problem")))
     if compact:
         return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
-    feedback_fields = feedback_fields or set()
+    feedback_fields = feedback_fields or {}
     sections = []
     for field_name, heading in SUMMARY_FEEDBACK_FIELDS.items():
         text = escape(summary_display_text(summary.get(field_name)))
@@ -1986,7 +1999,7 @@ def render_summary(
             paper_id=paper_id,
             artifact=artifact,
             field_name=field_name,
-            active=field_name in feedback_fields,
+            active_signal=feedback_fields.get(field_name),
         )
         if control:
             sections.append(
@@ -2004,19 +2017,26 @@ def render_summary_feedback_button(
     paper_id: int | None,
     artifact: dict[str, Any] | None,
     field_name: str,
-    active: bool,
+    active_signal: str | None,
 ) -> str:
     if paper_id is None or not artifact or artifact.get("id") is None:
         return ""
-    selected = " selected" if active else ""
-    pressed = "true" if active else "false"
-    title = "Marked insufficient; click to undo" if active else "Mark this field as insufficient"
-    return (
-        f'<button type="button" class="summary-feedback-button{selected}" '
-        f'data-paper-id="{paper_id}" data-artifact-id="{artifact["id"]}" '
-        f'data-field-name="{field_name}" aria-pressed="{pressed}" '
-        f'aria-label="{title}" title="{title}">👎</button>'
-    )
+    buttons = []
+    for signal, icon, inactive_title, active_title in [
+        ("up", "👍", "Mark this field as enough information", "Marked enough information; click to undo"),
+        ("down", "👎", "Mark this field as insufficient", "Marked insufficient; click to undo"),
+    ]:
+        active = active_signal == signal
+        selected = " selected" if active else ""
+        title = active_title if active else inactive_title
+        buttons.append(
+            f'<button type="button" class="summary-feedback-button {signal}{selected}" '
+            f'data-paper-id="{paper_id}" data-artifact-id="{artifact["id"]}" '
+            f'data-field-name="{field_name}" data-signal="{signal}" '
+            f'aria-pressed="{"true" if active else "false"}" '
+            f'aria-label="{title}" title="{title}">{icon}</button>'
+        )
+    return f'<span class="summary-feedback-controls">{"".join(buttons)}</span>'
 
 
 def summary_display_text(value: Any, *, max_chars: int = 520) -> str:
@@ -2517,16 +2537,22 @@ def load_artifacts_for_paper(connection: sqlite3.Connection, paper_id: int) -> d
     return artifacts
 
 
-def load_summary_feedback_fields(connection: sqlite3.Connection, artifact_id: int | None) -> set[str]:
+def load_summary_feedback_fields(connection: sqlite3.Connection, artifact_id: int | None) -> dict[str, str]:
     if artifact_id is None:
-        return set()
-    return {
-        row[0]
+        return {}
+    signals = {
+        row[0]: row[1]
         for row in connection.execute(
-            "SELECT field_name FROM summary_field_feedback WHERE artifact_id = ?",
+            "SELECT field_name, signal FROM summary_field_quality_signals WHERE artifact_id = ?",
             (artifact_id,),
         )
     }
+    for row in connection.execute(
+        "SELECT field_name FROM summary_field_feedback WHERE artifact_id = ?",
+        (artifact_id,),
+    ):
+        signals.setdefault(row[0], "down")
+    return signals
 
 
 def load_artifact(db_path: Path, artifact_id: int) -> dict[str, Any] | None:
@@ -2659,9 +2685,12 @@ def toggle_summary_field_feedback(
     paper_id: int,
     artifact_id: int,
     field_name: str,
+    signal: str = "down",
 ) -> dict[str, Any]:
     if field_name not in SUMMARY_FEEDBACK_FIELDS:
         raise ValueError("Invalid summary field")
+    if signal not in {"up", "down"}:
+        raise ValueError("Invalid summary field signal")
     init_db(db_path)
     with connect_db(db_path) as connection:
         row = connection.execute(
@@ -2675,11 +2704,18 @@ def toggle_summary_field_feedback(
         if row is None:
             raise ValueError("Summary artifact does not belong to this paper")
         existing = connection.execute(
+            "SELECT id, signal FROM summary_field_quality_signals WHERE artifact_id = ? AND field_name = ?",
+            (artifact_id, field_name),
+        ).fetchone()
+        legacy_down = connection.execute(
             "SELECT id FROM summary_field_feedback WHERE artifact_id = ? AND field_name = ?",
             (artifact_id, field_name),
         ).fetchone()
-        if existing:
-            connection.execute("DELETE FROM summary_field_feedback WHERE id = ?", (existing[0],))
+        if existing and existing[1] == signal:
+            connection.execute("DELETE FROM summary_field_quality_signals WHERE id = ?", (existing[0],))
+            active = False
+        elif not existing and legacy_down and signal == "down":
+            connection.execute("DELETE FROM summary_field_feedback WHERE id = ?", (legacy_down[0],))
             active = False
         else:
             artifact = {
@@ -2691,24 +2727,34 @@ def toggle_summary_field_feedback(
             summary = load_summary(artifact)
             connection.execute(
                 """
-                INSERT INTO summary_field_feedback (
-                    paper_id, artifact_id, field_name, field_text, model, artifact_metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO summary_field_quality_signals (
+                    paper_id, artifact_id, field_name, signal, field_text, model, artifact_metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(artifact_id, field_name) DO UPDATE SET
+                    signal = excluded.signal,
+                    field_text = excluded.field_text,
+                    model = excluded.model,
+                    artifact_metadata_json = excluded.artifact_metadata_json,
+                    updated_at = datetime('now')
                 """,
                 (
                     paper_id,
                     artifact_id,
                     field_name,
+                    signal,
                     summary_field_text(summary.get(field_name)),
                     row[2],
                     json.dumps(decode_json(row[3], {}), sort_keys=True),
                 ),
             )
+            if legacy_down:
+                connection.execute("DELETE FROM summary_field_feedback WHERE id = ?", (legacy_down[0],))
             active = True
     return {
         "active": active,
         "field_name": field_name,
         "field_label": SUMMARY_FEEDBACK_FIELDS[field_name],
+        "signal": signal,
     }
 
 
@@ -2917,10 +2963,12 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .summary-grid section { min-width: 0; }
 .summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
 .summary-heading h3 { margin-bottom: 0; }
+.summary-feedback-controls { display: inline-flex; align-items: center; gap: 1px; }
 .summary-feedback-button { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 22px; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 2px 4px; background: transparent; opacity: 0.12; filter: grayscale(1); line-height: 1; transition: opacity 120ms ease, filter 120ms ease, border-color 120ms ease, background 120ms ease; }
 .summary-grid section:hover .summary-feedback-button { opacity: 0.28; }
 .summary-feedback-button:hover, .summary-feedback-button:focus-visible { opacity: 0.72; border-color: var(--border-strong); background: rgba(148, 163, 184, 0.05); }
-.summary-feedback-button.selected { opacity: 1; filter: none; border-color: rgba(248, 113, 113, 0.52); background: rgba(248, 113, 113, 0.12); }
+.summary-feedback-button.down.selected { opacity: 1; filter: none; border-color: rgba(248, 113, 113, 0.52); background: rgba(248, 113, 113, 0.12); }
+.summary-feedback-button.up.selected { opacity: 1; filter: none; border-color: rgba(74, 222, 128, 0.52); background: rgba(74, 222, 128, 0.12); }
 .summary-feedback-button:disabled { cursor: wait; opacity: 0.45; }
 .summary-grid p, .source-summary p, .compact-summary { color: var(--muted-strong); font-size: 12px; }
 .source-summary { margin: 8px 0; }

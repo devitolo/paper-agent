@@ -192,6 +192,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_openalex_delta_applies_after_import_receipt(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE summary_field_quality_signals')
             c.execute('DROP TABLE semantic_scholar_page_dispositions')
             c.execute('DROP TABLE semantic_scholar_search_state')
             c.execute('DROP TABLE minilm_eval_decisions')
@@ -229,6 +230,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_summary_feedback_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE summary_field_quality_signals')
             c.execute('DROP TABLE semantic_scholar_page_dispositions')
             c.execute('DROP TABLE semantic_scholar_search_state')
             c.execute('DROP TABLE minilm_eval_decisions')
@@ -248,6 +250,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_minilm_eval_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE summary_field_quality_signals')
             c.execute('DROP TABLE semantic_scholar_page_dispositions')
             c.execute('DROP TABLE semantic_scholar_search_state')
             c.execute('DROP TABLE minilm_eval_decisions')
@@ -265,6 +268,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_semantic_progress_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE summary_field_quality_signals')
             c.execute('DROP TABLE semantic_scholar_page_dispositions')
             c.execute('DROP TABLE semantic_scholar_search_state')
             self.assertIn(import_state.schema(c), import_state.pre_semantic_progress_schemas())
@@ -277,6 +281,19 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
                 'semantic_scholar_search_state',
                 'semantic_scholar_page_dispositions',
             } <= tables)
+            self.assertIn(import_state.schema(c), import_state.trusted_schemas())
+
+    def test_approved_summary_quality_signals_delta_applies_to_current_production_schema(self):
+        self.start()
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE summary_field_quality_signals')
+            self.assertIn(import_state.schema(c), import_state.pre_summary_quality_signals_schemas())
+
+        self.assertTrue(import_state.apply_approved_post_import_schema_deltas(self.copy))
+
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            tables = {row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn('summary_field_quality_signals', tables)
             self.assertIn(import_state.schema(c), import_state.trusted_schemas())
 
 class ConfigurationAndModelTests(unittest.TestCase):

@@ -2739,17 +2739,20 @@ class BackendV2Tests(unittest.TestCase):
         self.assertTrue(result["active"])
         row = self.connection.execute(
             """
-            SELECT field_name, field_text, model, artifact_metadata_json
-            FROM summary_field_feedback
+            SELECT field_name, signal, field_text, model, artifact_metadata_json
+            FROM summary_field_quality_signals
             """
         ).fetchone()
         self.assertEqual(row[0], "approach")
-        self.assertEqual(row[1], "A named framework without enough detail.")
-        self.assertEqual(row[2], "qwen2.5:1.5b-instruct")
-        self.assertEqual(json.loads(row[3]), {"extractor_version": "qwen-triage-v1"})
+        self.assertEqual(row[1], "down")
+        self.assertEqual(row[2], "A named framework without enough detail.")
+        self.assertEqual(row[3], "qwen2.5:1.5b-instruct")
+        self.assertEqual(json.loads(row[4]), {"extractor_version": "qwen-triage-v1"})
         html = web.render_review_queue(self.db_path)
-        self.assertIn('data-field-name="approach" aria-pressed="true"', html)
-        self.assertIn('data-field-name="research_problem" aria-pressed="false"', html)
+        self.assertIn('data-field-name="approach" data-signal="down" aria-pressed="true"', html)
+        self.assertIn('data-field-name="research_problem" data-signal="up" aria-pressed="false"', html)
+        self.assertLess(html.index(">👍</button>"), html.index(">👎</button>"))
+        self.assertIn(">👍</button>", html)
         self.assertIn(">👎</button>", html)
 
         result = web.toggle_summary_field_feedback(
@@ -2760,7 +2763,38 @@ class BackendV2Tests(unittest.TestCase):
         )
 
         self.assertFalse(result["active"])
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM summary_field_feedback").fetchone()[0], 0)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM summary_field_quality_signals").fetchone()[0], 0)
+
+    def test_summary_field_feedback_switches_between_up_and_down(self):
+        paper_id, _ = self._seed_review_recommendation()
+        summary_path = Path(self.tmp.name) / "summary-signal.json"
+        summary_path.write_text('{"merged":{"research_problem":"Clear problem."}}', encoding="utf-8")
+        artifact_id = db.insert_artifact(
+            self.connection,
+            paper_id,
+            artifact_type="triage_summary",
+            path=summary_path,
+            model="qwen-test",
+        )
+        self.connection.commit()
+
+        up = web.toggle_summary_field_feedback(
+            self.db_path, paper_id=paper_id, artifact_id=artifact_id,
+            field_name="research_problem", signal="up",
+        )
+        self.assertEqual((up["active"], up["signal"]), (True, "up"))
+        down = web.toggle_summary_field_feedback(
+            self.db_path, paper_id=paper_id, artifact_id=artifact_id,
+            field_name="research_problem", signal="down",
+        )
+        self.assertEqual((down["active"], down["signal"]), (True, "down"))
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT signal FROM summary_field_quality_signals WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()[0],
+            "down",
+        )
 
     def test_summary_field_feedback_rejects_mismatched_artifact(self):
         paper_id, _ = self._seed_review_recommendation()
@@ -2782,6 +2816,15 @@ class BackendV2Tests(unittest.TestCase):
                 paper_id=paper_id,
                 artifact_id=artifact_id,
                 field_name="approach",
+            )
+
+        with self.assertRaisesRegex(ValueError, "Invalid summary field signal"):
+            web.toggle_summary_field_feedback(
+                self.db_path,
+                paper_id=other_paper,
+                artifact_id=artifact_id,
+                field_name="approach",
+                signal="sideways",
             )
 
     def test_topics_page_renders_editable_topic_manager(self):
