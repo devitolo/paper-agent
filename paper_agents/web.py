@@ -784,19 +784,8 @@ def format_user_score(score: float) -> str:
 
 def render_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> str:
     data = load_minilm_eval_page(db_path, run_value=run_value)
-    runs = data["runs"]
     selected = data["selected_run"]
-    options = "".join(
-        f'<option value="{run["id"]}"{" selected" if selected and run["id"] == selected["id"] else ""}>'
-        f'#{run["id"]} · {escape(source_display_name(run["source"]))} · {escape(run["created_at"])}</option>'
-        for run in runs
-    )
     controls = ""
-    if runs:
-        controls = f"""
-        <form method="get" action="/minilm-eval" class="queue-controls">
-          <label><span class="visually-hidden">Evaluation run</span><select name="run" onchange="this.form.submit()">{options}</select></label>
-        </form>"""
     if selected is None:
         content = '<section class="empty">No MiniLM Eval queue has been generated yet.</section>'
         subtitle = "Waiting for the next scheduled Scout evaluation"
@@ -846,6 +835,7 @@ def render_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> s
             }});
             const state = card.querySelector(".minilm-eval-state");
             if (state) state.textContent = "Saved";
+            card.parentElement.appendChild(card);
           }} catch (error) {{
             const state = card.querySelector(".minilm-eval-state");
             if (state) state.textContent = "Could not save. Try again.";
@@ -879,14 +869,18 @@ def render_minilm_eval_card(item: dict[str, Any]) -> str:
         if value
     )
     return f"""<article class="minilm-eval-card">
-      <div class="minilm-eval-card-head">
-        <span class="minilm-eval-rank">Paper {item['display_rank']} of {item['paper_count']}</span>
+      <div class="minilm-eval-content">
+        <div class="minilm-eval-card-head">
+          <span class="minilm-eval-rank">Paper {item['display_rank']} of {item['paper_count']}</span>
+        </div>
+        <h2>{escape(item['title'])}</h2>
+        <details class="minilm-eval-abstract" open><summary>Abstract</summary><p>{escape(item['abstract'] or 'No abstract available.')}</p></details>
+        {f'<div class="summary-grid minilm-eval-summary">{summary}</div>' if summary else ''}
       </div>
-      <h2>{escape(item['title'])}</h2>
-      <details class="minilm-eval-abstract" open><summary>Abstract</summary><p>{escape(item['abstract'] or 'No abstract available.')}</p></details>
-      {f'<div class="summary-grid minilm-eval-summary">{summary}</div>' if summary else ''}
-      <div class="minilm-eval-actions" role="group" aria-label="MiniLM Eval decision">{''.join(decision_buttons)}</div>
-      <span class="minilm-eval-state" aria-live="polite">{'Saved' if item['decision'] else ''}</span>
+      <aside class="minilm-eval-action-rail">
+        <div class="minilm-eval-actions" role="group" aria-label="MiniLM Eval decision">{''.join(decision_buttons)}</div>
+        <span class="minilm-eval-state" aria-live="polite">{'Saved' if item['decision'] else ''}</span>
+      </aside>
     </article>"""
 
 
@@ -967,11 +961,12 @@ def load_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> dic
                 for row in rows
             ]
             # Use a stable experiment-specific order that reveals neither lane.
-            items.sort(
-                key=lambda item: hashlib.sha256(
+            items.sort(key=lambda item: (
+                item["decision"] is not None,
+                hashlib.sha256(
                     f"minilm-eval:{selected_id}:{item['paper_id']}".encode("utf-8")
-                ).digest()
-            )
+                ).digest(),
+            ))
             for index, item in enumerate(items, 1):
                 item["display_rank"] = index
     return {"runs": runs, "selected_run": selected, "items": items}
@@ -2870,13 +2865,15 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .banner { padding: 7px 9px; border: 1px solid rgba(52, 211, 153, 0.42); background: rgba(52, 211, 153, 0.12); border-radius: var(--radius-sm); margin-bottom: 8px; }
 .banner.warning { border-color: rgba(251, 191, 36, 0.48); background: rgba(251, 191, 36, 0.12); }
 .minilm-eval-cards { display: grid; gap: 10px; }
-.minilm-eval-card { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); }
+.minilm-eval-card { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 16px; align-items: start; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); }
+.minilm-eval-content { min-width: 0; }
 .minilm-eval-card-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
 .minilm-eval-abstract { margin-top: 9px; color: var(--muted-strong); }
 .minilm-eval-abstract summary { cursor: pointer; color: var(--muted); font-size: 11px; font-weight: 720; text-transform: uppercase; }
 .minilm-eval-abstract p { margin-top: 5px; }
 .minilm-eval-summary { padding-top: 3px; border-top: 1px solid rgba(51, 70, 95, 0.55); }
-.minilm-eval-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.minilm-eval-action-rail { display: grid; gap: 5px; }
+.minilm-eval-actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .minilm-eval-decision { min-height: 38px; font-weight: 700; color: var(--muted-strong); }
 .minilm-eval-decision:hover { border-color: var(--accent); color: var(--text); }
 .minilm-eval-decision.selected { color: var(--accent-ink); border-color: var(--accent); background: var(--accent); }
@@ -3113,7 +3110,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .header-controls { justify-content: flex-start; }
   .queue-controls, .primary-nav { justify-content: flex-start; }
   .summary-grid { grid-template-columns: 1fr; }
-  .minilm-eval-actions { grid-template-columns: 1fr; }
+  .minilm-eval-card { grid-template-columns: 1fr; }
   .pulled-date { margin-left: 0; text-align: left; }
   .feedback-state { text-align: left; grid-column: 1 / -1; }
   .health-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }

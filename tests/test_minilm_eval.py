@@ -100,6 +100,8 @@ class MiniLMEvalTests(unittest.TestCase):
                 "SELECT decision FROM minilm_eval_decisions"
             ).fetchall()
         self.assertEqual([row[0] for row in decisions], ["skip"])
+        page_data = web.load_minilm_eval_page(self.db_path)
+        self.assertEqual(page_data["items"][-1]["decision"], "skip")
         with self.assertRaisesRegex(ValueError, "Invalid"):
             save_eval_decision(self.db_path, queue_item_id=queue_ids[0], decision="negative")
 
@@ -110,6 +112,9 @@ class MiniLMEvalTests(unittest.TestCase):
         self.assertIn("Send to Curator", page)
         self.assertNotIn("Unreviewed means unknown", page)
         self.assertIn("No abstract available.", page)
+        self.assertIn('class="minilm-eval-action-rail"', page)
+        self.assertIn("card.parentElement.appendChild(card)", page)
+        self.assertNotIn('name="run"', page)
         self.assertNotIn("Prioritize", page)
         self.assertNotIn("minilm_assisted", page)
         self.assertNotIn("baseline_rank", page)
