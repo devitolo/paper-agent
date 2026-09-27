@@ -5,6 +5,7 @@ import hashlib
 import json
 import mimetypes
 import re
+import signal
 import sqlite3
 import threading
 import urllib.parse
@@ -79,12 +80,19 @@ def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEF
         from paper_agents.manual_scout import status as scout_status
         scout_status(db_path)
     server = ThreadingHTTPServer((host, port), make_handler(db_path))
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def stop_from_sigterm(signum, frame):
+        raise KeyboardInterrupt
+
     print(f"review UI running at http://{host}:{port}")
     try:
+        signal.signal(signal.SIGTERM, stop_from_sigterm)
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nreview UI stopped")
     finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
         server.server_close()
 
 

@@ -43,7 +43,26 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("--mount=type=cache,target=/root/.npm", dockerfile)
         self.assertIn("FROM migration-gemini AS mini-production", dockerfile)
         self.assertIn('LABEL org.projectpaper.runtime="mini-production"', dockerfile)
-        self.assertRegex(dockerfile, r"FROM base AS runtime\s*$")
+        self.assertIn("FROM base AS runtime", dockerfile)
+
+    def test_dockerfile_copies_source_after_stable_mini_runtime_layers(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        mini_target = dockerfile.index("FROM migration-gemini AS mini-production")
+        npm_install = dockerfile.index("npm-cli.js ci")
+        copy_app = dockerfile.index("COPY paper_agents ./paper_agents", mini_target)
+        self.assertLess(npm_install, mini_target)
+        self.assertLess(mini_target, copy_app)
+
+    def test_mini_compose_uses_short_stop_grace_after_job_drain(self):
+        compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")
+        self.assertIn("stop_grace_period: 12s", compose)
+        self.assertNotIn("stop_grace_period: 40s", compose)
+
+    def test_packaged_web_app_handles_sigterm_for_fast_container_stop(self):
+        web = (ROOT / "paper_agents/web.py").read_text(encoding="utf-8")
+        self.assertIn("signal.signal(signal.SIGTERM, stop_from_sigterm)", web)
+        self.assertIn("raise KeyboardInterrupt", web)
+        self.assertIn("signal.signal(signal.SIGTERM, previous_sigterm)", web)
 
     def test_cron_template_uses_container_launcher_only(self):
         template = (ROOT / "deploy/project-paper.crontab").read_text(encoding="utf-8")

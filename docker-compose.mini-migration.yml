@@ -57,7 +57,7 @@ services:
       interval: 5s
       timeout: 6s
       retries: 12
-    stop_grace_period: 40s
+    stop_grace_period: 12s
     logging: &logging
       driver: json-file
       options:
@@ -83,7 +83,7 @@ services:
     depends_on:
       app:
         condition: service_healthy
-    stop_grace_period: 40s
+    stop_grace_period: 12s
     logging: *logging
   ollama:
     image: ${PAPER_MIGRATION_OLLAMA_IMAGE:?Set independently qualified immutable Ollama image digest}

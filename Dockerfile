@@ -27,12 +27,6 @@ COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     if [ -s requirements.txt ]; then pip install -r requirements.txt; fi
 
-COPY LICENSE NOTICE ./
-COPY paper_agents ./paper_agents
-COPY scripts ./scripts
-COPY sql ./sql
-COPY deploy/templates ./paper_agents/package_templates
-
 USER paper
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 ENTRYPOINT ["python", "-m", "paper_agents.package_runtime"]
@@ -49,6 +43,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     curl ca-certificates bash util-linux coreutils tzdata \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements-telemetry.txt ./
+RUN mkdir -p /app/scripts
+COPY scripts/image_runtime_inventory.py ./scripts/image_runtime_inventory.py
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-telemetry.txt \
     && python scripts/image_runtime_inventory.py "${PYTHON_BASE_IMAGE}" /app/image-runtime-inputs.json "${SOURCE_BUNDLE_SHA256}" "${VCS_REF}"
@@ -60,6 +56,7 @@ USER root
 ARG NODE_BASE_IMAGE
 COPY --from=gemini-node /usr/local/bin/node /usr/local/bin/node
 COPY --from=gemini-node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY scripts/gemini_runtime_inventory.py ./scripts/gemini_runtime_inventory.py
 # Exact top-level version; first build resolves transitive dependencies into the
 # retained lock, then installs that lock. Capture/review it before reproducible rebuilds.
 RUN --mount=type=cache,target=/root/.npm \
@@ -77,6 +74,20 @@ USER paper
 # Mini production runtime. Build this target for the operator Mini release path.
 # The default `runtime` target below remains the public package runtime.
 FROM migration-gemini AS mini-production
+USER root
+COPY LICENSE NOTICE ./
+COPY paper_agents ./paper_agents
+COPY scripts ./scripts
+COPY sql ./sql
+COPY deploy/templates ./paper_agents/package_templates
 LABEL org.projectpaper.runtime="mini-production"
+USER paper
 
 FROM base AS runtime
+USER root
+COPY LICENSE NOTICE ./
+COPY paper_agents ./paper_agents
+COPY scripts ./scripts
+COPY sql ./sql
+COPY deploy/templates ./paper_agents/package_templates
+USER paper
