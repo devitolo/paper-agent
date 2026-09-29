@@ -614,7 +614,9 @@ class CoreSource:
         if not self.api_key:
             raise RuntimeError("CORE_API_KEY is required for the CORE trial")
         cutoff_year = cutoff[:4]
-        query = f"({topic.strip()}) AND yearPublished:[{cutoff_year} TO *]"
+        # CORE models yearPublished as an integer; its query language expects a
+        # numeric comparison rather than a Lucene string range expression.
+        query = f"({topic.strip()}) AND yearPublished>={cutoff_year}"
         params = urllib.parse.urlencode({
             "q": query,
             "offset": offset,
@@ -630,7 +632,7 @@ class CoreSource:
             raise ValueError("CORE page missing results")
         returned_offset = payload.get("offset")
         returned_limit = payload.get("limit")
-        total_hits = payload.get("total_hits")
+        total_hits = payload.get("totalHits", payload.get("total_hits"))
         if not isinstance(returned_offset, int) or returned_offset != offset:
             raise ValueError("CORE returned an unexpected offset")
         if not isinstance(returned_limit, int) or returned_limit < len(payload["results"]):
@@ -649,7 +651,7 @@ class CoreSource:
             "next": next_offset,
             "results": payload["results"],
             "total_hits": total_hits,
-            "search_id": payload.get("search_id"),
+            "search_id": payload.get("searchId", payload.get("search_id")),
         }
 
 class OpenAlexSource:

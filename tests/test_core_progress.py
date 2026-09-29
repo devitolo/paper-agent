@@ -105,8 +105,8 @@ class CoreProgressTests(unittest.TestCase):
         call.assert_not_called()
 
     def test_transport_uses_works_search_bearer_and_no_key_in_url(self):
-        payload = {"total_hits": 1, "limit": 10, "offset": 20, "results": [],
-                   "search_id": "s"}
+        payload = {"totalHits": 1, "limit": 10, "offset": 20, "results": [],
+                   "searchId": "s"}
         with patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())) as call:
             result = self.source.fetch_page("llm operations", offset=20,
                                             cutoff="2024-09-01", page_size=10)
@@ -117,7 +117,7 @@ class CoreProgressTests(unittest.TestCase):
         self.assertEqual(query["offset"], ["20"])
         self.assertEqual(query["limit"], ["10"])
         self.assertEqual(query["stats"], ["false"])
-        self.assertIn("yearPublished:[2024 TO *]", query["q"][0])
+        self.assertIn("yearPublished>=2024", query["q"][0])
         self.assertEqual(request.get_header("Authorization"), "Bearer test-secret")
         self.assertNotIn("test-secret", request.full_url)
         self.assertIsNone(result["next"])
