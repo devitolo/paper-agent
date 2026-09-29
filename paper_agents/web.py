@@ -2505,7 +2505,7 @@ def source_label(primary_source: str, sources: list[str]) -> str:
 
 def source_badge_class(source: str) -> str:
     normalized = source.replace("_", "-").lower()
-    if normalized not in {"arxiv", "openalex", "semantic-scholar"}:
+    if normalized not in {"arxiv", "openalex", "semantic-scholar", "core"}:
         normalized = "unknown"
     return f"source-badge-{normalized}"
 
@@ -2515,6 +2515,7 @@ def source_display_name(source: str) -> str:
         "arxiv": "arXiv",
         "semantic_scholar": "Semantic Scholar",
         "openalex": "OpenAlex",
+        "core": "CORE",
         "unknown": "Unknown",
     }
     return labels.get(source, source.replace("_", " ").title())
@@ -2965,6 +2966,8 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .source-badge-openalex::before { content: "O"; }
 .source-badge-semantic-scholar { color: #d8b4fe; background: rgba(126, 34, 206, 0.16); border-color: rgba(168, 85, 247, 0.58); }
 .source-badge-semantic-scholar::before { content: "S"; }
+.source-badge-core { color: #86efac; background: rgba(34, 197, 94, 0.13); border-color: rgba(74, 222, 128, 0.58); }
+.source-badge-core::before { content: "C"; }
 .source-badge-unknown { color: var(--muted); background: rgba(148, 163, 184, 0.07); border-color: var(--border); }
 .source-badge-unknown::before { content: "?"; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
@@ -3133,6 +3136,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .source-badge-arxiv { color: #ffd166; background: rgba(251, 191, 36, 0.13); border-color: rgba(251, 191, 36, 0.58); }
   .source-badge-openalex { color: #7dd3fc; background: rgba(14, 165, 233, 0.14); border-color: rgba(56, 189, 248, 0.58); }
   .source-badge-semantic-scholar { color: #d8b4fe; background: rgba(126, 34, 206, 0.16); border-color: rgba(168, 85, 247, 0.58); }
+  .source-badge-core { color: #86efac; background: rgba(34, 197, 94, 0.13); border-color: rgba(74, 222, 128, 0.58); }
   .source-badge-unknown { color: var(--muted); background: rgba(148, 163, 184, 0.07); border-color: var(--border); }
   .chart-axis { stroke: #8b949e; }
   .chart-grid { stroke: #30363d; opacity: 1; }

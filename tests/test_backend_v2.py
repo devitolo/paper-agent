@@ -2486,6 +2486,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(web.source_badge_class("arxiv"), "source-badge-arxiv")
         self.assertEqual(web.source_badge_class("openalex"), "source-badge-openalex")
         self.assertEqual(web.source_badge_class("semantic_scholar"), "source-badge-semantic-scholar")
+        self.assertEqual(web.source_badge_class("core"), "source-badge-core")
+        self.assertEqual(web.source_display_name("core"), "CORE")
         self.assertEqual(web.source_badge_class("custom_source"), "source-badge-unknown")
 
     def test_review_queue_filters_by_source_and_shows_multi_source_label(self):
