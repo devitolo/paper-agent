@@ -363,6 +363,27 @@ Backlog:
 
 ## 2026-08-18
 
+### CORE trial source
+
+Status: Trial source implemented and deployed in commits `693cf09`, `2bd0da3`, and `01db154`.
+
+Decision: CORE is Project Paper's fourth discovery source for retrieval-quality coverage, not a ranking change.
+
+Completed behavior:
+
+- Add CORE API v3 Works search as source `core`; Works are the first discovery path because they are deduplicated/enriched scholarly records, while Outputs are raw harvested source records.
+- Use `CORE_API_KEY` from local or production environment and authenticate with `Authorization: Bearer [CORE_API_KEY]`; never include real keys in docs, logs, shell history, chat, or command examples.
+- Keep CORE conservative: bounded request budgets, roughly 3-second delay, cooldown on HTTP 429, and respect for `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Retry-After`.
+- Store CORE metadata and links first. Do not bulk-download PDFs; if selected-paper enrichment later uses CORE full text, prefer the supplied `downloadUrl` and do not bypass CORE API/fileserver.
+- Initial trial fixes corrected year-query compatibility and `totalHits` parsing (`693cf09`), then broadened trial queries with OR groups after an empty run (`2bd0da3`).
+- Trial run succeeded with CORE candidates, Qwen Curator produced 2 recommendations, both had abstracts and complete review cards, and no PDFs were downloaded.
+- Add CORE to MiniLM evaluation source mapping (`01db154`) so scheduled CORE runs feed parallel MiniLM evaluation when `PAPER_MINILM_EVAL_ENABLED=1`.
+- Production launcher is `scripts/mini_container_job.sh core`; scheduled output is expected in `logs/pipeline-core.log`.
+
+Follow-up:
+
+- Keep CORE labeled as a trial source until user review and Tester QA confirm recommendation quality and operational behavior.
+
 ### System health and pipeline metrics dashboard
 
 Status: Implemented.

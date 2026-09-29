@@ -153,11 +153,15 @@ python3 -m paper_agents.cli pipeline-daily --fetch 20 --keep 3
 
 `--keep` is capped at three recommendations. `--max-scout-attempts` controls the bounded re-scout loop.
 
-arXiv remains the default Scout source and the daily cron source. Semantic Scholar can be selected with `--source semantic_scholar`, and OpenAlex can be selected with `--source openalex`, for `scout-daily` or `pipeline-daily`. When no explicit `--topic` is supplied, source jobs select an enabled topic from `config/topics.yaml`; explicit `--topic` values still override config for that one run. OpenAlex is available through a separate weekly rotating script rather than the daily arXiv path.
+arXiv remains the default Scout source and the daily cron source. Semantic Scholar can be selected with `--source semantic_scholar`, OpenAlex with `--source openalex`, and CORE with `--source core`, for `scout-daily` or `pipeline-daily`. When no explicit `--topic` is supplied, source jobs select an enabled topic from `config/topics.yaml`; explicit `--topic` values still override config for that one run. CORE is a trial source for source coverage and retrieval-quality evaluation, not a ranking change.
 
 Scout also reads the active profile plus recent structured feedback to build deterministic guidance for every run. High-scored `keep` feedback can add a few boost terms to the source query set; low-scored `reject` feedback contributes avoid terms. The exact guidance is stored in `scouting_guidance` and copied into `scout_runs.diagnostics_json`. Candidate diagnostics record feedback boost/avoid hits, and only clear avoid-heavy matches with no positive hits are excluded before Curator. Softer matches remain visible for Curator evaluation. The sample size is still small, around 10 scored papers, so this path is deliberately conservative. Deep paper/PDF reading remains future Curator V2 evidence-aware reranking work, not Scout V2.
 
 Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
+
+CORE reads `CORE_API_KEY` from the local or production environment and uses CORE API v3 Works search first, not Outputs. Works are deduplicated/enriched scholarly records; Outputs are raw source-specific harvested records and are not the first Project Paper discovery path. Register at <https://core.ac.uk/services/api>; for this private single-user Project Paper setup, the Personal profile is usually appropriate unless applying through a real academic or institutional affiliation. Store the key only in the local environment or production env file, never in chat, logs, shell history, docs, or command examples. Preferred auth is `Authorization: Bearer [CORE_API_KEY]`, not a query parameter.
+
+CORE unauthenticated users receive 100 tokens per day and at most 10 requests per minute. Registered Personal users receive 1,000 tokens per day and at most 25 requests per minute. A simple query usually costs 1 token; complex queries can cost 3-5. Respect `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Retry-After`. Project Paper should stay conservative: bounded request budgets, roughly 3-second request spacing, and cooldown on HTTP 429. The first CORE pass stores metadata and links only. Do not bulk-download PDFs from CORE; if selected-paper enrichment later uses full text, prefer the supplied `downloadUrl` and do not bypass CORE API/fileserver or systematically harvest PDFs.
 
 During bounded rescouts inside one workflow cycle, papers rediscovered earlier in the same cycle remain eligible instead of being marked `previously_discovered`; older-cycle discoveries are still excluded. Papers already recommended before the current Scout run are excluded as `already_recommended` so they do not consume new daily recommendation slots, including during later rescout attempts in the same workflow cycle. Each rescout attempt asks the source for a deeper candidate window, so a shallow stale result set does not repeat unchanged across attempts.
 
@@ -229,10 +233,11 @@ python3 -m paper_agents.cli review-backfill --quick
 
 Since the 2026-09-24 production cutover, the Mini keeps host cron as its
 scheduler while executing work inside the app container. OpenAlex runs at 4:00
-AM, arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, the dry-run Gemini profile
-comparison at 2:00 AM every Monday, and SQLite backup at 1:00 AM Sunday. Every
-entry calls `scripts/mini_container_job.sh`, whose job watcher participates in
-the shared container runtime lifecycle lock for the full job and cleanup.
+AM, arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, CORE has its own scheduled
+trial source entry, the dry-run Gemini profile comparison runs at 2:00 AM every
+Monday, and SQLite backup runs at 1:00 AM Sunday. Every entry calls
+`scripts/mini_container_job.sh`, whose job watcher participates in the shared
+container runtime lifecycle lock for the full job and cleanup.
 
 Inspect the live schedule with:
 
@@ -255,7 +260,15 @@ does not move scheduling authority into the container.
 The source jobs continue to rotate across enabled topics in
 `config/topics.yaml`. Use only the deployed container launcher for operator
 runs during the soak; the native one-off commands below in historical documents
-are not the active production path.
+are not the active production path. CORE operator runs use:
+
+```sh
+scripts/mini_container_job.sh core
+```
+
+Scheduled CORE output is expected in `logs/pipeline-core.log`. The CORE run
+uses Qwen Curator first and then feeds the parallel MiniLM evaluation path when
+`PAPER_MINILM_EVAL_ENABLED=1`.
 
 The app and Ollama containers now own the long-lived services. Native
 `project-paper-web.service` and `ollama.service` are inactive; do not restart or
