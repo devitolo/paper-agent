@@ -222,6 +222,9 @@ old_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-ap
 old_config_id=$(docker inspect --format '{{.Image}}' paper-mini-production-app-1 2>/dev/null || true)
 old_env_image=$(sed -n 's/^PAPER_MIGRATION_APP_IMAGE=//p' "$ENV_FILE" | tail -1)
 old_ollama_image=$(sed -n 's/^PAPER_MIGRATION_OLLAMA_IMAGE=//p' "$ENV_FILE" | tail -1)
+if [[ -n "$old_config_id" ]]; then
+  docker image inspect "$old_config_id" > "$RELEASE_DIR/previous-app-image-inspect.json" 2>/dev/null || true
+fi
 {
   printf 'old_config_image=%s\n' "$old_image"
   printf 'old_config_id=%s\n' "$old_config_id"
@@ -243,7 +246,7 @@ phase_end
 
 phase_start "inspect image"
 docker image inspect "$APP_IMAGE" > "$RELEASE_DIR/new-app-image-inspect.json"
-python3 - "$RELEASE_DIR/new-app-image-inspect.json" "$RELEASE_DIR/before-app-inspect.json" "$RELEASE_DIR/image-metadata.env" "$RELEASE_DIR/image-layer-diff.txt" <<'PY'
+python3 - "$RELEASE_DIR/new-app-image-inspect.json" "$RELEASE_DIR/previous-app-image-inspect.json" "$RELEASE_DIR/image-metadata.env" "$RELEASE_DIR/image-layer-diff.txt" <<'PY'
 from __future__ import annotations
 
 import json

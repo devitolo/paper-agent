@@ -168,6 +168,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('verification_status=$(docker inspect', script)
         self.assertIn('image-metadata.env', script)
         self.assertIn('image-layer-diff.txt', script)
+        self.assertIn('previous-app-image-inspect.json', script)
         self.assertIn('image_size_mib=', script)
         self.assertIn('image_layer_count=', script)
         self.assertIn('reused_image_layer_count=', script)
