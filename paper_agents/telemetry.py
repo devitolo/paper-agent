@@ -37,7 +37,7 @@ _COUNTS = {"workflow_cycle_id", "profile_version_id", "scout_run_id", "curator_r
 _TOKENS = {"prompt_tokens": "llm.token_count.prompt", "completion_tokens": "llm.token_count.completion"}
 _IDENTIFIERS = {"model": "llm.model_name", "prompt_version": "paper.prompt_version",
                 "scoring_version": "paper.scoring_version"}
-_ENUMS = {"source": {"arxiv", "openalex", "semantic_scholar"}, "provider": {"ollama"},
+_ENUMS = {"source": {"arxiv", "openalex", "semantic_scholar", "core"}, "provider": {"ollama"},
           "outcome": {"ok", "failed", "unavailable", "skipped"},
           "fallback": {"source_abstract", "deterministic_merge"},
           "error_type": {"http", "timeout", "network", "invalid_response", "application"}}

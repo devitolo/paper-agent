@@ -45,6 +45,7 @@ jobs:
             tests.test_migration_gemini \
             tests.test_migration_scheduler \
             tests.test_mini_container_job \
+            tests.test_core_progress \
             tests.test_rehearsal_images \
             tests.test_import_legacy_schema \
             -v

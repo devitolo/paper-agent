@@ -374,3 +374,17 @@ CREATE TABLE IF NOT EXISTS arxiv_page_dispositions (
     topic TEXT NOT NULL,
     page_json TEXT NOT NULL
 );
+
+-- Versioned CORE v3 Works offset traversal state; enabled only by the opt-in trial.
+CREATE TABLE IF NOT EXISTS core_search_state (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS core_page_dispositions (
+    id INTEGER PRIMARY KEY,
+    scout_run_id INTEGER NOT NULL REFERENCES scout_runs(id),
+    query_key TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    page_json TEXT NOT NULL
+);

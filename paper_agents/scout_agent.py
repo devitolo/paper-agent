@@ -14,6 +14,7 @@ from paper_agents.scout import (
     DEFAULT_FETCH_LIMIT,
     DEFAULT_FRESHNESS_MONTHS,
     ArxivSource,
+    CoreSource,
     OpenAlexSource,
     PaperSource,
     SemanticScholarSource,
@@ -47,6 +48,7 @@ class ScoutConfig:
     arxiv_progress_enabled: bool = False
     openalex_cursor_enabled: bool = False
     semantic_scholar_progress_enabled: bool = False
+    core_progress_enabled: bool = False
 
 
 class ScoutAgent:
@@ -160,6 +162,16 @@ class ScoutAgent:
             source_diagnostics = progress.diagnostics
             refill_diagnostics = {"stop_reason": source_diagnostics["stop_reason"],
                                   "rounds": [], "mode": "cursor_v1"}
+        elif isinstance(source, CoreSource) and (
+                config.core_progress_enabled or os.getenv("PAPER_CORE_SOURCE") == "1"):
+            from paper_agents.core_progress import CoreProgress
+            progress = CoreProgress(connection, source)
+            candidates = progress.fetch(config.topics, freshness_months=config.freshness_months,
+                                        max_candidates=config.max_candidates, errors=errors)
+            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
+            source_diagnostics = progress.diagnostics
+            refill_diagnostics = {"stop_reason": source_diagnostics["stop_reason"],
+                                  "rounds": [], "mode": "offset_v1"}
         else:
             candidates, guided_candidates, refill_diagnostics, source_diagnostics = self._fetch_candidate_pool(
                 connection,
