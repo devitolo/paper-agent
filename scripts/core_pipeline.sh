@@ -15,9 +15,9 @@ fi
 
 python3 -m paper_agents.cli pipeline-daily \
   --source core \
-  --topic "${PAPER_AGENT_CORE_TOPIC_1:-ai platform operations reliability observability production engineering}" \
-  --topic "${PAPER_AGENT_CORE_TOPIC_2:-aiops root cause analysis incident management}" \
-  --topic "${PAPER_AGENT_CORE_TOPIC_3:-autonomous multi-agent systems software engineering operations}" \
+  --topic "${PAPER_AGENT_CORE_TOPIC_1:-(AIOps OR observability OR telemetry) AND (operations OR reliability OR production)}" \
+  --topic "${PAPER_AGENT_CORE_TOPIC_2:-(\"root cause analysis\" OR \"incident management\" OR remediation) AND (software OR cloud OR microservice)}" \
+  --topic "${PAPER_AGENT_CORE_TOPIC_3:-(\"multi-agent\" OR agentic OR autonomous) AND (\"software engineering\" OR operations OR debugging)}" \
   --topic-slot "${PAPER_AGENT_TOPIC_SLOT:-0}" \
   --quick \
   --fetch "${PAPER_AGENT_CORE_FETCH:-10}" \
