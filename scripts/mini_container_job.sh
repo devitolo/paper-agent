@@ -2,8 +2,8 @@
 # Host cron retains scheduling; execute the existing wrapper inside the running app.
 set -euo pipefail
 case "${1:-}" in
-  arxiv|openalex|semantic|profile|backup) ;;
-  *) echo 'Expected arxiv, openalex, semantic, profile, or backup' >&2; exit 64 ;;
+  arxiv|openalex|semantic|core|profile|backup) ;;
+  *) echo 'Expected arxiv, openalex, semantic, core, profile, or backup' >&2; exit 64 ;;
 esac
 if [[ $# -ne 1 ]]; then echo 'Exactly one job name required' >&2; exit 64; fi
 : "${PAPER_MIGRATION_ENV_FILE:?Set absolute private migration env-file path}"
@@ -29,10 +29,15 @@ if [[ -n "${PAPER_MIGRATION_EXTRA_COMPOSE_FILES:-}" ]]; then
   done
 fi
 # Never source an env file or interpolate its values as shell commands.
+job_core_source="${PAPER_CORE_SOURCE:-0}"
+if [[ "$1" == core ]]; then
+  job_core_source=1
+fi
 "${compose[@]}" exec -T app \
   env PAPER_AGENT_REPO=/app PAPER_AGENT_LOCK_DIR=/runtime-control \
   PAPER_AGENT_SELF_UPDATE=0 PAPER_AGENT_TOPIC_SLOT=0 \
   PAPER_AGENT_PROFILE_REBUILD_ANCHOR=2026-09-07 TZ=America/Los_Angeles \
+  PAPER_CORE_SOURCE="$job_core_source" \
   python -m paper_agents.migration_job "$1"
 
 if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" ]]; then

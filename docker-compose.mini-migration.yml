@@ -25,8 +25,10 @@ x-environment: &environment
   PAPER_OPENALEX_CURSOR: ${PAPER_OPENALEX_CURSOR:-0}
   PAPER_SEMANTIC_SCHOLAR_PROGRESS: ${PAPER_SEMANTIC_SCHOLAR_PROGRESS:-0}
   PAPER_ARXIV_PROGRESS: ${PAPER_ARXIV_PROGRESS:-0}
+  PAPER_CORE_SOURCE: ${PAPER_CORE_SOURCE:-0}
   TZ: America/Los_Angeles
   SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:?Provision source credential privately}
+  CORE_API_KEY: ${CORE_API_KEY:-}
 x-volumes: &state-mounts
   - paper-data:/app/data
   - paper-config:/app/config
