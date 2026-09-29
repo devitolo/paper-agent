@@ -3,6 +3,7 @@ from email.message import Message
 import io
 import json
 from pathlib import Path
+import ssl
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -11,7 +12,7 @@ import urllib.parse
 
 from paper_agents import db
 from paper_agents.openalex_progress import (
-    OpenAlexProgress, cooldown_seconds, transient_retry_seconds,
+    OpenAlexProgress, cooldown_seconds, transient_retry_seconds, transient_url_error,
 )
 from paper_agents.scout import OpenAlexSource
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
@@ -147,6 +148,44 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(p.diagnostics['attempts'], 2)
         self.assertEqual(p.diagnostics['stop_reason'], 'source_error')
         self.assertEqual(p.diagnostics['deferred_queries'], ['b'])
+
+    def test_transient_timeout_retries_once_and_records_safe_diagnostic(self):
+        error = urllib.error.URLError(TimeoutError('timed out'))
+        p = self.progress()
+        result, fetch = self.fetch(p, [error, page([work(1)], 'next')])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(p.diagnostics['transient_retries'], [{
+            'topic': 'incident', 'transport_error': 'TimeoutError', 'delay_seconds': 0,
+        }])
+
+    def test_repeated_transient_timeout_stops_after_one_retry(self):
+        errors = [
+            urllib.error.URLError(TimeoutError('timed out')),
+            urllib.error.URLError(TimeoutError('timed out')),
+        ]
+        p = self.progress()
+        _, fetch = self.fetch(p, errors, topics=['a', 'b'])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(p.diagnostics['attempts'], 2)
+        self.assertEqual(p.diagnostics['stop_reason'], 'source_error')
+        self.assertEqual(p.diagnostics['deferred_queries'], ['b'])
+
+    def test_permanent_url_and_certificate_errors_are_not_retried(self):
+        failures = [
+            urllib.error.URLError('unknown url type'),
+            urllib.error.URLError(ssl.SSLCertVerificationError(1, 'certificate verify failed')),
+        ]
+        for error in failures:
+            with self.subTest(reason=type(error.reason).__name__):
+                p = self.progress()
+                _, fetch = self.fetch(p, [error])
+                self.assertEqual(fetch.call_count, 1)
+                self.assertNotIn('transient_retries', p.diagnostics)
+
+    def test_temporary_dns_failure_is_transient(self):
+        error = urllib.error.URLError('Temporary failure in name resolution')
+        self.assertTrue(transient_url_error(error))
 
     def test_frozen_window_and_refresh_preserve_deep_cursor(self):
         p = self.progress(); self.fetch(p, [page([work(1)], 'deep')]); self.save(p)

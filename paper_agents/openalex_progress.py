@@ -7,9 +7,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+import errno
 import hashlib
 import json
 import random
+import socket
+import ssl
 import time
 import urllib.error
 
@@ -182,6 +185,18 @@ class OpenAlexProgress:
                     'http_status': error.code,
                     'delay_seconds': delay,
                 })
+            except urllib.error.URLError as error:
+                if (not transient_url_error(error) or retried
+                        or self.diagnostics['attempts'] >= ATTEMPT_BUDGET):
+                    raise
+                retried = True
+                delay = self.source.request_delay
+                reason = error.reason
+                self.diagnostics.setdefault('transient_retries', []).append({
+                    'topic': topic,
+                    'transport_error': type(reason).__name__,
+                    'delay_seconds': delay,
+                })
         raise RuntimeError('OpenAlex request budget exhausted')
 
     def _persist_cooldown(self, not_before):
@@ -242,3 +257,28 @@ def transient_retry_seconds(value, now, *, fallback):
         except (ValueError, TypeError, OverflowError):
             delay = fallback
     return max(fallback, delay)
+
+
+def transient_url_error(error):
+    """Return true only for transport failures that are useful to retry once."""
+    reason = error.reason
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return False
+    if isinstance(reason, (TimeoutError, ConnectionResetError, ConnectionAbortedError,
+                           BrokenPipeError)):
+        return True
+    if isinstance(reason, socket.gaierror):
+        return reason.errno == socket.EAI_AGAIN
+    if isinstance(reason, OSError):
+        return reason.errno in {
+            errno.ETIMEDOUT, errno.ECONNRESET, errno.ECONNABORTED, errno.EPIPE,
+            errno.EHOSTUNREACH, errno.ENETUNREACH,
+        }
+    if isinstance(reason, str):
+        normalized = reason.casefold()
+        return any(marker in normalized for marker in (
+            'timed out',
+            'temporary failure in name resolution',
+            'connection reset by peer',
+        ))
+    return False
