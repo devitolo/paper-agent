@@ -145,6 +145,14 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('PAPER_OPENALEX_CURSOR={openalex_cursor}', script)
         self.assertIn('if openalex_cursor and not found_openalex_cursor:', script)
 
+    def test_production_env_key_overrides_ambient_shell_key(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertGreaterEqual(script.count("unset SEMANTIC_SCHOLAR_API_KEY"), 2)
+        self.assertLess(
+            script.index("unset SEMANTIC_SCHOLAR_API_KEY"),
+            script.index("compose=("),
+        )
+
     def test_production_update_reports_post_deploy_verification(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         self.assertIn('post-deploy-verification.txt', script)

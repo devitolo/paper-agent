@@ -23,6 +23,7 @@ ATTEMPT_BUDGET = 3
 PAGE_SIZE = 10
 REFRESH_SECONDS = 7 * 86400
 TRAVERSAL_SECONDS = 30 * 86400
+TRANSIENT_HTTP_STATUSES = {500, 502, 503, 504}
 
 
 class OpenAlexProgress:
@@ -85,14 +86,11 @@ class OpenAlexProgress:
             if deep['exhausted'] and not refresh:
                 continue
             traversal = self._new_traversal(freshness_months) if refresh else deep
-            if self.diagnostics['attempts']:
-                time.sleep(self.source.request_delay)
-            self.diagnostics['attempts'] += 1
             attempted.append(topic)
             control['sequence'] += 1
             state['last_served'] = control['sequence']
             try:
-                payload = self.source.fetch_page(topic, cursor=traversal['cursor'],
+                payload = self._fetch_page(topic, cursor=traversal['cursor'],
                     cutoff=traversal['cutoff'], through=traversal['through'],
                     page_size=min(PAGE_SIZE, remaining))
                 if payload['meta']['next_cursor'] == traversal['cursor']:
@@ -159,6 +157,33 @@ class OpenAlexProgress:
                                 unique_count=len(candidates))
         return candidates
 
+    def _fetch_page(self, topic, **kwargs):
+        """Use at most one budgeted retry for transient provider failures."""
+        retried = False
+        delay = self.source.request_delay
+        while self.diagnostics['attempts'] < ATTEMPT_BUDGET:
+            if self.diagnostics['attempts']:
+                time.sleep(delay if retried else self.source.request_delay)
+            self.diagnostics['attempts'] += 1
+            try:
+                return self.source.fetch_page(topic, **kwargs)
+            except urllib.error.HTTPError as error:
+                if (error.code not in TRANSIENT_HTTP_STATUSES or retried
+                        or self.diagnostics['attempts'] >= ATTEMPT_BUDGET):
+                    raise
+                delay = transient_retry_seconds(
+                    error.headers.get('Retry-After') if error.headers else None,
+                    self.now,
+                    fallback=self.source.request_delay,
+                )
+                retried = True
+                self.diagnostics.setdefault('transient_retries', []).append({
+                    'topic': topic,
+                    'http_status': error.code,
+                    'delay_seconds': delay,
+                })
+        raise RuntimeError('OpenAlex request budget exhausted')
+
     def _persist_cooldown(self, not_before):
         old = self.original.get('@source')
         current = json.loads(old) if old else {'sequence': 0, 'not_before': 0}
@@ -200,3 +225,20 @@ def cooldown_seconds(value, now):
             return max(0, (parsed - now).total_seconds())
         except (ValueError, TypeError, OverflowError):
             return 60 + random.uniform(0, 30)
+
+
+def transient_retry_seconds(value, now, *, fallback):
+    """Honor a valid Retry-After while never retrying faster than configured."""
+    try:
+        delay = float(value)
+        if not 0 <= delay < float('inf'):
+            raise ValueError
+    except (ValueError, TypeError):
+        try:
+            parsed = parsedate_to_datetime(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            delay = max(0, (parsed - now).total_seconds())
+        except (ValueError, TypeError, OverflowError):
+            delay = fallback
+    return max(fallback, delay)

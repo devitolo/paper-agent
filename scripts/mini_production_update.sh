@@ -75,6 +75,10 @@ phase_end() {
 [[ -z "$OPENALEX_CURSOR" || "$OPENALEX_CURSOR" =~ ^[01]$ ]] || { echo "PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$SEMANTIC_SCHOLAR_PROGRESS" || "$SEMANTIC_SCHOLAR_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
 
+# Credentials in the private production env file are authoritative. Docker Compose
+# otherwise gives an ambient shell variable precedence over --env-file.
+unset SEMANTIC_SCHOLAR_API_KEY
+
 cd "$CANDIDATE_DIR"
 
 compose=(
@@ -134,6 +138,7 @@ cat > "$RELEASE_DIR/rollback.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$CANDIDATE_DIR"
+unset SEMANTIC_SCHOLAR_API_KEY
 cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"
 crontab "$RELEASE_DIR/crontab.before"
 compose=(docker compose --env-file "$ENV_FILE" -f docker-compose.mini-migration.yml)
