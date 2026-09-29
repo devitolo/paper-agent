@@ -243,7 +243,7 @@ phase_end
 
 phase_start "inspect image"
 docker image inspect "$APP_IMAGE" > "$RELEASE_DIR/new-app-image-inspect.json"
-python3 - "$RELEASE_DIR/new-app-image-inspect.json" "$RELEASE_DIR/image-metadata.env" <<'PY'
+python3 - "$RELEASE_DIR/new-app-image-inspect.json" "$RELEASE_DIR/before-app-inspect.json" "$RELEASE_DIR/image-metadata.env" "$RELEASE_DIR/image-layer-diff.txt" <<'PY'
 from __future__ import annotations
 
 import json
@@ -259,10 +259,33 @@ if labels.get("org.opencontainers.image.source") != "https://github.com/devitolo
     raise SystemExit("selected image is not from Project Paper")
 size_bytes = int(image.get("Size") or 0)
 layers = image.get("RootFS", {}).get("Layers") or []
-Path(sys.argv[2]).write_text(
+try:
+    old_value = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+    old_image = old_value[0] if old_value else {}
+except (FileNotFoundError, json.JSONDecodeError):
+    old_image = {}
+old_layers = old_image.get("RootFS", {}).get("Layers") or []
+old_layer_set = set(old_layers)
+new_layer_set = set(layers)
+reused_layers = [layer for layer in layers if layer in old_layer_set]
+new_layers = [layer for layer in layers if layer not in old_layer_set]
+removed_layers = [layer for layer in old_layers if layer not in new_layer_set]
+Path(sys.argv[3]).write_text(
     f"image_size_bytes={size_bytes}\n"
     f"image_size_mib={size_bytes / 1024 / 1024:.1f}\n"
-    f"image_layer_count={len(layers)}\n",
+    f"image_layer_count={len(layers)}\n"
+    f"previous_image_layer_count={len(old_layers)}\n"
+    f"reused_image_layer_count={len(reused_layers)}\n"
+    f"new_image_layer_count={len(new_layers)}\n"
+    f"removed_image_layer_count={len(removed_layers)}\n",
+    encoding="utf-8",
+)
+Path(sys.argv[4]).write_text(
+    "new_layers\n"
+    + "\n".join(new_layers)
+    + "\n\nremoved_layers\n"
+    + "\n".join(removed_layers)
+    + "\n",
     encoding="utf-8",
 )
 PY
@@ -482,6 +505,10 @@ expected_minilm_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_eval_after_pipeli
 verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=1$' "$RELEASE_DIR/crontab.next")
 image_size_mib=$(sed -n 's/^image_size_mib=//p' "$RELEASE_DIR/image-metadata.env")
 image_layer_count=$(sed -n 's/^image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
+previous_image_layer_count=$(sed -n 's/^previous_image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
+reused_image_layer_count=$(sed -n 's/^reused_image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
+new_image_layer_count=$(sed -n 's/^new_image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
+removed_image_layer_count=$(sed -n 's/^removed_image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
 {
   printf 'revision=%s\n' "$verification_revision"
   printf 'status=%s\n' "$verification_status"
@@ -491,6 +518,10 @@ image_layer_count=$(sed -n 's/^image_layer_count=//p' "$RELEASE_DIR/image-metada
   printf 'image=%s\n' "$verification_image"
   printf 'image_size_mib=%s\n' "$image_size_mib"
   printf 'image_layer_count=%s\n' "$image_layer_count"
+  printf 'previous_image_layer_count=%s\n' "$previous_image_layer_count"
+  printf 'reused_image_layer_count=%s\n' "$reused_image_layer_count"
+  printf 'new_image_layer_count=%s\n' "$new_image_layer_count"
+  printf 'removed_image_layer_count=%s\n' "$removed_image_layer_count"
   printf 'minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 1 || printf invalid)"
 } | tee "$RELEASE_DIR/post-deploy-verification.txt"
@@ -529,6 +560,10 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_semantic_scholar_progress=%s\n' "$verification_semantic_scholar_progress"
   printf 'verified_image_size_mib=%s\n' "$image_size_mib"
   printf 'verified_image_layer_count=%s\n' "$image_layer_count"
+  printf 'verified_previous_image_layer_count=%s\n' "$previous_image_layer_count"
+  printf 'verified_reused_image_layer_count=%s\n' "$reused_image_layer_count"
+  printf 'verified_new_image_layer_count=%s\n' "$new_image_layer_count"
+  printf 'verified_removed_image_layer_count=%s\n' "$removed_image_layer_count"
   printf 'verified_minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'verified_minilm_eval_enabled=1\n'
   printf 'total_deploy_seconds=%s\n' "$(( $(date +%s) - DEPLOY_STARTED_EPOCH ))"
@@ -549,6 +584,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- Status: \`$verification_status\`"
     echo "- Image size: \`${image_size_mib} MiB\`"
     echo "- Image layers: \`$image_layer_count\`"
+    echo "- Layer diff: \`${reused_image_layer_count} reused / ${new_image_layer_count} new / ${removed_image_layer_count} removed\`"
     echo "- PAPER_ARXIV_PROGRESS: \`$verification_arxiv_progress\`"
     echo "- PAPER_OPENALEX_CURSOR: \`$verification_openalex_cursor\`"
     echo "- PAPER_SEMANTIC_SCHOLAR_PROGRESS: \`$verification_semantic_scholar_progress\`"

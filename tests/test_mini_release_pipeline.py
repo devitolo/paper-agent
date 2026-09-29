@@ -167,8 +167,12 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('verification_revision=$(docker inspect', script)
         self.assertIn('verification_status=$(docker inspect', script)
         self.assertIn('image-metadata.env', script)
+        self.assertIn('image-layer-diff.txt', script)
         self.assertIn('image_size_mib=', script)
         self.assertIn('image_layer_count=', script)
+        self.assertIn('reused_image_layer_count=', script)
+        self.assertIn('new_image_layer_count=', script)
+        self.assertIn('removed_image_layer_count=', script)
         self.assertIn('verification_arxiv_progress=$("${compose[@]}" exec -T app sh -lc', script)
         self.assertIn('Post-deploy verification failed: PAPER_ARXIV_PROGRESS=', script)
         self.assertIn('verified_arxiv_progress=%s', script)
@@ -180,8 +184,10 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('Post-deploy verification failed: PAPER_SEMANTIC_SCHOLAR_PROGRESS=', script)
         self.assertIn('verified_semantic_scholar_progress=%s', script)
         self.assertIn('verified_image_size_mib=%s', script)
+        self.assertIn('verified_reused_image_layer_count=%s', script)
         self.assertIn('Image size: \\`', script)
         self.assertIn('Image layers: \\`', script)
+        self.assertIn('Layer diff: \\`', script)
 
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")
