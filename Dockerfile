@@ -4,16 +4,9 @@ ARG NODE_BASE_IMAGE=node:22.23.2-bookworm-slim
 FROM ${NODE_BASE_IMAGE} AS gemini-node
 FROM ${PYTHON_BASE_IMAGE} AS base
 
-ARG BUILD_DATE=unknown
-ARG VCS_REF=unknown
-ARG VERSION=dev
-
 LABEL org.opencontainers.image.title="Project Paper" \
       org.opencontainers.image.description="Local-first research paper discovery and review app" \
-      org.opencontainers.image.source="https://github.com/devitolo/paper-agent" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.version="${VERSION}"
+      org.opencontainers.image.source="https://github.com/devitolo/paper-agent"
 
 WORKDIR /app
 
@@ -36,9 +29,6 @@ CMD ["start"]
 FROM base AS migration
 USER root
 ARG PYTHON_BASE_IMAGE
-ARG SOURCE_BUNDLE_SHA256=
-ARG VCS_REF
-LABEL org.projectpaper.source-bundle-sha256="${SOURCE_BUNDLE_SHA256}"
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     curl ca-certificates bash util-linux coreutils tzdata \
     && rm -rf /var/lib/apt/lists/*
@@ -46,8 +36,7 @@ COPY requirements-telemetry.txt ./
 RUN mkdir -p /app/scripts
 COPY scripts/image_runtime_inventory.py ./scripts/image_runtime_inventory.py
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements-telemetry.txt \
-    && python scripts/image_runtime_inventory.py "${PYTHON_BASE_IMAGE}" /app/image-runtime-inputs.json "${SOURCE_BUNDLE_SHA256}" "${VCS_REF}"
+    pip install -r requirements-telemetry.txt
 LABEL org.projectpaper.runtime="migration-foundations-unqualified"
 USER paper
 
@@ -75,19 +64,37 @@ USER paper
 # The default `runtime` target below remains the public package runtime.
 FROM migration-gemini AS mini-production
 USER root
+ARG BUILD_DATE=unknown
+ARG PYTHON_BASE_IMAGE
+ARG SOURCE_BUNDLE_SHA256=
+ARG VCS_REF=unknown
+ARG VERSION=dev
 COPY LICENSE NOTICE ./
 COPY paper_agents ./paper_agents
 COPY scripts ./scripts
 COPY sql ./sql
 COPY deploy/templates ./paper_agents/package_templates
-LABEL org.projectpaper.runtime="mini-production"
+RUN python scripts/image_runtime_inventory.py "${PYTHON_BASE_IMAGE}" /app/image-runtime-inputs.json "${SOURCE_BUNDLE_SHA256}" "${VCS_REF}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.projectpaper.source-bundle-sha256="${SOURCE_BUNDLE_SHA256}" \
+      org.projectpaper.runtime="mini-production"
 USER paper
 
 FROM base AS runtime
 USER root
+ARG BUILD_DATE=unknown
+ARG SOURCE_BUNDLE_SHA256=
+ARG VCS_REF=unknown
+ARG VERSION=dev
 COPY LICENSE NOTICE ./
 COPY paper_agents ./paper_agents
 COPY scripts ./scripts
 COPY sql ./sql
 COPY deploy/templates ./paper_agents/package_templates
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.projectpaper.source-bundle-sha256="${SOURCE_BUNDLE_SHA256}"
 USER paper

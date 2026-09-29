@@ -43,7 +43,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("--mount=type=cache,target=/root/.cache/pip", dockerfile)
         self.assertIn("--mount=type=cache,target=/root/.npm", dockerfile)
         self.assertIn("FROM migration-gemini AS mini-production", dockerfile)
-        self.assertIn('LABEL org.projectpaper.runtime="mini-production"', dockerfile)
+        self.assertIn('org.projectpaper.runtime="mini-production"', dockerfile)
         self.assertIn("FROM base AS runtime", dockerfile)
 
     def test_dockerfile_copies_source_after_stable_mini_runtime_layers(self):
@@ -51,8 +51,11 @@ class MiniReleasePipelineTests(unittest.TestCase):
         mini_target = dockerfile.index("FROM migration-gemini AS mini-production")
         npm_install = dockerfile.index("npm-cli.js ci")
         copy_app = dockerfile.index("COPY paper_agents ./paper_agents", mini_target)
+        source_inventory = dockerfile.index("image-runtime-inputs.json", mini_target)
         self.assertLess(npm_install, mini_target)
         self.assertLess(mini_target, copy_app)
+        self.assertLess(copy_app, source_inventory)
+        self.assertNotIn("SOURCE_BUNDLE_SHA256", dockerfile[:mini_target])
 
     def test_mini_compose_uses_short_stop_grace_after_job_drain(self):
         compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")
