@@ -291,7 +291,11 @@ def latest_unprocessed_source_run(db_path: Path, source: str) -> int | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create an isolated MiniLM Eval queue")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
-    parser.add_argument("--source", required=True, choices=("arxiv", "openalex", "semantic_scholar"))
+    parser.add_argument(
+        "--source",
+        required=True,
+        choices=("arxiv", "openalex", "semantic_scholar", "core"),
+    )
     parser.add_argument("--candidate-limit", type=int, default=DEFAULT_CANDIDATE_LIMIT)
     args = parser.parse_args()
     source_run_id = latest_unprocessed_source_run(args.db, args.source)

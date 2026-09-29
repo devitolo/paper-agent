@@ -45,6 +45,7 @@ if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" ]]; then
     arxiv) eval_source=arxiv ;;
     openalex) eval_source=openalex ;;
     semantic) eval_source=semantic_scholar ;;
+    core) eval_source=core ;;
     *) exit 0 ;;
   esac
   if ! app_container=$("${compose[@]}" ps -q app); then

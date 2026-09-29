@@ -84,6 +84,7 @@ class HostCronTests(unittest.TestCase):
                    'PAPER_MIGRATION_ENV_FILE':str(envfile), 'CAPTURE':str(capture)}
             for job, script in [('arxiv','nightly_pipeline.sh'),('openalex','openalex_pipeline.sh'),
                                 ('semantic','semantic_scholar_pipeline.sh'),
+                                ('core','core_pipeline.sh'),
                                 ('profile','biweekly_profile_rebuild_compare.sh'),('backup','backup_db.sh')]:
                 capture.unlink(missing_ok=True)
                 result = subprocess.run(['bash', str(ROOT/'scripts/mini_container_job.sh'), job], env=env,
@@ -101,6 +102,10 @@ class HostCronTests(unittest.TestCase):
                 self.assertIn('PAPER_AGENT_SELF_UPDATE=0', args)
                 self.assertIn('PAPER_AGENT_TOPIC_SLOT=0', args)
             self.assertFalse((root/'BAD').exists())
+            self.assertIn(
+                'core) eval_source=core',
+                (ROOT/'scripts/mini_container_job.sh').read_text(),
+            )
             for arguments in (['unknown'], ['arxiv','extra']):
                 result = subprocess.run(['bash',str(ROOT/'scripts/mini_container_job.sh'),*arguments],env=env,capture_output=True,timeout=5)
                 self.assertEqual(result.returncode,64)
