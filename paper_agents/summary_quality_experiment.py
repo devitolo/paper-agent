@@ -212,8 +212,14 @@ def normalize_experiment_output(value: Any) -> dict[str, str | None]:
         else:
             raise ValueError(f"{key} must be a string or null")
     evidence_status = value.get("approach_experiment_evidence")
+    if isinstance(evidence_status, str):
+        evidence_status = "_".join(re.findall(r"[a-z0-9]+", evidence_status.casefold()))
     if evidence_status not in EXPERIMENT_EVIDENCE_VALUES:
-        raise ValueError("approach_experiment_evidence has an invalid value")
+        # This field is an auxiliary review signal. A small local model may
+        # leave it null or put explanatory prose here even when the three
+        # decision fields are usable. Preserve those fields and flag this one
+        # as unclassified during validation instead of rejecting the response.
+        evidence_status = None
     normalized["approach_experiment_evidence"] = evidence_status
     return normalized
 
@@ -300,6 +306,8 @@ def validate_experiment_output(
             if context_type == "full_text"
             else "experiment_evidence_not_visible"
         )
+    elif output.get("approach_experiment_evidence") is None:
+        flags["approach"].append("experiment_evidence_unclassified")
     return flags
 
 

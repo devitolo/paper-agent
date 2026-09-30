@@ -168,7 +168,7 @@ class SummaryQualityExperimentPromptTests(unittest.TestCase):
 
         self.assertIn("experiment_claim_without_evidence", flags["approach"])
 
-    def test_output_normalization_rejects_invalid_evidence_status(self):
+    def test_output_normalization_preserves_fields_when_evidence_status_is_invalid(self):
         output = {
             "research_problem": None,
             "research_problem_evidence": None,
@@ -179,9 +179,45 @@ class SummaryQualityExperimentPromptTests(unittest.TestCase):
             "approach_experiment_evidence": "unknown",
         }
 
-        with self.assertRaisesRegex(ValueError, "invalid value"):
-            normalize_experiment_output(output)
+        normalized = normalize_experiment_output(output)
+
+        self.assertIsNone(normalized["approach_experiment_evidence"])
         self.assertTrue(evidence_is_in_source("A  spaced\nquote appears.", "spaced quote"))
+
+    def test_validator_flags_unclassified_experiment_evidence(self):
+        output = {
+            "research_problem": None,
+            "research_problem_evidence": None,
+            "why_it_matters": None,
+            "why_it_matters_evidence": None,
+            "approach": "The authors inspect repository history to identify improvement opportunities.",
+            "approach_evidence": "inspect repository history",
+            "approach_experiment_evidence": None,
+        }
+
+        flags = validate_experiment_output(
+            output,
+            title="Repository Improvement",
+            source_text="The authors inspect repository history to identify improvement opportunities.",
+            context_type="full_text",
+        )
+
+        self.assertIn("experiment_evidence_unclassified", flags["approach"])
+
+    def test_output_normalization_accepts_harmless_evidence_status_formatting(self):
+        output = {
+            "research_problem": None,
+            "research_problem_evidence": None,
+            "why_it_matters": None,
+            "why_it_matters_evidence": None,
+            "approach": None,
+            "approach_evidence": None,
+            "approach_experiment_evidence": "Evidence Not Visible",
+        }
+
+        normalized = normalize_experiment_output(output)
+
+        self.assertEqual(normalized["approach_experiment_evidence"], "evidence_not_visible")
 
     def test_pilot_selection_includes_three_full_text_and_two_abstract_papers(self):
         papers = []
