@@ -91,17 +91,11 @@ class SectionRetrievalExperimentTests(unittest.TestCase):
         }
 
         def generate(url, model, prompt, timeout):
-            self.assertIn("RETRIEVED PASSAGES", prompt)
-            ids = {}
-            for field in ("research_problem", "why_it_matters", "approach"):
-                ids[field] = "p1"
+            self.assertIn("SELECTED PASSAGES", prompt)
             return {"response": json.dumps({
                 "research_problem": "Operators inspect incident logs manually.",
-                "research_problem_passage_id": ids["research_problem"],
                 "why_it_matters": "Manual inspection delays recovery.",
-                "why_it_matters_passage_id": ids["why_it_matters"],
                 "approach": "The authors train a classifier over telemetry.",
-                "approach_passage_id": ids["approach"],
             })}
 
         with tempfile.TemporaryDirectory() as tempdir:
