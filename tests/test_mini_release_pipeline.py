@@ -40,6 +40,8 @@ class MiniReleasePipelineTests(unittest.TestCase):
     def test_qwen_quality_pilot_is_manual_bounded_and_read_only(self):
         workflow = (ROOT / ".github/workflows/mini-production.yml").read_text(encoding="utf-8")
         self.assertIn("qwen_quality_pilot:", workflow)
+        self.assertIn("- qwen-quality-pilot-*", workflow)
+        self.assertIn("startsWith(github.ref, 'refs/tags/qwen-quality-pilot-')", workflow)
         self.assertIn("experiment_commit must be an exact 40-character", workflow)
         self.assertIn("pilot_size must be between 1 and 5", workflow)
         self.assertIn("target: ${{ env.MINI_TARGET }}", workflow)

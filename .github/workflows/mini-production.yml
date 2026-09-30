@@ -7,6 +7,8 @@ on:
   push:
     branches:
       - mini-production
+    tags:
+      - qwen-quality-pilot-*
   workflow_dispatch:
     inputs:
       qwen_quality_pilot:
@@ -45,7 +47,7 @@ concurrency:
 jobs:
   tests:
     name: Tests
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.qwen_quality_pilot != true }}
+    if: ${{ !startsWith(github.ref, 'refs/tags/qwen-quality-pilot-') && (github.event_name != 'workflow_dispatch' || inputs.qwen_quality_pilot != true) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -74,7 +76,7 @@ jobs:
   build:
     name: Build and publish Mini image
     needs: tests
-    if: github.event_name != 'pull_request' && inputs.qwen_quality_pilot != true
+    if: github.event_name != 'pull_request' && inputs.qwen_quality_pilot != true && !startsWith(github.ref, 'refs/tags/qwen-quality-pilot-')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -196,7 +198,7 @@ jobs:
 
   qwen-quality-validate:
     name: Validate Qwen quality experiment
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.qwen_quality_pilot == true }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.qwen_quality_pilot == true) || startsWith(github.ref, 'refs/tags/qwen-quality-pilot-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -209,9 +211,9 @@ jobs:
         id: revision
         shell: bash
         env:
-          EXPERIMENT_COMMIT: ${{ inputs.experiment_commit }}
-          PILOT_SIZE: ${{ inputs.pilot_size }}
-          FROZEN_MANIFEST: ${{ inputs.frozen_manifest }}
+          EXPERIMENT_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.experiment_commit || github.sha }}
+          PILOT_SIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.pilot_size || 5 }}
+          FROZEN_MANIFEST: ${{ github.event_name == 'workflow_dispatch' && inputs.frozen_manifest || 'qwen-section-quality-input-20260929T233540Z/manifest.json' }}
         run: |
           [[ "$EXPERIMENT_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
             echo "experiment_commit must be an exact 40-character lowercase commit SHA" >&2
@@ -340,8 +342,8 @@ jobs:
         shell: bash
         env:
           EXPERIMENT_IMAGE: ${{ needs.qwen-quality-build.outputs.image_ref }}
-          FROZEN_MANIFEST: ${{ inputs.frozen_manifest }}
-          PILOT_SIZE: ${{ inputs.pilot_size }}
+          FROZEN_MANIFEST: ${{ github.event_name == 'workflow_dispatch' && inputs.frozen_manifest || 'qwen-section-quality-input-20260929T233540Z/manifest.json' }}
+          PILOT_SIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.pilot_size || 5 }}
         run: |
           data_volume=$(docker inspect paper-mini-production-app-1 --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}{{end}}{{end}}')
           control_volume=$(docker inspect paper-mini-production-app-1 --format '{{range .Mounts}}{{if eq .Destination "/runtime-control"}}{{.Name}}{{end}}{{end}}')
@@ -373,7 +375,7 @@ jobs:
         shell: bash
         env:
           OUTPUT_DIR: ${{ steps.pilot.outputs.output_dir }}
-          PILOT_SIZE: ${{ inputs.pilot_size }}
+          PILOT_SIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.pilot_size || 5 }}
         run: |
           python3 - "$OUTPUT_DIR/pilot-results.json" "$PILOT_SIZE" <<'PY'
           import json
