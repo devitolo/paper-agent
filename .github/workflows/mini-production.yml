@@ -8,6 +8,26 @@ on:
     branches:
       - mini-production
   workflow_dispatch:
+    inputs:
+      qwen_quality_pilot:
+        description: Build and run the isolated five-paper Qwen section-quality pilot
+        required: true
+        type: boolean
+        default: false
+      experiment_commit:
+        description: Exact 40-character commit SHA containing the isolated experiment
+        required: false
+        type: string
+      pilot_size:
+        description: Bounded pilot size (1-5)
+        required: false
+        type: number
+        default: 5
+      frozen_manifest:
+        description: Path below /app/data/exports to the frozen input manifest
+        required: false
+        type: string
+        default: qwen-section-quality-input-20260929T233540Z/manifest.json
 
 env:
   REGISTRY: ghcr.io
@@ -25,6 +45,7 @@ concurrency:
 jobs:
   tests:
     name: Tests
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.qwen_quality_pilot != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -53,7 +74,7 @@ jobs:
   build:
     name: Build and publish Mini image
     needs: tests
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && inputs.qwen_quality_pilot != true
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -172,3 +193,237 @@ jobs:
           PAPER_MINI_OPENALEX_CURSOR: "1"
           PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS: "1"
         run: bash scripts/mini_production_update.sh
+
+  qwen-quality-validate:
+    name: Validate Qwen quality experiment
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.qwen_quality_pilot == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      experiment_sha: ${{ steps.revision.outputs.experiment_sha }}
+      source_bundle_sha256: ${{ steps.source.outputs.source_bundle_sha256 }}
+    steps:
+      - name: Validate immutable experiment revision
+        id: revision
+        shell: bash
+        env:
+          EXPERIMENT_COMMIT: ${{ inputs.experiment_commit }}
+          PILOT_SIZE: ${{ inputs.pilot_size }}
+          FROZEN_MANIFEST: ${{ inputs.frozen_manifest }}
+        run: |
+          [[ "$EXPERIMENT_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "experiment_commit must be an exact 40-character lowercase commit SHA" >&2
+            exit 64
+          }
+          [[ "$PILOT_SIZE" =~ ^[1-5]$ ]] || {
+            echo "pilot_size must be between 1 and 5" >&2
+            exit 64
+          }
+          [[ "$FROZEN_MANIFEST" =~ ^[A-Za-z0-9._/-]+$ && "$FROZEN_MANIFEST" != /* && "$FROZEN_MANIFEST" != *..* ]] || {
+            echo "frozen_manifest must be a safe relative path below /app/data/exports" >&2
+            exit 64
+          }
+          echo "experiment_sha=$EXPERIMENT_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact experiment commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ steps.revision.outputs.experiment_sha }}
+          fetch-depth: 0
+
+      - name: Confirm checked-out revision
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.revision.outputs.experiment_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Run isolated experiment tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest tests.test_summary_quality_experiment -v
+
+      - name: Compute source bundle hash
+        id: source
+        shell: bash
+        run: |
+          git archive --format=tar HEAD | sha256sum | awk '{ print "source_bundle_sha256=" $1 }' >> "$GITHUB_OUTPUT"
+
+  qwen-quality-build:
+    name: Build Qwen quality experiment package
+    needs: qwen-quality-validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_ref: ${{ steps.ref.outputs.image_ref }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout exact experiment commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.qwen-quality-validate.outputs.experiment_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish isolated amd64 experiment image
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          target: ${{ env.MINI_TARGET }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:qwen-quality-${{ needs.qwen-quality-validate.outputs.experiment_sha }}
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ needs.qwen-quality-validate.outputs.experiment_sha }}
+            VERSION=qwen-quality-${{ needs.qwen-quality-validate.outputs.experiment_sha }}
+            SOURCE_BUNDLE_SHA256=${{ needs.qwen-quality-validate.outputs.source_bundle_sha256 }}
+          cache-from: type=gha,scope=qwen-section-quality
+          cache-to: type=gha,mode=min,scope=qwen-section-quality
+          provenance: mode=max
+          sbom: true
+
+      - name: Export immutable experiment image reference
+        id: ref
+        shell: bash
+        run: echo "image_ref=${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  qwen-quality-run:
+    name: Run Qwen quality pilot on Mini
+    needs:
+      - qwen-quality-validate
+      - qwen-quality-build
+    runs-on:
+      - self-hosted
+      - project-paper-mini
+      - linux
+      - x64
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Confirm isolated runner prerequisites
+        shell: bash
+        run: |
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          docker version
+          docker inspect paper-mini-production-app-1 >/dev/null
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull exact experiment image
+        shell: bash
+        run: docker pull "${{ needs.qwen-quality-build.outputs.image_ref }}"
+
+      - name: Run bounded read-only pilot
+        id: pilot
+        shell: bash
+        env:
+          EXPERIMENT_IMAGE: ${{ needs.qwen-quality-build.outputs.image_ref }}
+          FROZEN_MANIFEST: ${{ inputs.frozen_manifest }}
+          PILOT_SIZE: ${{ inputs.pilot_size }}
+        run: |
+          data_volume=$(docker inspect paper-mini-production-app-1 --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}{{end}}{{end}}')
+          control_volume=$(docker inspect paper-mini-production-app-1 --format '{{range .Mounts}}{{if eq .Destination "/runtime-control"}}{{.Name}}{{end}}{{end}}')
+          ollama_container=$(docker ps --filter label=com.docker.compose.project=paper-mini-production --filter label=com.docker.compose.service=ollama --format '{{.Names}}' | head -1)
+          test -n "$data_volume"
+          test -n "$control_volume"
+          test -n "$ollama_container"
+
+          output_dir="$RUNNER_TEMP/qwen-section-quality-${GITHUB_RUN_ID}"
+          mkdir -p "$output_dir"
+          chmod 0777 "$output_dir"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+
+          docker run --rm --pull=never --read-only \
+            --cpus=1 --memory=1g --memory-swap=1g --pids-limit=128 \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            --user 10001:10001 --workdir /app \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m \
+            --network "container:$ollama_container" \
+            --mount "type=volume,src=$data_volume,dst=/app/data,readonly" \
+            --mount "type=volume,src=$control_volume,dst=/runtime-control" \
+            --mount "type=bind,src=$output_dir,dst=/experiment-output" \
+            --env "EXPERIMENT_MANIFEST=/app/data/exports/$FROZEN_MANIFEST" \
+            --env "PILOT_SIZE=$PILOT_SIZE" \
+            --entrypoint bash "$EXPERIMENT_IMAGE" -lc \
+            'exec flock -s -w 1800 /runtime-control/.runtime.lock python -m paper_agents.summary_quality_experiment --manifest "$EXPERIMENT_MANIFEST" --output /experiment-output/pilot-results.json --pilot-size "$PILOT_SIZE" --ollama-url http://127.0.0.1:11434/api/generate --run'
+
+      - name: Verify pilot result contract
+        shell: bash
+        env:
+          OUTPUT_DIR: ${{ steps.pilot.outputs.output_dir }}
+          PILOT_SIZE: ${{ inputs.pilot_size }}
+        run: |
+          python3 - "$OUTPUT_DIR/pilot-results.json" "$PILOT_SIZE" <<'PY'
+          import json
+          import sys
+
+          path, expected = sys.argv[1], int(sys.argv[2])
+          with open(path, encoding="utf-8") as handle:
+              result = json.load(handle)
+          rows = result.get("results") or []
+          if len(rows) != expected:
+              raise SystemExit(f"expected {expected} pilot results, found {len(rows)}")
+          failures = [row for row in rows if row.get("status") != "succeeded"]
+          if failures:
+              raise SystemExit("pilot failures: " + ", ".join(str(row.get("paper_id")) for row in failures))
+          print(f"Verified {len(rows)} isolated pilot results.")
+          PY
+
+      - name: Write pilot summary
+        if: ${{ always() && steps.pilot.outputs.output_dir != '' }}
+        shell: bash
+        env:
+          OUTPUT_DIR: ${{ steps.pilot.outputs.output_dir }}
+          IMAGE_REF: ${{ needs.qwen-quality-build.outputs.image_ref }}
+        run: |
+          python3 - "$OUTPUT_DIR/pilot-results.json" "$IMAGE_REF" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json
+          import sys
+
+          path, image = sys.argv[1:]
+          print("## Qwen section-quality pilot")
+          print()
+          print(f"- Image: `{image}`")
+          try:
+              with open(path, encoding="utf-8") as handle:
+                  result = json.load(handle)
+          except OSError:
+              print("- Result artifact was not created.")
+              raise SystemExit(0)
+          rows = result.get("results") or []
+          print(f"- Papers: `{len(rows)}`")
+          for row in rows:
+              flags = sum(len(items) for items in (row.get("validation_flags") or {}).values())
+              print(f"- Paper `{row.get('paper_id')}`: `{row.get('status')}`, flags `{flags}`, elapsed `{row.get('elapsed_seconds')}` seconds")
+          PY
+
+      - name: Upload isolated pilot results
+        if: ${{ always() && steps.pilot.outputs.output_dir != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qwen-section-quality-${{ github.run_id }}
+          path: ${{ steps.pilot.outputs.output_dir }}
+          if-no-files-found: error
+          retention-days: 14
