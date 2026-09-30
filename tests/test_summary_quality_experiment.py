@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
 
 from paper_agents.summary_quality_experiment import (
     EXPERIMENT_VERSION,
+    build_field_correction_prompt,
     build_section_quality_prompt,
     build_section_quality_synthesis_prompt,
     build_title_restatement_correction_prompt,
@@ -15,6 +17,7 @@ from paper_agents.summary_quality_experiment import (
     normalize_experiment_output,
     normalize_comparison_text,
     restates_title,
+    run_correction_experiment,
     run_paper_experiment,
     select_pilot_papers,
     validate_experiment_output,
@@ -119,6 +122,26 @@ class SummaryQualityExperimentPromptTests(unittest.TestCase):
         self.assertIn("restates the paper title", prompt)
         self.assertIn("If the source contains no reasonable support beyond the title", prompt)
         self.assertIn("Rejected research_problem: Cloud incident analysis.", prompt)
+
+    def test_field_correction_prompt_is_limited_to_one_failed_field(self):
+        prompt = build_field_correction_prompt(
+            "The system times out during incident recovery.",
+            title="Recovery System",
+            field="approach",
+            rejected_value="ABC framework",
+            rejected_evidence="The system times out",
+            failure_flags=["missing_method", "missing_evidence"],
+            context_type="full_text",
+        )
+
+        schema_line = next(line for line in prompt.splitlines() if line.startswith("{"))
+        self.assertEqual(
+            list(json.loads(schema_line)),
+            ["approach", "approach_evidence", "approach_experiment_evidence"],
+        )
+        self.assertIn("missing_method, missing_evidence", prompt)
+        self.assertIn("A framework name, acronym, or capability list is not a mechanism", prompt)
+        self.assertIn("exact, contiguous quote", prompt)
 
     def test_validator_flags_title_method_and_context_limited_experiment_evidence(self):
         source = "We present ABC. We evaluate it, but the abstract gives no setup or results."
@@ -265,14 +288,23 @@ class SummaryQualityExperimentPromptTests(unittest.TestCase):
             "approach_evidence": "train a classifier over incident logs",
             "approach_experiment_evidence": "not_applicable",
         }
-        correction = {
+        problem_correction = {
             "research_problem": "Operators must inspect incident logs manually before identifying a failure.",
             "research_problem_evidence": "Operators inspect logs manually.",
+        }
+        why_correction = {
+            "why_it_matters": None,
+            "why_it_matters_evidence": None,
         }
 
         def generate(url, model, prompt, timeout):
             calls.append(prompt)
-            response = correction if "proposed research_problem restates" in prompt else initial
+            if "Correct only the failed research-paper fields" not in prompt:
+                response = initial
+            elif '"research_problem"' in prompt.splitlines()[2]:
+                response = problem_correction
+            else:
+                response = why_correction
             return {"response": json.dumps(response)}
 
         with tempfile.TemporaryDirectory() as tempdir:
@@ -292,7 +324,62 @@ class SummaryQualityExperimentPromptTests(unittest.TestCase):
             result["new_fields"]["research_problem"],
             "Operators must inspect incident logs manually before identifying a failure.",
         )
+        self.assertEqual(set(result["field_corrections"]), {"research_problem", "why_it_matters"})
         self.assertIn("not_extracted", result["validation_flags"]["why_it_matters"])
+
+    def test_correction_only_runner_reuses_verified_baseline(self):
+        abstract = "Operators inspect logs manually, delaying recovery. The authors train a classifier over incident logs."
+        paper = {
+            "paper_id": 9,
+            "title": "Cloud Incident Analysis",
+            "abstract": abstract,
+            "published": "2026-09-01",
+            "artifact": {"metadata": {"abstract_only": True, "chunk_count": 1}},
+            "signals": {
+                field: {"signal": "down", "field_text": "old"}
+                for field in ("research_problem", "why_it_matters", "approach")
+            },
+            "frozen_sources": [],
+        }
+        baseline = {
+            "status": "succeeded",
+            "paper_id": 9,
+            "source_sha256": hashlib.sha256(abstract.encode()).hexdigest(),
+            "new_fields": {
+                "research_problem": "Cloud Incident Analysis",
+                "research_problem_evidence": "Operators inspect logs manually",
+                "why_it_matters": "Manual incident-log inspection delays service recovery for cloud operators.",
+                "why_it_matters_evidence": "delaying recovery",
+                "approach": "The authors train a classifier over incident logs.",
+                "approach_evidence": "train a classifier over incident logs",
+                "approach_experiment_evidence": "not_applicable",
+            },
+        }
+        correction = {
+            "research_problem": "Operators must inspect incident logs manually before identifying a failure.",
+            "research_problem_evidence": "Operators inspect logs manually",
+        }
+        calls = []
+
+        def generate(url, model, prompt, timeout):
+            calls.append(prompt)
+            return {"response": json.dumps(correction)}
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            result = run_correction_experiment(
+                Path(tempdir),
+                paper,
+                baseline,
+                model="test-model",
+                ollama_url="http://unused",
+                timeout=1,
+                generate_fn=generate,
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(result["correction_only"])
+        self.assertEqual(result["new_fields"]["why_it_matters"], baseline["new_fields"]["why_it_matters"])
+        self.assertNotIn("restates_title", result["validation_flags"]["research_problem"])
 
 
 if __name__ == "__main__":

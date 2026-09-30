@@ -19,6 +19,17 @@ EXPERIMENT_VERSION = "qwen-section-quality-v1"
 SECTION_FIELDS = ("research_problem", "why_it_matters", "approach")
 EVIDENCE_FIELDS = tuple(f"{field}_evidence" for field in SECTION_FIELDS)
 EXPERIMENT_EVIDENCE_VALUES = {"not_applicable", "evidence_present", "evidence_not_visible"}
+REPAIRABLE_FLAGS = {
+    "not_extracted",
+    "too_generic",
+    "missing_evidence",
+    "restates_title",
+    "missing_method",
+    "capability_list",
+    "missing_gap",
+    "describes_paper",
+    "promotional",
+}
 
 
 def experiment_schema_text() -> str:
@@ -199,6 +210,97 @@ SOURCE MATERIAL
 ---END SOURCE MATERIAL---"""
 
 
+def build_field_correction_prompt(
+    source_text: str,
+    *,
+    title: str,
+    field: str,
+    rejected_value: str | None,
+    rejected_evidence: str | None,
+    failure_flags: list[str],
+    context_type: str,
+) -> str:
+    """Build one bounded correction request for one failed decision field."""
+    return build_fields_correction_prompt(
+        source_text,
+        title=title,
+        failures={field: failure_flags},
+        rejected={field: (rejected_value, rejected_evidence)},
+        context_type=context_type,
+    )
+
+
+def build_fields_correction_prompt(
+    source_text: str,
+    *,
+    title: str,
+    failures: dict[str, list[str]],
+    rejected: dict[str, tuple[str | None, str | None]],
+    context_type: str,
+) -> str:
+    """Build one correction call containing only fields that failed validation."""
+    if not failures or any(field not in SECTION_FIELDS for field in failures):
+        raise ValueError("correction fields must be non-empty decision fields")
+    schema: dict[str, str] = {}
+    for field in SECTION_FIELDS:
+        if field not in failures:
+            continue
+        schema[field] = "string|null"
+        schema[f"{field}_evidence"] = "exact source quote|string|null"
+        if field == "approach":
+            schema["approach_experiment_evidence"] = (
+                "not_applicable|evidence_present|evidence_not_visible"
+            )
+    requirements = {
+        "research_problem": (
+            "State the affected system or research area and its concrete limitation, failure, "
+            "gap, or unmet need. Do not repeat or lightly rewrite the title."
+        ),
+        "why_it_matters": (
+            "State who or what is affected and the concrete practical or scientific consequence. "
+            "Do not describe the paper, framework, or claimed novelty as the consequence."
+        ),
+        "approach": (
+            "Explain what the authors built, tested, measured, or analyzed and how the underlying "
+            "method works. A framework name, acronym, or capability list is not a mechanism."
+        ),
+    }
+    requirement_lines = []
+    rejected_lines = []
+    for field in SECTION_FIELDS:
+        if field not in failures:
+            continue
+        requirement_lines.append(
+            f"- {field} failed {', '.join(failures[field])}: {requirements[field]}"
+        )
+        rejected_value, rejected_evidence = rejected[field]
+        rejected_lines.extend(
+            [f"{field}: {rejected_value!r}", f"{field}_evidence: {rejected_evidence!r}"]
+        )
+    experiment_rules = ""
+    if "approach" in failures:
+        experiment_rules = """
+Set approach_experiment_evidence to not_applicable when no evaluation is claimed, evidence_present when a concrete dataset, sample, environment, setup, comparison, metric, or result is visible, or evidence_not_visible when an evaluation is claimed without such detail in the supplied material."""
+    return f"""Correct only the failed research-paper fields listed below.
+Return exactly one JSON object matching this schema:
+{json.dumps(schema, separators=(",", ":"))}
+
+{chr(10).join(requirement_lines)}
+Examine the entire supplied source before returning null. Use null for both a field and its evidence only when no reasonable support exists. For every non-null answer, copy one short, exact, contiguous quote from SOURCE MATERIAL into its evidence field. Do not paraphrase evidence. Do not invent details, use promotional language, modify fields absent from the schema, or include markdown, arrays, extra keys, or line breaks inside values.{experiment_rules}
+
+PAPER METADATA
+Title: {title}
+Context type: {context_type}
+
+REJECTED ANSWER
+{chr(10).join(rejected_lines)}
+
+SOURCE MATERIAL
+---BEGIN SOURCE MATERIAL---
+{source_text}
+---END SOURCE MATERIAL---"""
+
+
 def normalize_experiment_output(value: Any) -> dict[str, str | None]:
     if not isinstance(value, dict):
         raise ValueError("model response is not a JSON object")
@@ -233,6 +335,34 @@ def parse_experiment_json(response_text: str) -> dict[str, str | None]:
     return normalize_experiment_output(json.loads(cleaned))
 
 
+def parse_field_correction_json(response_text: str, field: str) -> dict[str, str | None]:
+    cleaned = response_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:].strip()
+    value = json.loads(cleaned)
+    if not isinstance(value, dict):
+        raise ValueError("field correction is not a JSON object")
+    corrected: dict[str, str | None] = {}
+    for key in (field, f"{field}_evidence"):
+        item = value.get(key)
+        if item is None:
+            corrected[key] = None
+        elif isinstance(item, str):
+            corrected[key] = " ".join(item.split()) or None
+        else:
+            raise ValueError(f"{key} must be a string or null")
+    if field == "approach":
+        status = value.get("approach_experiment_evidence")
+        if isinstance(status, str):
+            status = "_".join(re.findall(r"[a-z0-9]+", status.casefold()))
+        corrected["approach_experiment_evidence"] = (
+            status if status in EXPERIMENT_EVIDENCE_VALUES else None
+        )
+    return corrected
+
+
 def normalized_quote(value: str) -> str:
     return " ".join(value.casefold().split())
 
@@ -247,11 +377,11 @@ def looks_like_acronym_label(value: str) -> bool:
     method_verbs = re.search(
         r"\b(analy[sz](?:e|es|ed|ing)|builds?|classif(?:y|ies|ied)|compares?|constructs?|"
         r"detects?|evaluates?|extracts?|generates?|learns?|measures?|models?|retrieves?|"
-        r"routes?|trains?|uses?)\b",
+        r"combines?|integrates?|organizes?|routes?|trains?|uses?)\b",
         value,
         re.IGNORECASE,
     )
-    return bool(acronyms and len(words) <= 12 and not method_verbs)
+    return bool(acronyms and len(words) <= 18 and not method_verbs)
 
 
 def looks_like_capability_list(value: str) -> bool:
@@ -293,6 +423,20 @@ def validate_experiment_output(
     problem = output.get("research_problem")
     if restates_title(title, problem):
         flags["research_problem"].append("restates_title")
+    if problem and not re.search(
+        r"\b(cannot|challenge|complex|difficult|fail(?:s|ed|ure)?|gap|inaccurate|lack|"
+        r"limit(?:ation|ed|s)?|missing|need|overhead|poor|risk|slow|unaddressed|"
+        r"unavailable|unreliable|without)\b|\bdid not\b",
+        problem,
+        re.IGNORECASE,
+    ):
+        flags["research_problem"].append("missing_gap")
+
+    why = output.get("why_it_matters")
+    if why and re.match(r"^(this|the) (paper|research|study|work) (introduces|presents|proposes)\b", why, re.IGNORECASE):
+        flags["why_it_matters"].append("describes_paper")
+    if why and re.search(r"\b(innovative|revolutionary|transformative|state-of-the-art)\b", why, re.IGNORECASE):
+        flags["why_it_matters"].append("promotional")
 
     approach = output.get("approach")
     if approach:
@@ -329,6 +473,73 @@ def call_experiment_ollama(url: str, model: str, prompt: str, timeout: int) -> d
     if not isinstance(result, dict) or not isinstance(result.get("response"), str):
         raise RuntimeError("Ollama response did not contain generated text")
     return result
+
+
+def apply_field_corrections(
+    merged: dict[str, str | None],
+    *,
+    source_text: str,
+    correction_source: str,
+    paper: dict[str, Any],
+    context_type: str,
+    model: str,
+    ollama_url: str,
+    timeout: int,
+    generate_fn: Any,
+) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, dict[str, Any]]]:
+    """Try each failed field once while preserving fields that already pass."""
+    initial_flags = validate_experiment_output(
+        merged,
+        title=paper["title"],
+        source_text=source_text,
+        context_type=context_type,
+    )
+    field_corrections: dict[str, dict[str, Any]] = {}
+    failures: dict[str, list[str]] = {}
+    for field in SECTION_FIELDS:
+        failure_flags = [flag for flag in initial_flags[field] if flag in REPAIRABLE_FLAGS]
+        if failure_flags:
+            failures[field] = failure_flags
+    if failures:
+        prompt = build_fields_correction_prompt(
+            correction_source,
+            title=paper["title"],
+            failures=failures,
+            rejected={
+                field: (merged.get(field), merged.get(f"{field}_evidence"))
+                for field in failures
+            },
+            context_type=context_type,
+        )
+        try:
+            response = generate_fn(ollama_url, model, prompt, timeout)
+            for field, failure_flags in failures.items():
+                corrected = parse_field_correction_json(response["response"], field)
+                merged.update(corrected)
+                field_corrections[field] = {
+                    "status": "completed",
+                    "failure_flags": failure_flags,
+                    "raw_response": response["response"],
+                    "parsed": corrected,
+                }
+        except Exception as error:
+            for field, failure_flags in failures.items():
+                field_corrections[field] = {
+                    "status": "failed",
+                    "failure_flags": failure_flags,
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                }
+
+    final_flags = validate_experiment_output(
+        merged,
+        title=paper["title"],
+        source_text=source_text,
+        context_type=context_type,
+    )
+    for field, correction in field_corrections.items():
+        correction["remaining_flags"] = final_flags[field]
+    return initial_flags, final_flags, field_corrections
 
 
 def source_context(manifest_root: Path, paper: dict[str, Any]) -> tuple[str, str, str]:
@@ -490,31 +701,23 @@ def run_paper_experiment(
         merged = parse_experiment_json(response["response"])
         synthesis = {"raw_response": response["response"], "parsed": merged}
 
-    correction = None
-    if restates_title(paper["title"], merged.get("research_problem")):
-        prompt = build_title_restatement_correction_prompt(
-            source_text,
-            title=paper["title"],
-            rejected_problem=merged["research_problem"] or "",
-        )
-        response = generate_fn(ollama_url, model, prompt, timeout)
-        cleaned = response["response"].strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.strip("`")
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:].strip()
-        corrected = json.loads(cleaned)
-        corrected_problem = corrected.get("research_problem")
-        corrected_evidence = corrected.get("research_problem_evidence")
-        if corrected_problem is not None and not isinstance(corrected_problem, str):
-            raise ValueError("corrected research_problem must be a string or null")
-        if corrected_evidence is not None and not isinstance(corrected_evidence, str):
-            raise ValueError("corrected research_problem_evidence must be a string or null")
-        merged["research_problem"] = " ".join(corrected_problem.split()) if corrected_problem else None
-        merged["research_problem_evidence"] = (
-            " ".join(corrected_evidence.split()) if corrected_evidence else None
-        )
-        correction = {"raw_response": response["response"], "parsed": corrected}
+    correction_source = "\n\n".join(chunks)
+    initial_flags, final_flags, field_corrections = apply_field_corrections(
+        merged,
+        source_text=source_text,
+        correction_source=correction_source,
+        paper=paper,
+        context_type=context_type,
+        model=model,
+        ollama_url=ollama_url,
+        timeout=timeout,
+        generate_fn=generate_fn,
+    )
+
+    title_correction = field_corrections.get("research_problem")
+    title_correction_attempted = bool(
+        title_correction and "restates_title" in title_correction["failure_flags"]
+    )
 
     return {
         "status": "succeeded",
@@ -528,16 +731,68 @@ def run_paper_experiment(
         "original_signals": {field: paper["signals"][field]["signal"] for field in SECTION_FIELDS},
         "original_fields": {field: paper["signals"][field]["field_text"] for field in SECTION_FIELDS},
         "new_fields": merged,
-        "validation_flags": validate_experiment_output(
-            merged,
-            title=paper["title"],
-            source_text=source_text,
-            context_type=context_type,
-        ),
-        "title_correction_attempted": correction is not None,
-        "title_correction": correction,
+        "initial_validation_flags": initial_flags,
+        "validation_flags": final_flags,
+        "field_corrections": field_corrections,
+        "title_correction_attempted": title_correction_attempted,
+        "title_correction": title_correction if title_correction_attempted else None,
         "chunks": chunk_results,
         "synthesis": synthesis,
+        "started_at": started_at,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }
+
+
+def run_correction_experiment(
+    manifest_root: Path,
+    paper: dict[str, Any],
+    baseline: dict[str, Any],
+    *,
+    model: str,
+    ollama_url: str,
+    timeout: int,
+    max_chars: int = 7000,
+    generate_fn: Any = call_experiment_ollama,
+) -> dict[str, Any]:
+    """Correct a saved successful result without repeating initial extraction."""
+    source_text, context_type, source_sha256 = source_context(manifest_root, paper)
+    if baseline.get("status") != "succeeded":
+        raise ValueError(f"Paper {paper['paper_id']} baseline did not succeed")
+    if baseline.get("source_sha256") != source_sha256:
+        raise ValueError(f"Paper {paper['paper_id']} baseline source hash does not match")
+    merged = normalize_experiment_output(dict(baseline.get("new_fields") or {}))
+    configured_chunks = int((paper["artifact"].get("metadata") or {}).get("chunk_count") or 1)
+    chunks = chunk_text(source_text, max_chars)[: max(1, configured_chunks)]
+    started_at = datetime.now(timezone.utc).isoformat()
+    started = time.monotonic()
+    initial_flags, final_flags, field_corrections = apply_field_corrections(
+        merged,
+        source_text=source_text,
+        correction_source="\n\n".join(chunks),
+        paper=paper,
+        context_type=context_type,
+        model=model,
+        ollama_url=ollama_url,
+        timeout=timeout,
+        generate_fn=generate_fn,
+    )
+    title_correction = field_corrections.get("research_problem")
+    title_correction_attempted = bool(
+        title_correction and "restates_title" in title_correction["failure_flags"]
+    )
+    return {
+        **baseline,
+        "status": "succeeded",
+        "model": model,
+        "new_fields": merged,
+        "correction_only": True,
+        "correction_baseline_fields": baseline["new_fields"],
+        "initial_validation_flags": initial_flags,
+        "validation_flags": final_flags,
+        "field_corrections": field_corrections,
+        "title_correction_attempted": title_correction_attempted,
+        "title_correction": title_correction if title_correction_attempted else None,
         "started_at": started_at,
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -547,6 +802,11 @@ def run_paper_experiment(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the isolated Qwen section-quality experiment.")
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument(
+        "--baseline-results",
+        type=Path,
+        help="Correct saved successful results without repeating initial extraction.",
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--pilot-size", type=int, default=5)
     parser.add_argument("--paper-id", action="append", type=int, default=[])
@@ -558,9 +818,18 @@ def main() -> None:
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     manifest_root = args.manifest.parent
+    baselines: dict[int, dict[str, Any]] = {}
+    if args.baseline_results:
+        baseline_payload = json.loads(args.baseline_results.read_text(encoding="utf-8"))
+        baselines = {
+            int(result["paper_id"]): result
+            for result in baseline_payload.get("results", [])
+            if result.get("status") == "succeeded"
+        }
+    selected_ids = set(args.paper_id) if args.paper_id else set(baselines)
     selected = (
-        [paper for paper in manifest["papers"] if int(paper["paper_id"]) in set(args.paper_id)]
-        if args.paper_id
+        [paper for paper in manifest["papers"] if int(paper["paper_id"]) in selected_ids]
+        if selected_ids
         else select_pilot_papers(manifest["papers"], args.pilot_size)
     )
     plan = {
@@ -591,13 +860,26 @@ def main() -> None:
         paper_started_at = datetime.now(timezone.utc).isoformat()
         started = time.monotonic()
         try:
-            result = run_paper_experiment(
-                manifest_root,
-                paper,
-                model=args.model,
-                ollama_url=args.ollama_url,
-                timeout=args.timeout,
-            )
+            if args.baseline_results:
+                baseline = baselines.get(int(paper["paper_id"]))
+                if baseline is None:
+                    raise ValueError(f"Paper {paper['paper_id']} has no successful baseline")
+                result = run_correction_experiment(
+                    manifest_root,
+                    paper,
+                    baseline,
+                    model=args.model,
+                    ollama_url=args.ollama_url,
+                    timeout=args.timeout,
+                )
+            else:
+                result = run_paper_experiment(
+                    manifest_root,
+                    paper,
+                    model=args.model,
+                    ollama_url=args.ollama_url,
+                    timeout=args.timeout,
+                )
         except Exception as error:  # Preserve later papers and the exact failure for review.
             result = {
                 "status": "failed",
