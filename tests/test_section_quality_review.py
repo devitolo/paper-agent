@@ -27,13 +27,20 @@ class SectionQualityReviewTests(unittest.TestCase):
         self.assertEqual({c["label"] for c in public["tasks"][0]["candidates"]}, {"A", "B"})
         self.assertTrue(all("method" not in c for c in public["tasks"][0]["candidates"]))
 
-    def test_decision_requires_all_usefulness_and_support_labels(self):
+    def test_decision_requires_three_usefulness_labels(self):
         bundle = build_review_bundle(self.baseline, self.abstract, self.field)
         task_id = bundle["tasks"][0]["task_id"]
-        ratings = {"current_useful": "yes", "A_useful": "partial", "A_supported": "yes", "B_useful": "no", "B_supported": "unclear"}
+        ratings = {"current_useful": "yes", "A_useful": "partial", "B_useful": "no"}
         self.assertEqual(validate_decision(bundle, {"task_id": task_id, "ratings": ratings}), (task_id, ratings))
         with self.assertRaisesRegex(ValueError, "incomplete"):
             validate_decision(bundle, {"task_id": task_id, "ratings": {}})
+
+    def test_old_support_labels_are_not_accepted(self):
+        bundle = build_review_bundle(self.baseline, self.abstract, self.field)
+        task_id = bundle["tasks"][0]["task_id"]
+        ratings = {"current_useful": "yes", "A_useful": "partial", "A_supported": "yes", "B_useful": "no", "B_supported": "unclear"}
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            validate_decision(bundle, {"task_id": task_id, "ratings": ratings})
 
 
 if __name__ == "__main__":
