@@ -246,12 +246,40 @@ def run_prepared_paper(
     }
 
 
+def prepare_paper_source(
+    manifest_root: Path,
+    paper: dict[str, Any],
+    baseline: dict[str, Any],
+    *,
+    source_mode: str,
+) -> dict[str, Any]:
+    if source_mode == "abstract":
+        source_text = (paper.get("abstract") or "").strip()
+        if not source_text:
+            raise ValueError(f"Paper {paper['paper_id']} has no abstract")
+        context_type = "source_abstract"
+        source_sha256 = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    elif source_mode == "auto":
+        source_text, context_type, source_sha256 = source_context(manifest_root, paper)
+        if baseline.get("source_sha256") != source_sha256:
+            raise ValueError(f"Paper {paper['paper_id']} baseline source hash does not match")
+    else:
+        raise ValueError(f"Unsupported source mode: {source_mode}")
+    return {
+        "paper": paper,
+        "baseline": baseline,
+        "context_type": context_type,
+        "source_mode": source_mode,
+        "source_sha256": source_sha256,
+        "passages": split_source_passages(source_text),
+    }
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run frozen MiniLM passage extraction experiment.")
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--baseline-results", type=Path)
     parser.add_argument("--prepared-input", type=Path)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--source-mode", choices=("auto", "abstract"), default="auto")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default="qwen2.5:1.5b-instruct")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/generate")
@@ -273,20 +301,19 @@ def main() -> None:
             baseline = baselines.get(int(paper["paper_id"]))
             if baseline is None:
                 continue
-            source_text, context_type, source_sha256 = source_context(args.manifest.parent, paper)
-            if baseline.get("source_sha256") != source_sha256:
-                raise ValueError(f"Paper {paper['paper_id']} baseline source hash does not match")
-            prepared_rows.append({
-                "paper": paper,
-                "baseline": baseline,
-                "context_type": context_type,
-                "source_sha256": source_sha256,
-                "passages": split_source_passages(source_text),
-            })
+            prepared_rows.append(
+                prepare_paper_source(
+                    args.manifest.parent,
+                    paper,
+                    baseline,
+                    source_mode=args.source_mode,
+                )
+            )
         payload = {
             "experiment_version": EXPERIMENT_VERSION,
             "manifest_sha256": hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
             "prepared_at": datetime.now(timezone.utc).isoformat(),
+            "source_mode": args.source_mode,
             "papers": prepared_rows,
         }
         args.output.parent.mkdir(parents=True, exist_ok=True)

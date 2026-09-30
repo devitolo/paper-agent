@@ -9,6 +9,7 @@ from pathlib import Path
 from paper_agents.section_retrieval_experiment import (
     build_qwen_retrieval_prompt,
     parse_qwen_retrieval_output,
+    prepare_paper_source,
     rank_passages,
     run_paper,
     split_source_passages,
@@ -22,6 +23,21 @@ class FakeScorer:
 
 
 class SectionRetrievalExperimentTests(unittest.TestCase):
+    def test_abstract_mode_uses_abstract_even_when_baseline_hash_is_full_text(self):
+        paper = {"paper_id": 4, "abstract": "A focused abstract about incident recovery."}
+        prepared = prepare_paper_source(
+            Path("/unused"),
+            paper,
+            {"source_sha256": "full-text-hash"},
+            source_mode="abstract",
+        )
+        self.assertEqual(prepared["context_type"], "source_abstract")
+        self.assertEqual(prepared["source_mode"], "abstract")
+        self.assertEqual(
+            prepared["source_sha256"],
+            hashlib.sha256(paper["abstract"].encode()).hexdigest(),
+        )
+
     def test_passages_overlap_and_preserve_source_words(self):
         source = (
             "Operators inspect logs manually during incidents. "
