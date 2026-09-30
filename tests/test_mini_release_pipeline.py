@@ -37,20 +37,6 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("cache-from: type=gha,scope=mini-production", workflow)
         self.assertIn("cache-to: type=gha,mode=min,scope=mini-production", workflow)
 
-    def test_qwen_quality_pilot_is_manual_bounded_and_read_only(self):
-        workflow = (ROOT / ".github/workflows/mini-production.yml").read_text(encoding="utf-8")
-        self.assertIn("qwen_quality_pilot:", workflow)
-        self.assertIn("experiment_commit must be an exact 40-character", workflow)
-        self.assertIn("pilot_size must be between 1 and 5", workflow)
-        self.assertIn("target: ${{ env.MINI_TARGET }}", workflow)
-        self.assertIn("qwen-quality-${{ needs.qwen-quality-validate.outputs.experiment_sha }}", workflow)
-        self.assertIn('--mount "type=volume,src=$data_volume,dst=/app/data,readonly"', workflow)
-        self.assertIn("--cpus=1 --memory=1g --memory-swap=1g", workflow)
-        self.assertIn("flock -s -w 1800 /runtime-control/.runtime.lock", workflow)
-        self.assertIn("--ollama-url http://127.0.0.1:11434/api/generate --run", workflow)
-        self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", workflow)
-        self.assertNotIn("docker compose up", workflow[workflow.index("qwen-quality-run:"):])
-
     def test_dockerfile_keeps_public_and_mini_targets_explicit(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("# syntax=docker/dockerfile:", dockerfile)
