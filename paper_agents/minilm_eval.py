@@ -67,22 +67,24 @@ class MiniLMScorer:
 
     def __call__(self, title: str, abstract: str) -> float:
         text = f"{title.strip()}\n{abstract.strip()}"
-        scores = []
-        for interest in INTERESTS:
-            encoded = self.tokenizer(
-                interest,
-                text,
-                truncation=True,
-                max_length=512,
-                padding=False,
-                return_tensors="np",
-            )
-            result = self.session.run(None, {name: encoded[name] for name in self.input_names})
-            score = float(result[0][0][0])
-            if not math.isfinite(score):
-                raise RuntimeError("MiniLM returned a non-finite score")
-            scores.append(score)
+        scores = [self.score_pair(interest, text) for interest in INTERESTS]
         return max(scores)
+
+    def score_pair(self, query: str, text: str) -> float:
+        """Return the pinned cross-encoder score for one query/text pair."""
+        encoded = self.tokenizer(
+            query,
+            text,
+            truncation=True,
+            max_length=512,
+            padding=False,
+            return_tensors="np",
+        )
+        result = self.session.run(None, {name: encoded[name] for name in self.input_names})
+        score = float(result[0][0][0])
+        if not math.isfinite(score):
+            raise RuntimeError("MiniLM returned a non-finite score")
+        return score
 
 
 def file_sha256(path: Path) -> str:
