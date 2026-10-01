@@ -2,13 +2,42 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Project Paper is a local-first system for discovering, curating, reviewing, and learning from research papers based on a user's evolving interests and feedback.
+**A local-first AI research discovery system that finds, ranks, and learns which technical papers are worth your time.**
 
-> **First supported release:** the installer-fronted Docker Compose path and manual in-product Scout have passed exact-image acceptance on Ubuntu x86-64. The same v0.1.3 image also passed macOS Apple Silicon acceptance. See the [package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
+Project Paper helps technical readers keep up with research without turning paper discovery into an endless search tab. It discovers candidate papers, ranks them against your interests, gives you a compact review queue, and learns from the feedback you save after reading or discussing a paper.
 
-The repository currently contains a Python MVP called `paper_agents`. The V2 backend separates Scout, Curator, and Feedback responsibilities: Scout retrieves candidate pools, Curator scores and recommends papers, and the Feedback Agent stores pasted ChatGPT discussion summaries in immutable SQLite history with deterministic v1 parsing.
+```text
+Scout -> Curator -> Review -> Feedback -> Better Recommendations
+```
+
+![Project Paper Review Queue showing source filters, match score, paper rationale, signals, and feedback controls](docs/images/review-queue.png)
+
+Project Paper is designed around recommendation quality, not collecting the largest possible pile of PDFs. It separates discovery, curation, review, and feedback so each part of the workflow can be inspected and improved.
+
+## What It Does
+
+- Discovers papers from academic sources including arXiv, OpenAlex, and Semantic Scholar.
+- Separates retrieval, recommendation scoring, review, and feedback instead of treating the whole process as one opaque ranking step.
+- Uses local AI for high-volume paper triage and optional cloud AI for profile synthesis.
+- Keeps review history, feedback, topics, and recommendation state local-first.
+- Lets you use your preferred external AI or reading workflow for deep paper discussion, then paste the final feedback back into Project Paper.
+- Feeds saved feedback into future discovery and recommendation guidance.
+
+## Basic Workflow
+
+1. Configure research topics.
+2. Run Scout to discover candidate papers.
+3. Curator ranks and explains the strongest matches.
+4. Review papers in the Review Queue.
+5. Optionally discuss a paper in your preferred external AI or reading workflow.
+6. Paste your final feedback back into Project Paper.
+7. Future discovery and recommendations use that feedback.
+
+Project Paper is a working local product, not just an AI experiment. The supported Docker Compose path has passed exact-image acceptance on Ubuntu x86-64 and macOS Apple Silicon, with a loopback web UI, persistent local state, local Qwen inference, Review Queue, feedback storage, diagnostics, and packaged backup/restore.
 
 ## First Supported Path
+
+> **First supported release:** the installer-fronted Docker Compose path and manual in-product Scout have passed exact-image acceptance on Ubuntu x86-64. The same v0.1.3 image also passed macOS Apple Silicon acceptance. See the [package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
 
 The current first-user path is:
 
