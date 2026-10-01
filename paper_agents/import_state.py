@@ -45,6 +45,8 @@ SUMMARY_FEEDBACK_SCHEMA_MARKER = '-- Versioned summary-field quality feedback; a
 SUMMARY_FEEDBACK_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SUMMARY_FEEDBACK_SCHEMA_MARKER, 1)[1]
 MINILM_EVAL_SCHEMA_MARKER = '-- Temporary MiniLM Eval experiment; isolated from production ranking and feedback/profile learning.'
 MINILM_EVAL_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(MINILM_EVAL_SCHEMA_MARKER, 1)[1]
+MINILM_SHADOW_SCHEMA_MARKER = '-- Temporary paired pre-Curator MiniLM shadow experiment; isolated from production behavior and learning.'
+MINILM_SHADOW_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(MINILM_SHADOW_SCHEMA_MARKER, 1)[1]
 SEMANTIC_PROGRESS_SCHEMA_MARKER = '-- Versioned Semantic Scholar offset traversal state; enabled only by the progressive retrieval path.'
 SEMANTIC_PROGRESS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SEMANTIC_PROGRESS_SCHEMA_MARKER, 1)[1]
 SUMMARY_QUALITY_SIGNALS_SCHEMA_MARKER = '-- Versioned bidirectional summary-field quality signals; legacy feedback rows remain down signals.'
@@ -94,6 +96,12 @@ def pre_minilm_eval_schemas():
     return _schema_variants(sql)
 
 
+def pre_minilm_shadow_schemas():
+    """Accepted production schema before the paired MiniLM shadow tables."""
+    sql = TRUSTED_SCHEMA.read_text().split(MINILM_SHADOW_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql)
+
+
 def pre_semantic_progress_schemas():
     """Accepted production schema before Semantic Scholar progressive retrieval."""
     sql = TRUSTED_SCHEMA.read_text().split(SEMANTIC_PROGRESS_SCHEMA_MARKER, 1)[0]
@@ -129,7 +137,9 @@ def apply_approved_post_import_schema_deltas(root):
         actual_schema = schema(connection)
         if actual_schema in trusted_schemas():
             return False
-        if actual_schema in pre_core_progress_schemas():
+        if actual_schema in pre_minilm_shadow_schemas():
+            delta_sql = MINILM_SHADOW_SCHEMA_SQL
+        elif actual_schema in pre_core_progress_schemas():
             delta_sql = CORE_PROGRESS_SCHEMA_SQL
         elif actual_schema in pre_arxiv_progress_schemas():
             delta_sql = ARXIV_PROGRESS_SCHEMA_SQL

@@ -165,6 +165,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('phase_start "readiness"', script)
         self.assertIn('### Deploy phase timing', script)
         self.assertIn('scripts/minilm_eval_after_pipeline.sh', script)
+        self.assertIn('scripts/minilm_shadow_after_pipeline.sh', script)
         self.assertIn('minilm_runner_sha256=', script)
         self.assertIn('PAPER_MINILM_EVAL_ENABLED=1', script)
         self.assertIn('verification_revision=$(docker inspect', script)

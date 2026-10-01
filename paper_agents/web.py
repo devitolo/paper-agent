@@ -179,6 +179,14 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     )
                 )
                 return
+            if parsed.path == "/retrieval-experiment":
+                params = urllib.parse.parse_qs(parsed.query)
+                run_value = params.get("run", [None])[0]
+                self.respond_html(render_retrieval_experiment_page(
+                    db_path,
+                    run_id=int(run_value) if run_value and run_value.isascii() and run_value.isdigit() else None,
+                ))
+                return
             if parsed.path == "/scout-eval":
                 self.send_response(HTTPStatus.SEE_OTHER)
                 self.send_header("Location", "/minilm-eval")
@@ -303,6 +311,34 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         db_path,
                         queue_item_id=int(form.get("queue_item_id", [""])[0]),
                         decision=form.get("decision", [""])[0],
+                    )
+                except (ValueError, sqlite3.IntegrityError) as error:
+                    payload = json.dumps({"error": str(error)}).encode("utf-8")
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                else:
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if parsed.path == "/retrieval-experiment/decision":
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Save evaluation from Project Paper")
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    from paper_agents.minilm_shadow import save_shadow_decision
+                    result = save_shadow_decision(
+                        db_path,
+                        output_id=int(form.get("output_id", [""])[0]),
+                        would_sample=form.get("would_sample", [""])[0],
+                        usefulness=int(form.get("usefulness", [""])[0]),
+                        reason_tags=form.get("reason_tag", []),
                     )
                 except (ValueError, sqlite3.IntegrityError) as error:
                     payload = json.dumps({"error": str(error)}).encode("utf-8")
@@ -801,6 +837,122 @@ def discussion_summary_lines(summary: dict[str, Any]) -> list[str]:
 
 def format_user_score(score: float) -> str:
     return f"{float(score):.2f}".rstrip("0").rstrip(".")
+
+
+def render_retrieval_experiment_page(db_path: Path, *, run_id: int | None = None) -> str:
+    from paper_agents.minilm_shadow import load_shadow_review
+    data = load_shadow_review(db_path, run_id=run_id)
+    selected = data["selected_run"]
+    options = "".join(
+        f'<option value="{run["id"]}"{" selected" if selected and run["id"] == selected["id"] else ""}>'
+        f'#{run["id"]} · {escape(source_display_name(run["source"]))} · '
+        f'{run["decided_count"]}/{run["paper_count"]} reviewed</option>'
+        for run in data["runs"]
+    )
+    controls = (
+        f'<form method="get" action="/retrieval-experiment" class="queue-controls">'
+        f'<label><span class="sr-only">Experiment run</span><select name="run" onchange="this.form.submit()">{options}</select></label>'
+        f'</form>' if options else ""
+    )
+    if selected is None:
+        subtitle = "Waiting for a completed shadow run"
+        cards = '<section class="empty">No retrieval experiment outputs are available yet.</section>'
+    else:
+        subtitle = (
+            f'{source_display_name(selected["source"])} source run #{selected["source_run_id"]} | '
+            f'{selected["decided_count"]}/{selected["paper_count"]} reviewed'
+        )
+        cards = "".join(render_retrieval_experiment_card(item) for item in data["items"])
+        if not cards:
+            cards = '<section class="empty">This run produced no final experiment papers.</section>'
+
+    metric_rows = "".join(
+        f'<tr><td>{escape(source_display_name(metric["source"]))}</td>'
+        f'<td>{"Current" if metric["path"] == "baseline" else "MiniLM"}</td>'
+        f'<td>{metric["yes_count"]}/{metric["reviewed_count"]}</td>'
+        f'<td>{metric["sample_count"]}/{metric["reviewed_count"]}</td>'
+        f'<td>{format_user_score(metric["mean_usefulness"]) if metric["mean_usefulness"] is not None else "—"}</td></tr>'
+        for metric in data["metrics"]
+    )
+    comparison_text = "; ".join(
+        f'{source_display_name(row["source"])}: {row["yes_gain"]:+d} yes, {row["sample_gain"]:+d} yes/maybe'
+        for row in data["comparisons"]
+    )
+    metrics = (
+        '<details class="experiment-metrics"><summary>Accumulated results</summary>'
+        '<div class="table-wrap"><table><thead><tr><th>Source</th><th>Path</th><th>Yes</th>'
+        '<th>Yes or maybe</th><th>Mean usefulness</th></tr></thead><tbody>'
+        f'{metric_rows or "<tr><td colspan=\"5\">No reviewed results yet.</td></tr>"}'
+        '</tbody></table></div>'
+        f'<p class="muted">Shared outputs: {data["overlap_count"]}. '
+        f'Runs: {data["runtime"]["run_count"]}; failures: {data["runtime"]["failed_count"]}.'
+        f'{" MiniLM difference: " + escape(comparison_text) + "." if comparison_text else ""}</p></details>'
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Paper Retrieval Experiment</title><style>{page_css()}
+.experiment-help,.experiment-metrics{{margin:12px 0;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}}
+.experiment-cards{{display:grid;gap:12px}}.experiment-card{{padding:16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}}
+.experiment-actions{{display:grid;gap:10px;margin-top:14px}}.experiment-row{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}.experiment-row strong{{min-width:135px}}
+.experiment-choice.selected{{color:var(--accent-ink);border-color:var(--accent);background:var(--accent)}}.experiment-tags label{{color:var(--muted);font-size:12px}}
+.experiment-state{{min-height:18px;color:var(--muted);font-size:12px}}.experiment-metrics summary{{cursor:pointer;font-weight:700}}
+</style></head><body><main>{render_app_header("Retrieval Experiment", subtitle, controls, "retrieval_experiment")}
+<section class="experiment-help">For each paper, answer only whether you would sample it and how useful it looks. Papers are shown once even when both experiment paths selected them.</section>
+{metrics}<div class="experiment-cards">{cards}</div>
+<script>
+document.querySelectorAll('.experiment-card').forEach((card) => {{
+  const save = async () => {{
+    const would = card.querySelector('[data-would].selected');
+    const useful = card.querySelector('[data-usefulness].selected');
+    if (!would || !useful) return;
+    const body = new URLSearchParams({{output_id: card.dataset.outputId, would_sample: would.dataset.would, usefulness: useful.dataset.usefulness}});
+    card.querySelectorAll('[data-reason]:checked').forEach((item) => body.append('reason_tag', item.dataset.reason));
+    const state = card.querySelector('.experiment-state'); state.textContent = 'Saving…';
+    try {{ const response = await fetch('/retrieval-experiment/decision', {{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body}}); if(!response.ok) throw new Error(); state.textContent='Saved'; card.parentElement.appendChild(card); }}
+    catch(error) {{ state.textContent='Could not save. Try again.'; }}
+  }};
+  card.querySelectorAll('[data-would]').forEach((button) => button.onclick=()=>{{card.querySelectorAll('[data-would]').forEach(x=>x.classList.remove('selected'));button.classList.add('selected');save();}});
+  card.querySelectorAll('[data-usefulness]').forEach((button) => button.onclick=()=>{{card.querySelectorAll('[data-usefulness]').forEach(x=>x.classList.remove('selected'));button.classList.add('selected');save();}});
+  card.querySelectorAll('[data-reason]').forEach((input) => input.onchange=save);
+}});
+</script></main></body></html>"""
+
+
+def render_retrieval_experiment_card(item: dict[str, Any]) -> str:
+    would_buttons = "".join(
+        f'<button type="button" class="experiment-choice{" selected" if item["would_sample"] == value else ""}" data-would="{value}">{label}</button>'
+        for value, label in (("yes", "Yes"), ("maybe", "Maybe"), ("no", "No"))
+    )
+    usefulness_buttons = "".join(
+        f'<button type="button" class="experiment-choice{" selected" if item["usefulness"] == value else ""}" data-usefulness="{value}">{value}</button>'
+        for value in range(1, 6)
+    )
+    tag_labels = (
+        ("strong_fit", "Strong fit"), ("practical_evidence", "Practical evidence"),
+        ("too_theoretical", "Too theoretical"), ("weak_evidence", "Weak evidence"),
+        ("duplicate_or_familiar", "Duplicate/familiar"), ("unclear_summary", "Unclear summary"),
+        ("off_topic", "Off topic"),
+    )
+    tags = "".join(
+        f'<label><input type="checkbox" data-reason="{value}"{" checked" if value in item["reason_tags"] else ""}> {label}</label>'
+        for value, label in tag_labels
+    )
+    summary = "".join(
+        f'<section><h3>{label}</h3><p>{escape(value)}</p></section>'
+        for label, value in (("Problem", item["problem"]), ("Why it matters", item["why_it_matters"]), ("Approach", item["approach"]))
+        if value
+    )
+    return f"""<article class="experiment-card" data-output-id="{item['id']}">
+      <h2>{escape(item['title'])}</h2>
+      {f'<div class="summary-grid">{summary}</div>' if summary else ''}
+      <details><summary>Abstract</summary><p>{escape(item['abstract'] or 'No abstract available.')}</p></details>
+      <div class="experiment-actions">
+        <div class="experiment-row"><strong>Would sample/read?</strong>{would_buttons}</div>
+        <div class="experiment-row"><strong>Usefulness</strong>{usefulness_buttons}</div>
+        <div class="experiment-row experiment-tags"><strong>Optional reasons</strong>{tags}</div>
+        <span class="experiment-state">{'Saved' if item['would_sample'] else ''}</span>
+      </div>
+    </article>"""
 
 
 def render_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> str:
@@ -2412,6 +2564,7 @@ def render_primary_nav(current_page: str) -> str:
         ("review", "/", "Review Queue"),
         ("topics", "/topics", "Topics"),
         ("minilm_eval", "/minilm-eval", "MiniLM Eval"),
+        ("retrieval_experiment", "/retrieval-experiment", "Retrieval Experiment"),
         ("health", "/health", "Health"),
     ]
     return "".join(

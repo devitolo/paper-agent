@@ -40,7 +40,7 @@ fi
   PAPER_CORE_SOURCE="$job_core_source" \
   python -m paper_agents.migration_job "$1"
 
-if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" ]]; then
+if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" || "${PAPER_MINILM_SHADOW_ENABLED:-0}" == "1" ]]; then
   case "$1" in
     arxiv) eval_source=arxiv ;;
     openalex) eval_source=openalex ;;
@@ -52,7 +52,14 @@ if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" ]]; then
     echo "MiniLM Eval skipped after successful $1 pipeline: app container lookup failed." >&2
   elif [[ -z "$app_container" ]]; then
     echo "MiniLM Eval skipped after successful $1 pipeline: app container was not found." >&2
-  elif ! bash "$repo/scripts/minilm_eval_after_pipeline.sh" "$eval_source" "$app_container" "$repo"; then
-    echo "MiniLM Eval failed after successful $1 pipeline; production results are unchanged." >&2
+  else
+    if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" ]] && \
+       ! bash "$repo/scripts/minilm_eval_after_pipeline.sh" "$eval_source" "$app_container" "$repo"; then
+      echo "MiniLM Eval failed after successful $1 pipeline; production results are unchanged." >&2
+    fi
+    if [[ "${PAPER_MINILM_SHADOW_ENABLED:-0}" == "1" ]] && \
+       ! bash "$repo/scripts/minilm_shadow_after_pipeline.sh" "$eval_source" "$app_container" "$repo"; then
+      echo "MiniLM Shadow failed after successful $1 pipeline; production results are unchanged." >&2
+    fi
   fi
 fi

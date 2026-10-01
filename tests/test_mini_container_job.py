@@ -69,6 +69,36 @@ class HostCronTests(unittest.TestCase):
                 r'MiniLM Eval completed_at=.* status=failed elapsed_seconds=\d+',
             )
 
+    def test_minilm_shadow_runner_is_bounded_and_calls_shadow_module(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root/'docker'
+            executable.write_text('#!'+sys.executable+'\nimport json,os,sys\n'
+                'args=sys.argv[1:]\n'
+                'with open(os.environ["CAPTURE"],"a") as stream: stream.write(json.dumps(args)+"\\n")\n'
+                'if args[:2] == ["image", "inspect"]: print("sha256:7d8b960220e3c6f60292e6d40a8f300ff19c5ee05cd97cf5f725a76673e2d5c2")\n'
+                'elif args and args[0] == "inspect" and "NetworkSettings.Networks" in " ".join(args): print("production-network")\n'
+                'elif args and args[0] == "inspect" and ".Config.Env" in " ".join(args): print("PAPER_AGENT_OLLAMA_URL=http://ollama:11434/api/generate")\n')
+            executable.chmod(0o700)
+            capture = root/'calls'
+            env = {**os.environ, 'PATH':str(root)+':'+os.environ['PATH'], 'CAPTURE':str(capture)}
+            result = subprocess.run(
+                ['bash', str(ROOT/'scripts/minilm_shadow_after_pipeline.sh'), 'arxiv', 'app-id', str(ROOT)],
+                env=env, capture_output=True, text=True, timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('MiniLM Shadow started_at=', result.stdout)
+            calls = [json.loads(line) for line in capture.read_text().splitlines()]
+            run = next(call for call in calls if call and call[0] == 'run')
+            self.assertIn('production-network', run)
+            self.assertIn('--read-only', run)
+            self.assertIn('--cpus=2', run)
+            self.assertIn('PAPER_AGENT_OLLAMA_URL=http://ollama:11434/api/generate', run)
+            self.assertEqual(run[-10:], [
+                '-m', 'paper_agents.minilm_shadow', '--db', '/app/data/paper_agent.db',
+                '--source', 'arxiv', '--input-limit', '10', '--output-limit', '3',
+            ])
+
     def test_fixed_commands_enter_owned_job_without_sourcing_env(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

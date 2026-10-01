@@ -114,6 +114,7 @@ install -m 0644 "$SOURCE_DIR/docker-compose.mini-migration.yml" "$CANDIDATE_DIR/
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-rehearsal.yml" "$CANDIDATE_DIR/docker-compose.mini-rehearsal.yml"
 install -m 0755 "$SOURCE_DIR/scripts/mini_container_job.sh" "$CANDIDATE_DIR/scripts/mini_container_job.sh"
 install -m 0755 "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh"
+install -m 0755 "$SOURCE_DIR/scripts/minilm_shadow_after_pipeline.sh" "$CANDIDATE_DIR/scripts/minilm_shadow_after_pipeline.sh"
 install -m 0755 "$SOURCE_DIR/scripts/mini_production_update.sh" "$CANDIDATE_DIR/scripts/mini_production_update.sh"
 {
   printf 'started_at=%s\n' "$(date -u +%FT%TZ)"
@@ -505,7 +506,10 @@ verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc 'printf %s "${
 verification_semantic_scholar_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_SEMANTIC_SCHOLAR_PROGRESS:-unset}"')
 verification_minilm_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
 expected_minilm_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
+verification_minilm_shadow_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_shadow_after_pipeline.sh" | awk '{print $1}')
+expected_minilm_shadow_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_shadow_after_pipeline.sh" | awk '{print $1}')
 verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=1$' "$RELEASE_DIR/crontab.next")
+verification_minilm_shadow_cron=$(grep -c '^PAPER_MINILM_SHADOW_ENABLED=1$' "$RELEASE_DIR/crontab.next" || true)
 image_size_mib=$(sed -n 's/^image_size_mib=//p' "$RELEASE_DIR/image-metadata.env")
 image_layer_count=$(sed -n 's/^image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
 previous_image_layer_count=$(sed -n 's/^previous_image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
@@ -526,7 +530,9 @@ removed_image_layer_count=$(sed -n 's/^removed_image_layer_count=//p' "$RELEASE_
   printf 'new_image_layer_count=%s\n' "$new_image_layer_count"
   printf 'removed_image_layer_count=%s\n' "$removed_image_layer_count"
   printf 'minilm_runner_sha256=%s\n' "$verification_minilm_runner"
+  printf 'minilm_shadow_runner_sha256=%s\n' "$verification_minilm_shadow_runner"
   printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 1 || printf invalid)"
+  printf 'PAPER_MINILM_SHADOW_ENABLED=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 1 || printf 0)"
 } | tee "$RELEASE_DIR/post-deploy-verification.txt"
 if [[ -n "$ARXIV_PROGRESS" && "$verification_arxiv_progress" != "$ARXIV_PROGRESS" ]]; then
   echo "Post-deploy verification failed: PAPER_ARXIV_PROGRESS=$verification_arxiv_progress, expected $ARXIV_PROGRESS" >&2
@@ -542,6 +548,14 @@ if [[ -n "$SEMANTIC_SCHOLAR_PROGRESS" && "$verification_semantic_scholar_progres
 fi
 if [[ "$verification_minilm_runner" != "$expected_minilm_runner" ]]; then
   echo "Post-deploy verification failed: MiniLM evaluation runner mismatch" >&2
+  exit 1
+fi
+if [[ "$verification_minilm_shadow_runner" != "$expected_minilm_shadow_runner" ]]; then
+  echo "Post-deploy verification failed: MiniLM shadow runner mismatch" >&2
+  exit 1
+fi
+if [[ "$verification_minilm_shadow_cron" -gt 1 ]]; then
+  echo "Post-deploy verification failed: PAPER_MINILM_SHADOW_ENABLED=1 is duplicated" >&2
   exit 1
 fi
 if [[ "$verification_minilm_cron" != 1 ]]; then
@@ -568,7 +582,9 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_new_image_layer_count=%s\n' "$new_image_layer_count"
   printf 'verified_removed_image_layer_count=%s\n' "$removed_image_layer_count"
   printf 'verified_minilm_runner_sha256=%s\n' "$verification_minilm_runner"
+  printf 'verified_minilm_shadow_runner_sha256=%s\n' "$verification_minilm_shadow_runner"
   printf 'verified_minilm_eval_enabled=1\n'
+  printf 'verified_minilm_shadow_enabled=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 1 || printf 0)"
   printf 'total_deploy_seconds=%s\n' "$(( $(date +%s) - DEPLOY_STARTED_EPOCH ))"
   printf 'rollback_script=%s\n' "$RELEASE_DIR/rollback.sh"
 } >> "$RELEASE_DIR/update.env"

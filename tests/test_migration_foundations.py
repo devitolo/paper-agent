@@ -28,6 +28,14 @@ def fixture_connection(path):
         connection.close()
 
 
+def drop_minilm_shadow_tables(connection):
+    """Return a trusted fixture to the production schema before this newest delta."""
+    connection.execute('DROP TABLE minilm_shadow_decisions')
+    connection.execute('DROP TABLE minilm_shadow_outputs')
+    connection.execute('DROP TABLE minilm_shadow_path_results')
+    connection.execute('DROP TABLE minilm_shadow_runs')
+
+
 def settings(manifest):
     return {'PAPER_AGENT_PACKAGED':'1','PAPER_AGENT_STARTUP_MODE':'imported',
         'PAPER_AGENT_IMPORT_MANIFEST':str(manifest), 'PAPER_AGENT_DEFAULT_SOURCES':'arxiv,semantic_scholar,openalex',
@@ -192,6 +200,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_openalex_delta_applies_after_import_receipt(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            drop_minilm_shadow_tables(c)
             c.execute('DROP TABLE core_page_dispositions')
             c.execute('DROP TABLE core_search_state')
             c.execute('DROP TABLE arxiv_page_dispositions')
@@ -234,6 +243,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_summary_feedback_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            drop_minilm_shadow_tables(c)
             c.execute('DROP TABLE core_page_dispositions')
             c.execute('DROP TABLE core_search_state')
             c.execute('DROP TABLE arxiv_page_dispositions')
@@ -258,6 +268,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_minilm_eval_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            drop_minilm_shadow_tables(c)
             c.execute('DROP TABLE core_page_dispositions')
             c.execute('DROP TABLE core_search_state')
             c.execute('DROP TABLE arxiv_page_dispositions')
@@ -280,6 +291,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_semantic_progress_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            drop_minilm_shadow_tables(c)
             c.execute('DROP TABLE core_page_dispositions')
             c.execute('DROP TABLE core_search_state')
             c.execute('DROP TABLE arxiv_page_dispositions')
@@ -299,9 +311,29 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
             } <= tables)
             self.assertIn(import_state.schema(c), import_state.trusted_schemas())
 
+    def test_approved_minilm_shadow_delta_applies_to_current_production_schema(self):
+        self.start()
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.execute('DROP TABLE minilm_shadow_decisions')
+            c.execute('DROP TABLE minilm_shadow_outputs')
+            c.execute('DROP TABLE minilm_shadow_path_results')
+            c.execute('DROP TABLE minilm_shadow_runs')
+            self.assertIn(import_state.schema(c), import_state.pre_minilm_shadow_schemas())
+
+        self.assertTrue(import_state.apply_approved_post_import_schema_deltas(self.copy))
+
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            tables = {row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertTrue({
+                'minilm_shadow_runs', 'minilm_shadow_path_results',
+                'minilm_shadow_outputs', 'minilm_shadow_decisions',
+            } <= tables)
+            self.assertIn(import_state.schema(c), import_state.trusted_schemas())
+
     def test_approved_summary_quality_signals_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            drop_minilm_shadow_tables(c)
             c.execute('DROP TABLE core_page_dispositions')
             c.execute('DROP TABLE core_search_state')
             c.execute('DROP TABLE arxiv_page_dispositions')
@@ -319,6 +351,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_arxiv_progress_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            drop_minilm_shadow_tables(c)
             c.execute('DROP TABLE core_page_dispositions')
             c.execute('DROP TABLE core_search_state')
             c.execute('DROP TABLE arxiv_page_dispositions')
@@ -335,6 +368,7 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
     def test_approved_core_progress_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            drop_minilm_shadow_tables(c)
             c.execute('DROP TABLE core_page_dispositions')
             c.execute('DROP TABLE core_search_state')
             self.assertIn(import_state.schema(c), import_state.pre_core_progress_schemas())
