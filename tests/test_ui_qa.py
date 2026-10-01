@@ -105,6 +105,34 @@ class UIQueueRegressionTests(unittest.TestCase):
                 for value, label in selections:
                     self.assertIn(f'<option value="{value}" selected>{label}</option>', html)
 
+    def test_retired_minilm_eval_redirects_to_retrieval_experiment_and_leaves_navigation(self):
+        class RequestSocket:
+            def __init__(self, request):
+                self.request = request
+                self.response = bytearray()
+
+            def makefile(self, *args, **kwargs):
+                return io.BytesIO(self.request)
+
+            def sendall(self, data):
+                self.response.extend(data)
+
+        for path in ("/minilm-eval", "/scout-eval"):
+            request = RequestSocket(f"GET {path} HTTP/1.0\r\n\r\n".encode())
+            web.make_handler(self.path)(request, ("127.0.0.1", 1), object())
+            self.assertIn(b"303 See Other", request.response)
+            self.assertIn(b"Location: /retrieval-experiment", request.response)
+
+        request = RequestSocket(
+            b"POST /minilm-eval/decision HTTP/1.0\r\nContent-Length: 0\r\n\r\n"
+        )
+        web.make_handler(self.path)(request, ("127.0.0.1", 1), object())
+        self.assertIn(b"HTTP/1.0 410 ", request.response)
+
+        navigation = web.render_primary_nav("review")
+        self.assertNotIn("MiniLM Eval", navigation)
+        self.assertIn("Retrieval Experiment", navigation)
+
     def test_more_than_fifty_pending_papers_are_not_silently_inaccessible(self):
         expected = {self.seed(number) for number in range(121)}
         other = self.seed(122)

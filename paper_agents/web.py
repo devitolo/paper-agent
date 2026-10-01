@@ -171,13 +171,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 )
                 return
             if parsed.path == "/minilm-eval":
-                params = urllib.parse.parse_qs(parsed.query)
-                self.respond_html(
-                    render_minilm_eval_page(
-                        db_path,
-                        run_value=params.get("run", [None])[0],
-                    )
-                )
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", "/retrieval-experiment")
+                self.end_headers()
                 return
             if parsed.path == "/retrieval-experiment":
                 params = urllib.parse.parse_qs(parsed.query)
@@ -189,7 +185,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/scout-eval":
                 self.send_response(HTTPStatus.SEE_OTHER)
-                self.send_header("Location", "/minilm-eval")
+                self.send_header("Location", "/retrieval-experiment")
                 self.end_headers()
                 return
             if parsed.path == "/topics":
@@ -299,30 +295,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
 
             if parsed.path == "/minilm-eval/decision":
-                if self.headers.get("Sec-Fetch-Site") == "cross-site":
-                    self.send_error(HTTPStatus.FORBIDDEN, "Save evaluation from Project Paper")
-                    return
-                length = int(self.headers.get("Content-Length", "0"))
-                body = self.rfile.read(length).decode("utf-8")
-                form = urllib.parse.parse_qs(body)
-                try:
-                    from paper_agents.minilm_eval import save_eval_decision
-                    result = save_eval_decision(
-                        db_path,
-                        queue_item_id=int(form.get("queue_item_id", [""])[0]),
-                        decision=form.get("decision", [""])[0],
-                    )
-                except (ValueError, sqlite3.IntegrityError) as error:
-                    payload = json.dumps({"error": str(error)}).encode("utf-8")
-                    self.send_response(HTTPStatus.BAD_REQUEST)
-                else:
-                    payload = json.dumps(result).encode("utf-8")
-                    self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
+                self.send_error(HTTPStatus.GONE, "MiniLM Eval has been retired; use Retrieval Experiment")
                 return
             if parsed.path == "/retrieval-experiment/decision":
                 if self.headers.get("Sec-Fetch-Site") == "cross-site":
@@ -353,7 +326,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self.wfile.write(payload)
                 return
             if parsed.path == "/scout-eval/decision":
-                self.send_error(HTTPStatus.GONE, "Use /minilm-eval/decision")
+                self.send_error(HTTPStatus.GONE, "MiniLM Eval has been retired; use Retrieval Experiment")
                 return
 
             if parsed.path != "/feedback":
@@ -2563,7 +2536,6 @@ def render_primary_nav(current_page: str) -> str:
     links = [
         ("review", "/", "Review Queue"),
         ("topics", "/topics", "Topics"),
-        ("minilm_eval", "/minilm-eval", "MiniLM Eval"),
         ("retrieval_experiment", "/retrieval-experiment", "Retrieval Experiment"),
         ("health", "/health", "Health"),
     ]
