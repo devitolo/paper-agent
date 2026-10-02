@@ -3,6 +3,7 @@ from email.message import Message
 import io
 import json
 from pathlib import Path
+import ssl
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -11,7 +12,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 
 from paper_agents import db
-from paper_agents.arxiv_progress import ArxivProgress
+from paper_agents.arxiv_progress import ArxivProgress, transient_url_error
 from paper_agents.scout import ArxivSource
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
 
@@ -114,6 +115,64 @@ class ArxivProgressTests(unittest.TestCase):
             "SELECT value_json FROM arxiv_search_state WHERE key='@source'"
         ).fetchone()[0])
         self.assertGreater(state["not_before"], 0)
+
+    def test_transient_503_retries_once_without_advancing_offset(self):
+        error = urllib.error.HTTPError("url", 503, "unavailable", Message(), io.BytesIO())
+        progress = self.progress()
+        with patch.object(
+            self.source, "fetch_page", side_effect=[error, page([entry(1)], next_offset=10)]
+        ) as fetch, patch("paper_agents.arxiv_progress.time.sleep"):
+            candidates = progress.fetch(
+                ["incident"], freshness_months=24, max_candidates=10, errors=[]
+            )
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual([call.kwargs["offset"] for call in fetch.call_args_list], [0, 0])
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(progress.diagnostics["attempts"], 2)
+        self.assertEqual(progress.diagnostics["transient_retries"], [{
+            "topic": "incident", "http_status": 503, "delay_seconds": 0,
+        }])
+
+    def test_repeated_transient_503_stops_after_one_retry(self):
+        errors = []
+        failures = [
+            urllib.error.HTTPError("url", 503, "unavailable", Message(), io.BytesIO()),
+            urllib.error.HTTPError("url", 503, "unavailable", Message(), io.BytesIO()),
+        ]
+        progress = self.progress()
+        with patch.object(self.source, "fetch_page", side_effect=failures) as fetch, patch(
+            "paper_agents.arxiv_progress.time.sleep"
+        ):
+            candidates = progress.fetch(
+                ["incident"], freshness_months=24, max_candidates=10, errors=errors
+            )
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(candidates, [])
+        self.assertEqual(progress.diagnostics["attempts"], 2)
+        self.assertEqual(progress.diagnostics["stop_reason"], "source_error")
+        self.assertEqual(errors, ["arXiv HTTP 503: incident"])
+        self.assertEqual(progress.states[next(k for k in progress.states if k != "@source")]["deep"]["offset"], 0)
+
+    def test_transient_timeout_retries_once(self):
+        error = urllib.error.URLError(TimeoutError("timed out"))
+        progress = self.progress()
+        with patch.object(
+            self.source, "fetch_page", side_effect=[error, page([entry(1)], next_offset=10)]
+        ) as fetch, patch("paper_agents.arxiv_progress.time.sleep"):
+            candidates = progress.fetch(
+                ["incident"], freshness_months=24, max_candidates=10, errors=[]
+            )
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(progress.diagnostics["transient_retries"], [{
+            "topic": "incident", "transport_error": "TimeoutError", "delay_seconds": 0,
+        }])
+
+    def test_certificate_error_is_not_transient(self):
+        error = urllib.error.URLError(
+            ssl.SSLCertVerificationError(1, "certificate verify failed")
+        )
+        self.assertFalse(transient_url_error(error))
 
     def test_fetch_page_sends_offset_and_detects_provider_end(self):
         feed = b'''<feed xmlns="http://www.w3.org/2005/Atom"></feed>'''
