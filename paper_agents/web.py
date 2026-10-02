@@ -870,23 +870,20 @@ def render_retrieval_experiment_page(db_path: Path, *, run_id: int | None = None
 .experiment-choice.selected{{color:var(--accent-ink);border-color:var(--accent);background:var(--accent)}}.experiment-tags label{{color:var(--muted);font-size:12px}}
 .experiment-state{{min-height:18px;color:var(--muted);font-size:12px}}.experiment-metrics summary{{cursor:pointer;font-weight:700}}
 </style></head><body><main>{render_app_header("Retrieval Experiment", subtitle, controls, "retrieval_experiment")}
-<section class="experiment-help">For each paper, answer only whether you would sample it and how useful it looks. Papers are shown once even when both experiment paths selected them.</section>
+<section class="experiment-help">For each paper, make one choice: read it, maybe read it, or skip it. Papers are shown once even when both experiment paths selected them.</section>
 {metrics}<div class="experiment-cards">{cards}</div>
 <script>
 document.querySelectorAll('.experiment-card').forEach((card) => {{
   const save = async () => {{
     const would = card.querySelector('[data-would].selected');
-    const useful = card.querySelector('[data-usefulness].selected');
-    if (!would || !useful) return;
-    const body = new URLSearchParams({{output_id: card.dataset.outputId, would_sample: would.dataset.would, usefulness: useful.dataset.usefulness}});
-    card.querySelectorAll('[data-reason]:checked').forEach((item) => body.append('reason_tag', item.dataset.reason));
+    if (!would) return;
+    const usefulness = {{yes:'5', maybe:'3', no:'1'}}[would.dataset.would];
+    const body = new URLSearchParams({{output_id: card.dataset.outputId, would_sample: would.dataset.would, usefulness}});
     const state = card.querySelector('.experiment-state'); state.textContent = 'Saving…';
     try {{ const response = await fetch('/retrieval-experiment/decision', {{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body}}); if(!response.ok) throw new Error(); state.textContent='Saved'; card.parentElement.appendChild(card); }}
     catch(error) {{ state.textContent='Could not save. Try again.'; }}
   }};
   card.querySelectorAll('[data-would]').forEach((button) => button.onclick=()=>{{card.querySelectorAll('[data-would]').forEach(x=>x.classList.remove('selected'));button.classList.add('selected');save();}});
-  card.querySelectorAll('[data-usefulness]').forEach((button) => button.onclick=()=>{{card.querySelectorAll('[data-usefulness]').forEach(x=>x.classList.remove('selected'));button.classList.add('selected');save();}});
-  card.querySelectorAll('[data-reason]').forEach((input) => input.onchange=save);
 }});
 </script></main></body></html>"""
 
@@ -894,21 +891,7 @@ document.querySelectorAll('.experiment-card').forEach((card) => {{
 def render_retrieval_experiment_card(item: dict[str, Any]) -> str:
     would_buttons = "".join(
         f'<button type="button" class="experiment-choice{" selected" if item["would_sample"] == value else ""}" data-would="{value}">{label}</button>'
-        for value, label in (("yes", "Yes"), ("maybe", "Maybe"), ("no", "No"))
-    )
-    usefulness_buttons = "".join(
-        f'<button type="button" class="experiment-choice{" selected" if item["usefulness"] == value else ""}" data-usefulness="{value}">{value}</button>'
-        for value in range(1, 6)
-    )
-    tag_labels = (
-        ("strong_fit", "Strong fit"), ("practical_evidence", "Practical evidence"),
-        ("too_theoretical", "Too theoretical"), ("weak_evidence", "Weak evidence"),
-        ("duplicate_or_familiar", "Duplicate/familiar"), ("unclear_summary", "Unclear summary"),
-        ("off_topic", "Off topic"),
-    )
-    tags = "".join(
-        f'<label><input type="checkbox" data-reason="{value}"{" checked" if value in item["reason_tags"] else ""}> {label}</label>'
-        for value, label in tag_labels
+        for value, label in (("yes", "Read"), ("maybe", "Maybe"), ("no", "Skip"))
     )
     summary = "".join(
         f'<section><h3>{label}</h3><p>{escape(value)}</p></section>'
@@ -920,9 +903,7 @@ def render_retrieval_experiment_card(item: dict[str, Any]) -> str:
       {f'<div class="summary-grid">{summary}</div>' if summary else ''}
       <details><summary>Abstract</summary><p>{escape(item['abstract'] or 'No abstract available.')}</p></details>
       <div class="experiment-actions">
-        <div class="experiment-row"><strong>Would sample/read?</strong>{would_buttons}</div>
-        <div class="experiment-row"><strong>Usefulness</strong>{usefulness_buttons}</div>
-        <div class="experiment-row experiment-tags"><strong>Optional reasons</strong>{tags}</div>
+        <div class="experiment-row"><strong>Would you read this?</strong>{would_buttons}</div>
         <span class="experiment-state">{'Saved' if item['would_sample'] else ''}</span>
       </div>
     </article>"""
