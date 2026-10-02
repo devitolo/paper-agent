@@ -3,6 +3,7 @@ from email.message import Message
 import io
 import json
 from pathlib import Path
+import ssl
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,7 +13,9 @@ import urllib.parse
 from paper_agents import db
 from paper_agents.scout import SemanticScholarSource
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
-from paper_agents.semantic_scholar_progress import SemanticScholarProgress, cooldown_seconds
+from paper_agents.semantic_scholar_progress import (
+    SemanticScholarProgress, cooldown_seconds, transient_url_error,
+)
 
 
 def paper(number, **changes):
@@ -196,6 +199,65 @@ class SemanticScholarProgressTests(unittest.TestCase):
         provider_error = progress.diagnostics["provider_error"]
         self.assertTrue(provider_error["body_truncated"])
         self.assertLessEqual(len(provider_error["body"]), 1000)
+
+    def test_transient_503_retries_once_without_advancing_offset(self):
+        error = urllib.error.HTTPError("url", 503, "unavailable", Message(), io.BytesIO())
+        progress = self.progress()
+        with patch.object(
+            self.source, "fetch_page", side_effect=[error, page([paper(1)], next_offset=10)]
+        ) as fetch, patch("paper_agents.semantic_scholar_progress.time.sleep"):
+            candidates = progress.fetch(
+                ["incident"], freshness_months=24, max_candidates=10, errors=[]
+            )
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual([call.kwargs["offset"] for call in fetch.call_args_list], [0, 0])
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(progress.diagnostics["attempts"], 2)
+        self.assertEqual(progress.diagnostics["transient_retries"], [{
+            "topic": "incident", "http_status": 503, "delay_seconds": 0,
+        }])
+
+    def test_transient_timeout_retries_once(self):
+        error = urllib.error.URLError(TimeoutError("timed out"))
+        progress = self.progress()
+        with patch.object(
+            self.source, "fetch_page", side_effect=[error, page([paper(1)], next_offset=10)]
+        ) as fetch, patch("paper_agents.semantic_scholar_progress.time.sleep"):
+            candidates = progress.fetch(
+                ["incident"], freshness_months=24, max_candidates=10, errors=[]
+            )
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(progress.diagnostics["transient_retries"], [{
+            "topic": "incident", "transport_error": "TimeoutError", "delay_seconds": 0,
+        }])
+
+    def test_repeated_timeout_stops_with_safe_transport_diagnostic(self):
+        errors = []
+        failures = [
+            urllib.error.URLError(TimeoutError("first")),
+            urllib.error.URLError(TimeoutError("second")),
+        ]
+        progress = self.progress()
+        with patch.object(self.source, "fetch_page", side_effect=failures) as fetch, patch(
+            "paper_agents.semantic_scholar_progress.time.sleep"
+        ):
+            candidates = progress.fetch(
+                ["incident"], freshness_months=24, max_candidates=10, errors=errors
+            )
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(candidates, [])
+        self.assertEqual(progress.diagnostics["attempts"], 2)
+        self.assertEqual(progress.diagnostics["transport_error"], {
+            "error_type": "URLError", "reason_type": "TimeoutError",
+        })
+        self.assertEqual(errors, ["Semantic Scholar page failed (URLError): incident"])
+
+    def test_certificate_error_is_not_retried(self):
+        error = urllib.error.URLError(
+            ssl.SSLCertVerificationError(1, "certificate verify failed")
+        )
+        self.assertFalse(transient_url_error(error))
 
     def test_changed_query_and_freshness_start_at_zero(self):
         progress = self.progress()
