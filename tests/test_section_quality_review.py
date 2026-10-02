@@ -68,8 +68,13 @@ class SectionQualityReviewTests(unittest.TestCase):
         page = render_page()
         self.assertIn("Current production", page)
         self.assertIn("Proposed replacement", page)
-        self.assertIn("Current is better", page)
-        self.assertIn("Too similar to judge", page)
+        for label in ("Current better", "Replacement better", "Neither useful", "Too similar"):
+            self.assertIn(f"'{label}'", page)
+        for old_label in (
+            "Current is better", "Replacement is better", "Neither is useful",
+            "Too similar to judge",
+        ):
+            self.assertNotIn(old_label, page)
         self.assertNotIn("Candidate A", page)
         self.assertNotIn("Prior signal", page)
 
