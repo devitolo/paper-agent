@@ -117,6 +117,57 @@ class MiniLMShadowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 1 and 5"):
             save_shadow_decision(self.db_path, output_id=output_id, would_sample="yes", usefulness=6)
 
+    def test_unified_queue_deduplicates_runs_and_applies_one_decision_globally(self):
+        self.run_experiment()
+        with db.connect_db(self.db_path) as connection:
+            cycle = connection.execute("SELECT id FROM workflow_cycles LIMIT 1").fetchone()[0]
+            source_run_id = connection.execute(
+                """INSERT INTO scout_runs (
+                       workflow_cycle_id,attempt_number,completed_at,source,
+                       target_candidates,max_candidates,freshness_months
+                   ) VALUES (?,2,datetime('now'),'core',5,5,24)""",
+                (cycle,),
+            ).lastrowid
+            shadow_run_id = connection.execute(
+                """INSERT INTO minilm_shadow_runs (
+                       source_run_id,source,status,pool_snapshot_json,pool_hash,
+                       input_limit,output_limit,min_quality_score,minilm_model_id,
+                       minilm_model_hash,minilm_query_version,config_hash,completed_at
+                   ) VALUES (?,'core','complete','{}','pool',3,2,0,'model','hash','query','config',datetime('now'))""",
+                (source_run_id,),
+            ).lastrowid
+            connection.execute(
+                """INSERT INTO minilm_shadow_outputs (
+                       shadow_run_id,paper_id,canonical_key_snapshot,source_snapshot,
+                       title_snapshot,abstract_snapshot,summary_source,summary_hash,
+                       baseline_output_position
+                   ) SELECT ?,paper_id,canonical_key_snapshot,'core',title_snapshot,
+                            abstract_snapshot,summary_source,summary_hash,1
+                     FROM minilm_shadow_outputs WHERE paper_id=2 LIMIT 1""",
+                (shadow_run_id,),
+            )
+            output_id = connection.execute(
+                "SELECT id FROM minilm_shadow_outputs WHERE paper_id=2 ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+
+        result = save_shadow_decision(
+            self.db_path, output_id=output_id, would_sample="yes", usefulness=5,
+        )
+        self.assertEqual(result["updated_memberships"], 2)
+        with db.connect_db(self.db_path) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM minilm_shadow_decisions WHERE paper_id=2"
+            ).fetchone()[0], 2)
+        page = load_shadow_review(self.db_path)
+        self.assertEqual(len(page["items"]), 3)
+        self.assertEqual(page["paper_count"], 3)
+        self.assertEqual(page["reviewed_count"], 1)
+        paper_two = next(item for item in page["items"] if item["paper_id"] == 2)
+        self.assertEqual(paper_two["would_sample"], "yes")
+        rendered = web.render_retrieval_experiment_page(self.db_path)
+        self.assertNotIn('select name="run"', rendered)
+        self.assertIn("1/3 papers reviewed", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

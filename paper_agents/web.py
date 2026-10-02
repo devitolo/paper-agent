@@ -814,30 +814,16 @@ def format_user_score(score: float) -> str:
 
 def render_retrieval_experiment_page(db_path: Path, *, run_id: int | None = None) -> str:
     from paper_agents.minilm_shadow import load_shadow_review
-    data = load_shadow_review(db_path, run_id=run_id)
-    selected = data["selected_run"]
-    options = "".join(
-        f'<option value="{run["id"]}"{" selected" if selected and run["id"] == selected["id"] else ""}>'
-        f'#{run["id"]} · {escape(source_display_name(run["source"]))} · '
-        f'{run["decided_count"]}/{run["paper_count"]} reviewed</option>'
-        for run in data["runs"]
-    )
-    controls = (
-        f'<form method="get" action="/retrieval-experiment" class="queue-controls">'
-        f'<label><span class="sr-only">Experiment run</span><select name="run" onchange="this.form.submit()">{options}</select></label>'
-        f'</form>' if options else ""
-    )
-    if selected is None:
+    data = load_shadow_review(db_path)
+    controls = ""
+    if not data["runs"]:
         subtitle = "Waiting for a completed shadow run"
         cards = '<section class="empty">No retrieval experiment outputs are available yet.</section>'
     else:
-        subtitle = (
-            f'{source_display_name(selected["source"])} source run #{selected["source_run_id"]} | '
-            f'{selected["decided_count"]}/{selected["paper_count"]} reviewed'
-        )
+        subtitle = f'{data["reviewed_count"]}/{data["paper_count"]} papers reviewed'
         cards = "".join(render_retrieval_experiment_card(item) for item in data["items"])
         if not cards:
-            cards = '<section class="empty">This run produced no final experiment papers.</section>'
+            cards = '<section class="empty">No final experiment papers are available.</section>'
 
     metric_rows = "".join(
         f'<tr><td>{escape(source_display_name(metric["source"]))}</td>'

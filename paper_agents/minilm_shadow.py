@@ -347,25 +347,41 @@ def save_shadow_decision(
     db.init_db(db_path)
     with db.connect_db(db_path) as connection:
         row = connection.execute(
-            "SELECT shadow_run_id, paper_id FROM minilm_shadow_outputs WHERE id=?", (output_id,),
+            "SELECT paper_id, canonical_key_snapshot FROM minilm_shadow_outputs WHERE id=?",
+            (output_id,),
         ).fetchone()
         if row is None:
             raise ValueError("Experiment output not found")
-        connection.execute(
-            """INSERT INTO minilm_shadow_decisions (
-                   shadow_run_id, paper_id, would_sample, usefulness, reason_tags_json
-               ) VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(shadow_run_id, paper_id) DO UPDATE SET
-                   would_sample=excluded.would_sample, usefulness=excluded.usefulness,
-                   reason_tags_json=excluded.reason_tags_json,
-                   decided_at=datetime('now'), updated_at=datetime('now')""",
-            (int(row[0]), int(row[1]), would_sample, usefulness, json.dumps(tags)),
-        )
-    return {"output_id": output_id, "paper_id": int(row[1]), "would_sample": would_sample, "usefulness": usefulness}
+        paper_id, canonical_key = int(row[0]), str(row[1] or "").strip()
+        if canonical_key:
+            memberships = connection.execute(
+                """SELECT DISTINCT shadow_run_id, paper_id FROM minilm_shadow_outputs
+                   WHERE canonical_key_snapshot=?""",
+                (canonical_key,),
+            ).fetchall()
+        else:
+            memberships = connection.execute(
+                """SELECT DISTINCT shadow_run_id, paper_id FROM minilm_shadow_outputs
+                   WHERE paper_id=?""",
+                (paper_id,),
+            ).fetchall()
+        for shadow_run_id, member_paper_id in memberships:
+            connection.execute(
+                """INSERT INTO minilm_shadow_decisions (
+                       shadow_run_id, paper_id, would_sample, usefulness, reason_tags_json
+                   ) VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(shadow_run_id,paper_id) DO UPDATE SET
+                       would_sample=excluded.would_sample, usefulness=excluded.usefulness,
+                       reason_tags_json=excluded.reason_tags_json,
+                       decided_at=datetime('now'), updated_at=datetime('now')""",
+                (int(shadow_run_id), int(member_paper_id), would_sample, usefulness, json.dumps(tags)),
+            )
+    return {"output_id": output_id, "paper_id": paper_id, "would_sample": would_sample,
+            "usefulness": usefulness, "updated_memberships": len(memberships)}
 
 
 def load_shadow_review(db_path: Path, *, run_id: int | None = None) -> dict[str, Any]:
-    """Load blind cards plus accumulated paired metrics."""
+    """Load one globally deduplicated blind queue plus accumulated paired metrics."""
     db.init_db(db_path)
     with db.connect_db(db_path) as connection:
         run_rows = connection.execute(
@@ -381,47 +397,67 @@ def load_shadow_review(db_path: Path, *, run_id: int | None = None) -> dict[str,
             "started_at": row[4], "completed_at": row[5], "paper_count": int(row[6]),
             "decided_count": int(row[7]),
         } for row in run_rows]
-        valid_ids = {run["id"] for run in runs}
-        selected_id = run_id if run_id in valid_ids else None
-        if selected_id is None:
-            selected_id = next((run["id"] for run in reversed(runs)
-                                if run["status"] == "complete" and run["decided_count"] < run["paper_count"]),
-                               runs[0]["id"] if runs else None)
-        selected = next((run for run in runs if run["id"] == selected_id), None)
-        items = []
-        if selected_id is not None:
-            rows = connection.execute(
-                """SELECT o.id, o.paper_id, o.title_snapshot, o.abstract_snapshot,
-                          o.problem_snapshot, o.why_it_matters_snapshot, o.approach_snapshot,
-                          d.would_sample, d.usefulness, d.reason_tags_json
-                   FROM minilm_shadow_outputs o
-                   LEFT JOIN minilm_shadow_decisions d
-                     ON d.shadow_run_id=o.shadow_run_id AND d.paper_id=o.paper_id
-                   WHERE o.shadow_run_id=?""",
-                (selected_id,),
-            ).fetchall()
-            items = [{
-                "id": int(row[0]), "paper_id": int(row[1]), "title": row[2], "abstract": row[3],
-                "problem": row[4], "why_it_matters": row[5], "approach": row[6],
-                "would_sample": row[7], "usefulness": row[8],
-                "reason_tags": db.decode_json(row[9], []),
-            } for row in rows]
-            items.sort(key=lambda item: (
-                item["would_sample"] is not None,
-                hashlib.sha256(f"minilm-shadow:{selected_id}:{item['paper_id']}".encode()).digest(),
-            ))
+        rows = connection.execute(
+            """SELECT o.id, o.paper_id, o.canonical_key_snapshot, o.title_snapshot,
+                      o.abstract_snapshot, o.problem_snapshot, o.why_it_matters_snapshot,
+                      o.approach_snapshot, d.id, d.would_sample, d.usefulness,
+                      d.reason_tags_json, d.updated_at
+               FROM minilm_shadow_outputs o
+               JOIN minilm_shadow_runs r ON r.id=o.shadow_run_id AND r.status='complete'
+               LEFT JOIN minilm_shadow_decisions d
+                 ON d.shadow_run_id=o.shadow_run_id AND d.paper_id=o.paper_id
+               ORDER BY o.id DESC"""
+        ).fetchall()
+        grouped_items: dict[str, dict[str, Any]] = {}
+        decision_order: dict[str, tuple[str, int]] = {}
+        for row in rows:
+            identity = str(row[2] or f"paper:{int(row[1])}")
+            if identity not in grouped_items:
+                grouped_items[identity] = {
+                    "id": int(row[0]), "paper_id": int(row[1]), "title": row[3],
+                    "abstract": row[4], "problem": row[5], "why_it_matters": row[6],
+                    "approach": row[7], "would_sample": None, "usefulness": None,
+                    "reason_tags": [], "identity": identity,
+                }
+            if row[8] is not None:
+                order = (str(row[12] or ""), int(row[8]))
+                if order > decision_order.get(identity, ("", -1)):
+                    decision_order[identity] = order
+                    grouped_items[identity].update({
+                        "would_sample": row[9], "usefulness": row[10],
+                        "reason_tags": db.decode_json(row[11], []),
+                    })
+        items = list(grouped_items.values())
+        items.sort(key=lambda item: (
+            item["would_sample"] is not None,
+            hashlib.sha256(f"minilm-shadow:{item['identity']}".encode()).digest(),
+        ))
 
         metric_rows = connection.execute(
-            """SELECT r.source, p.path,
+            """WITH ranked_decisions AS (
+                   SELECT COALESCE(NULLIF(o.canonical_key_snapshot,''), 'paper:' || d.paper_id) identity,
+                          d.would_sample, d.usefulness,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY COALESCE(NULLIF(o.canonical_key_snapshot,''), 'paper:' || d.paper_id)
+                              ORDER BY d.updated_at DESC, d.id DESC
+                          ) decision_rank
+                   FROM minilm_shadow_decisions d
+                   JOIN minilm_shadow_outputs o
+                     ON o.shadow_run_id=d.shadow_run_id AND o.paper_id=d.paper_id
+               )
+               SELECT r.source, p.path,
                       COUNT(DISTINCT CASE WHEN p.curator_accepted=1 THEN p.paper_id END) AS output_count,
-                      COUNT(DISTINCT CASE WHEN p.curator_accepted=1 AND d.paper_id IS NOT NULL THEN p.paper_id END) AS reviewed_count,
+                      COUNT(DISTINCT CASE WHEN p.curator_accepted=1 AND d.identity IS NOT NULL THEN p.paper_id END) AS reviewed_count,
                       COUNT(DISTINCT CASE WHEN p.curator_accepted=1 AND d.would_sample='yes' THEN p.paper_id END) AS yes_count,
                       COUNT(DISTINCT CASE WHEN p.curator_accepted=1 AND d.would_sample IN ('yes','maybe') THEN p.paper_id END) AS sample_count,
                       AVG(CASE WHEN p.curator_accepted=1 THEN d.usefulness END) AS mean_usefulness
                FROM minilm_shadow_runs r
                JOIN minilm_shadow_path_results p ON p.shadow_run_id=r.id
-               LEFT JOIN minilm_shadow_decisions d
-                 ON d.shadow_run_id=p.shadow_run_id AND d.paper_id=p.paper_id
+               JOIN minilm_shadow_outputs o
+                 ON o.shadow_run_id=p.shadow_run_id AND o.paper_id=p.paper_id
+               LEFT JOIN ranked_decisions d
+                 ON d.identity=COALESCE(NULLIF(o.canonical_key_snapshot,''), 'paper:' || o.paper_id)
+                AND d.decision_rank=1
                WHERE r.status='complete'
                GROUP BY r.source, p.path ORDER BY r.source, p.path"""
         ).fetchall()
@@ -459,8 +495,10 @@ def load_shadow_review(db_path: Path, *, run_id: int | None = None) -> dict[str,
                 "sample_gain": minilm_metric["sample_count"] - baseline_metric["sample_count"],
             })
     return {
-        "runs": runs, "selected_run": selected, "items": items, "metrics": metrics,
+        "runs": runs, "selected_run": None, "items": items, "metrics": metrics,
         "comparisons": comparisons,
+        "paper_count": len(items),
+        "reviewed_count": sum(item["would_sample"] is not None for item in items),
         "overlap_count": int(overlap),
         "runtime": {"run_count": int(runtime[0]), "failed_count": int(runtime[1] or 0),
                     "mean_seconds": float(runtime[2]) if runtime[2] is not None else None},
