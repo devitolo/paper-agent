@@ -544,8 +544,7 @@ def render_review_queue(
           <input type="hidden" name="view" value="{escape(view_value)}">
           <input type="hidden" name="page" value="1">
           <label class="visually-hidden" for="title-search-input">Paper title</label>
-          <input id="title-search-input" name="title" type="search" value="{escape(title_query)}" placeholder="Filter by title" maxlength="200">
-          <button type="submit" class="secondary-action">Filter</button>
+          <input id="title-search-input" name="title" type="search" value="{escape(title_query)}" placeholder="Filter by title, then press Enter" maxlength="200">
           <a class="title-search-clear" href="{escape(clear_search_href)}" aria-label="Clear title filter" title="Clear title filter">&times;</a>
         </form>
       </details>
@@ -2933,11 +2932,12 @@ p { margin: 0; }
 .topbar p, .card-head p { color: var(--muted); font-size: 12px; }
 .queue-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: end; }
 .title-search { position: relative; }
+.title-search[open] { display: flex; align-items: center; gap: 5px; }
 .title-search summary { display: inline-flex; align-items: center; justify-content: center; width: 30px; min-height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(17, 26, 38, 0.72); cursor: pointer; list-style: none; }
 .title-search summary::-webkit-details-marker { display: none; }
 .title-search[open] summary { color: var(--text); border-color: rgba(56, 189, 248, 0.55); background: rgba(56, 189, 248, 0.10); }
-.title-search-form { display: flex; gap: 5px; align-items: center; margin-top: 6px; }
-.title-search-form input[type="search"] { width: min(220px, 55vw); }
+.title-search-form { display: flex; gap: 5px; align-items: center; }
+.title-search-form input[type="search"] { width: min(190px, 48vw); }
 .title-search-clear { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(17, 26, 38, 0.72); font-size: 18px; line-height: 1; text-decoration: none; }
 .title-search-clear:hover { color: var(--text); border-color: var(--border-strong); }
 .queue-pagination { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin: 12px 0; color: var(--muted-strong); }
