@@ -105,6 +105,72 @@ class UIQueueRegressionTests(unittest.TestCase):
                 for value, label in selections:
                     self.assertIn(f'<option value="{value}" selected>{label}</option>', html)
 
+    def test_review_queue_title_filter_is_case_insensitive_and_preserves_queue_state(self):
+        matching = self.seed(1)
+        other = self.seed(2)
+        self.connection.execute(
+            "UPDATE papers SET title='Context-Aware Incident Analysis' WHERE id=?",
+            (matching,),
+        )
+        self.connection.execute(
+            "UPDATE papers SET title='Unrelated telemetry survey' WHERE id=?",
+            (other,),
+        )
+        self.connection.commit()
+
+        result = web.load_review_page(
+            self.path,
+            filter_value="needs_review",
+            source_value="arxiv",
+            sort_value="latest",
+            title_query="context-aware",
+        )
+        self.assertEqual(result["total"], 1)
+        self.assertEqual([card["id"] for card in result["cards"]], [matching])
+
+        html = web.render_review_queue(
+            self.path,
+            filter_value="needs_review",
+            source_value="arxiv",
+            sort_value="latest",
+            view_value="compact",
+            title_query="  context-aware  ",
+        )
+        self.assertIn('class="title-search" open', html)
+        self.assertIn('aria-label="Filter papers by title"', html)
+        self.assertIn('name="title" type="search" value="context-aware"', html)
+        self.assertIn('name="title" value="context-aware"', html)
+        self.assertIn('aria-label="Clear title filter"', html)
+        self.assertIn("Context-Aware Incident Analysis", html)
+        self.assertNotIn("Unrelated telemetry survey", html)
+        self.assertIn("filter=needs_review", html)
+        self.assertIn("source=arxiv", html)
+        self.assertIn("view=compact", html)
+
+    def test_review_queue_title_filter_treats_like_wildcards_as_literal_text(self):
+        literal = self.seed(1)
+        wildcard_match = self.seed(2)
+        self.connection.execute("UPDATE papers SET title='Reliability 100% guide' WHERE id=?", (literal,))
+        self.connection.execute("UPDATE papers SET title='Reliability 1000 guide' WHERE id=?", (wildcard_match,))
+        self.connection.commit()
+
+        result = web.load_review_page(
+            self.path,
+            filter_value="all",
+            source_value="all",
+            sort_value="latest",
+            title_query="100%",
+        )
+        self.assertEqual([card["id"] for card in result["cards"]], [literal])
+
+    def test_review_queue_title_filter_has_specific_empty_state(self):
+        self.seed(1)
+        self.connection.commit()
+
+        html = web.render_review_queue(self.path, title_query="missing title")
+        self.assertIn("No papers found for this title search.", html)
+        self.assertNotIn("No selected papers are waiting in the registry yet.", html)
+
     def test_retired_minilm_eval_redirects_to_retrieval_experiment_and_leaves_navigation(self):
         class RequestSocket:
             def __init__(self, request):

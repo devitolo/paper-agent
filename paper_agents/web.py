@@ -138,6 +138,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         sort_value=params.get("sort", ["latest"])[0],
                         view_value=params.get("view", ["full"])[-1],
                         page_value=params.get("page", ["1"])[0],
+                        title_query=params.get("title", [""])[0],
                     )
                 )
                 return
@@ -504,14 +505,16 @@ def render_review_queue(
     sort_value: str = "latest",
     view_value: str = "full",
     page_value: str | int = 1,
+    title_query: str = "",
 ) -> str:
     filter_value = normalize_filter_value(filter_value)
     source_choices = load_source_filter_choices(db_path)
     source_value = normalize_choice(source_value, source_choices, SOURCE_FILTER_ALL)
     sort_value = normalize_choice(sort_value, SORTS, "latest")
     view_value = normalize_choice(view_value, VIEWS, "full")
+    title_query = normalize_title_query(title_query)
     result = load_review_page(db_path, filter_value=filter_value, source_value=source_value,
-                              sort_value=sort_value, page=page_value)
+                              sort_value=sort_value, page=page_value, title_query=title_query)
     cards = result["cards"]
     banners = []
     if scout_error:
@@ -523,20 +526,42 @@ def render_review_queue(
     if profile_apply_failed:
         banners.append('<div class="banner warning">Profile auto-apply failed. Feedback was saved; run feedback apply manually when ready.</div>')
     saved_banner = "".join(banners)
-    request_path = build_queue_href(filter_value, source_value, sort_value, view_value, result["page"])
-    pagination = render_queue_pagination(result, filter_value, source_value, sort_value, view_value)
+    request_path = build_queue_href(filter_value, source_value, sort_value, view_value, result["page"], title_query)
+    pagination = render_queue_pagination(result, filter_value, source_value, sort_value, view_value, title_query)
     card_html = "\n".join(render_card(card, view_value=view_value, return_to=request_path) for card in cards)
     if not card_html:
-        card_html = '<section class="empty">No selected papers are waiting in the registry yet.</section>'
+        empty_message = "No papers found for this title search." if title_query else "No selected papers are waiting in the registry yet."
+        card_html = f'<section class="empty">{empty_message}</section>'
+    clear_search_href = build_queue_href(filter_value, source_value, sort_value, view_value, 1)
+    search_open = " open" if title_query else ""
+    search_control = f"""
+      <details class="title-search"{search_open}>
+        <summary aria-label="Filter papers by title" title="Filter papers by title"><span aria-hidden="true">&#128269;</span></summary>
+        <form method="get" action="/" class="title-search-form">
+          <input type="hidden" name="filter" value="{escape(filter_value)}">
+          <input type="hidden" name="source" value="{escape(source_value)}">
+          <input type="hidden" name="sort" value="{escape(sort_value)}">
+          <input type="hidden" name="view" value="{escape(view_value)}">
+          <input type="hidden" name="page" value="1">
+          <label class="visually-hidden" for="title-search-input">Paper title</label>
+          <input id="title-search-input" name="title" type="search" value="{escape(title_query)}" placeholder="Filter by title" maxlength="200">
+          <button type="submit" class="secondary-action">Filter</button>
+          <a class="title-search-clear" href="{escape(clear_search_href)}" aria-label="Clear title filter" title="Clear title filter">&times;</a>
+        </form>
+      </details>
+    """
+    title_hidden = f'<input type="hidden" name="title" value="{escape(title_query)}">' if title_query else ""
     controls = f"""
       <form method="get" action="/" class="queue-controls">
         <input type="hidden" name="view" value="{view_value}">
         <input type="hidden" name="page" value="{result['page']}">
+        {title_hidden}
         {render_select(FILTERS, "filter", filter_value, "Queue")}
         {render_select(source_choices, "source", source_value, "Source")}
         {render_select(SORTS, "sort", sort_value, "Sort")}
         {render_view_toggle(view_value)}
       </form>
+      {search_control}
     """
 
     return f"""<!doctype html>
@@ -2139,13 +2164,13 @@ REVIEW_PAGE_SIZE = 50
 
 
 def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, sort_value: str,
-                      page: int = 1) -> list[dict[str, Any]]:
+                      page: int = 1, title_query: str = "") -> list[dict[str, Any]]:
     return load_review_page(db_path, filter_value=filter_value, source_value=source_value,
-                            sort_value=sort_value, page=page)["cards"]
+                            sort_value=sort_value, page=page, title_query=title_query)["cards"]
 
 
 def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sort_value: str,
-                     page: str | int = 1) -> dict[str, Any]:
+                     page: str | int = 1, title_query: str = "") -> dict[str, Any]:
     init_db(db_path)
     where_clauses = []
     params: list[Any] = []
@@ -2171,6 +2196,10 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
     if source_value != SOURCE_FILTER_ALL:
         where_clauses.append("EXISTS (SELECT 1 FROM paper_sources source_filter WHERE source_filter.paper_id = papers.id AND source_filter.source = ?)")
         params.append(source_value)
+    title_query = normalize_title_query(title_query)
+    if title_query:
+        where_clauses.append("papers.title COLLATE NOCASE LIKE ? ESCAPE '\\'")
+        params.append(f"%{escape_like_pattern(title_query)}%")
     where_clause = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
     if sort_value == "score":
@@ -2428,19 +2457,23 @@ def render_primary_nav(current_page: str) -> str:
     )
 
 
-def build_queue_href(filter_value: str, source_value: str, sort_value: str, view_value: str, page: int = 1) -> str:
-    return "/?" + urllib.parse.urlencode({"filter": filter_value, "source": source_value, "sort": sort_value, "view": view_value, "page": page})
+def build_queue_href(filter_value: str, source_value: str, sort_value: str, view_value: str,
+                     page: int = 1, title_query: str = "") -> str:
+    params = {"filter": filter_value, "source": source_value, "sort": sort_value, "view": view_value, "page": page}
+    if title_query:
+        params["title"] = normalize_title_query(title_query)
+    return "/?" + urllib.parse.urlencode(params)
 
 
 def render_queue_pagination(result: dict[str, Any], filter_value: str, source_value: str,
-                            sort_value: str, view_value: str) -> str:
+                            sort_value: str, view_value: str, title_query: str = "") -> str:
     if result["pages"] <= 1:
         return ""
     links = []
     for target, label, symbol in [(result["page"] - 1, "Previous page", "&#8592;"),
                                   (result["page"] + 1, "Next page", "&#8594;")]:
         if 1 <= target <= result["pages"]:
-            href = build_queue_href(filter_value, source_value, sort_value, view_value, target)
+            href = build_queue_href(filter_value, source_value, sort_value, view_value, target, title_query)
             links.append(f'<a class="secondary-link" href="{escape(href)}" aria-label="{label}" title="{label}">{symbol}</a>')
         else:
             links.append(f'<span class="page-disabled" aria-disabled="true" aria-label="{label}">{symbol}</span>')
@@ -2459,6 +2492,14 @@ def add_query_param(path: str, key: str, value: str) -> str:
 def normalize_choice(value: str, choices: list[tuple[str, str]], default: str) -> str:
     allowed = {choice for choice, _ in choices}
     return value if value in allowed else default
+
+
+def normalize_title_query(value: Any) -> str:
+    return " ".join(str(value or "").split())[:200]
+
+
+def escape_like_pattern(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def selected_label(choices: list[tuple[str, str]], value: str) -> str:
@@ -2876,7 +2917,7 @@ body { margin: 0; font: 13px/1.42 Inter, ui-sans-serif, -apple-system, BlinkMacS
 main { max-width: 1180px; margin: 0 auto; padding: 14px; }
 .topbar { display: grid; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 7px; margin-bottom: 10px; }
 .header-main { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 18px; align-items: center; }
-.header-controls { display: flex; justify-content: flex-end; }
+.header-controls { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 760; letter-spacing: 0; }
 .brand-title, .brand-home { display: flex; gap: 8px; align-items: center; }
 .brand-home { color: inherit; text-decoration: none; }
@@ -2891,6 +2932,14 @@ h3 { margin: 0 0 3px; font-size: 11px; font-weight: 760; color: var(--muted); le
 p { margin: 0; }
 .topbar p, .card-head p { color: var(--muted); font-size: 12px; }
 .queue-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: end; }
+.title-search { position: relative; }
+.title-search summary { display: inline-flex; align-items: center; justify-content: center; width: 30px; min-height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(17, 26, 38, 0.72); cursor: pointer; list-style: none; }
+.title-search summary::-webkit-details-marker { display: none; }
+.title-search[open] summary { color: var(--text); border-color: rgba(56, 189, 248, 0.55); background: rgba(56, 189, 248, 0.10); }
+.title-search-form { display: flex; gap: 5px; align-items: center; margin-top: 6px; }
+.title-search-form input[type="search"] { width: min(220px, 55vw); }
+.title-search-clear { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(17, 26, 38, 0.72); font-size: 18px; line-height: 1; text-decoration: none; }
+.title-search-clear:hover { color: var(--text); border-color: var(--border-strong); }
 .queue-pagination { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin: 12px 0; color: var(--muted-strong); }
 .queue-pagination a, .page-disabled { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; }
 .page-disabled { opacity: 0.4; }
