@@ -2,6 +2,17 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-10-04
+
+### Review Queue title filter
+
+Status: Implemented in production commits `5564d21` and `d9bd3ab`; CI/CD verification passed in GitHub Actions run `37185870408`.
+
+- Add a magnifying-glass control in the Review Queue header that reveals a compact inline title input.
+- Entering part of a paper title and pressing Enter filters the current Review Queue case-insensitively.
+- Preserve queue, source, sort, view, and paging controls while the title filter is active; clearing with `x` returns to the normal queue.
+- Keep this as a simple title substring filter. It does not add semantic search, ranking changes, schema changes, or a separate search page.
+
 ## 2026-09-24
 
 ### Production Mini container migration
