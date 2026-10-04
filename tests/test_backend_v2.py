@@ -2751,11 +2751,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(row[3], "qwen2.5:1.5b-instruct")
         self.assertEqual(json.loads(row[4]), {"extractor_version": "qwen-triage-v1"})
         html = web.render_review_queue(self.db_path)
-        self.assertIn('data-field-name="approach" data-signal="down" aria-pressed="true"', html)
-        self.assertIn('data-field-name="research_problem" data-signal="up" aria-pressed="false"', html)
-        self.assertLess(html.index(">👍</button>"), html.index(">👎</button>"))
-        self.assertIn(">👍</button>", html)
-        self.assertIn(">👎</button>", html)
+        self.assertNotIn("summary-feedback-button", html)
+        self.assertNotIn(">👍</button>", html)
+        self.assertNotIn(">👎</button>", html)
 
         result = web.toggle_summary_field_feedback(
             self.db_path,

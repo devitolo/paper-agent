@@ -575,51 +575,6 @@ def render_review_queue(
           setTimeout(() => {{ button.textContent = originalText; }}, 1400);
         }});
       }});
-      document.querySelectorAll(".summary-feedback-button").forEach((button) => {{
-        button.addEventListener("click", async () => {{
-          if (button.disabled) return;
-          button.disabled = true;
-          const data = new URLSearchParams({{
-            paper_id: button.dataset.paperId,
-            artifact_id: button.dataset.artifactId,
-            field_name: button.dataset.fieldName,
-            signal: button.dataset.signal,
-          }});
-          try {{
-            const response = await fetch("/summary-field-feedback", {{
-              method: "POST",
-              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
-              body: data,
-            }});
-            if (!response.ok) throw new Error("Unable to save");
-            const result = await response.json();
-            const group = button.closest(".summary-feedback-controls");
-            if (group) {{
-              group.querySelectorAll(".summary-feedback-button").forEach((peer) => {{
-                const selected = result.active && peer.dataset.signal === result.signal;
-                peer.classList.toggle("selected", selected);
-                peer.setAttribute("aria-pressed", selected ? "true" : "false");
-                const positive = peer.dataset.signal === "up";
-                peer.title = selected
-                  ? `${{positive ? "Marked enough information" : "Marked insufficient"}}; click to undo`
-                  : `${{positive ? "Mark this field as enough information" : "Mark this field as insufficient"}}`;
-                peer.setAttribute("aria-label", peer.title);
-              }});
-            }}
-            const notice = button.closest(".paper-form").querySelector(".submit-state");
-            if (notice) {{
-              const label = result.signal === "up" ? "enough information" : "insufficient";
-              notice.textContent = result.active ? `${{result.field_label}} marked ${{label}}.` : `${{result.field_label}} signal removed.`;
-              setTimeout(() => {{ notice.textContent = ""; }}, 1800);
-            }}
-          }} catch (error) {{
-            const notice = button.closest(".paper-form").querySelector(".submit-state");
-            if (notice) notice.textContent = "Could not save the quality signal. Try again.";
-          }} finally {{
-            button.disabled = false;
-          }}
-        }});
-      }});
       document.querySelectorAll(".paper-form").forEach((form) => {{
         form.addEventListener("submit", (event) => {{
           const submitter = event.submitter;
@@ -2091,52 +2046,13 @@ def render_summary(
     problem = escape(summary_display_text(summary.get("research_problem")))
     if compact:
         return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
-    feedback_fields = feedback_fields or {}
     sections = []
     for field_name, heading in SUMMARY_FEEDBACK_FIELDS.items():
         text = escape(summary_display_text(summary.get(field_name)))
-        control = render_summary_feedback_button(
-            paper_id=paper_id,
-            artifact=artifact,
-            field_name=field_name,
-            active_signal=feedback_fields.get(field_name),
-        )
-        if control:
-            sections.append(
-                f'<section><div class="summary-heading"><h3>{heading}</h3>{control}</div><p>{text}</p></section>'
-            )
-        else:
-            sections.append(f'<section><h3>{heading}</h3><p>{text}</p></section>')
+        sections.append(f'<section><h3>{heading}</h3><p>{text}</p></section>')
     return f"""<div class="summary-grid">
     {''.join(sections)}
   </div>"""
-
-
-def render_summary_feedback_button(
-    *,
-    paper_id: int | None,
-    artifact: dict[str, Any] | None,
-    field_name: str,
-    active_signal: str | None,
-) -> str:
-    if paper_id is None or not artifact or artifact.get("id") is None:
-        return ""
-    buttons = []
-    for signal, icon, inactive_title, active_title in [
-        ("up", "👍", "Mark this field as enough information", "Marked enough information; click to undo"),
-        ("down", "👎", "Mark this field as insufficient", "Marked insufficient; click to undo"),
-    ]:
-        active = active_signal == signal
-        selected = " selected" if active else ""
-        title = active_title if active else inactive_title
-        buttons.append(
-            f'<button type="button" class="summary-feedback-button {signal}{selected}" '
-            f'data-paper-id="{paper_id}" data-artifact-id="{artifact["id"]}" '
-            f'data-field-name="{field_name}" data-signal="{signal}" '
-            f'aria-pressed="{"true" if active else "false"}" '
-            f'aria-label="{title}" title="{title}">{icon}</button>'
-        )
-    return f'<span class="summary-feedback-controls">{"".join(buttons)}</span>'
 
 
 def summary_display_text(value: Any, *, max_chars: int = 520) -> str:
@@ -3066,13 +2982,6 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .summary-grid section { min-width: 0; }
 .summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
 .summary-heading h3 { margin-bottom: 0; }
-.summary-feedback-controls { display: inline-flex; align-items: center; gap: 1px; }
-.summary-feedback-button { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 22px; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 2px 4px; background: transparent; opacity: 0.12; filter: grayscale(1); line-height: 1; transition: opacity 120ms ease, filter 120ms ease, border-color 120ms ease, background 120ms ease; }
-.summary-grid section:hover .summary-feedback-button { opacity: 0.28; }
-.summary-feedback-button:hover, .summary-feedback-button:focus-visible { opacity: 0.72; border-color: var(--border-strong); background: rgba(148, 163, 184, 0.05); }
-.summary-feedback-button.down.selected { opacity: 1; filter: none; border-color: rgba(248, 113, 113, 0.52); background: rgba(248, 113, 113, 0.12); }
-.summary-feedback-button.up.selected { opacity: 1; filter: none; border-color: rgba(74, 222, 128, 0.52); background: rgba(74, 222, 128, 0.12); }
-.summary-feedback-button:disabled { cursor: wait; opacity: 0.45; }
 .summary-grid p, .source-summary p, .compact-summary { color: var(--muted-strong); font-size: 12px; }
 .source-summary { margin: 8px 0; }
 .source-summary p {
