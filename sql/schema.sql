@@ -463,3 +463,20 @@ CREATE TABLE IF NOT EXISTS minilm_shadow_decisions (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (shadow_run_id, paper_id)
 );
+
+-- Personal review collections; isolated from feedback, ranking, and profile learning.
+CREATE TABLE IF NOT EXISTS saved_papers (
+    paper_id INTEGER PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_papers_created_at
+ON saved_papers (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS excluded_papers (
+    paper_id INTEGER PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_excluded_papers_created_at
+ON excluded_papers (created_at DESC);

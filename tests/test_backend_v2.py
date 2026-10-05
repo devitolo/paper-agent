@@ -2231,6 +2231,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<option value="all" selected>All papers</option>', html)
         self.assertIn('<option value="has_feedback">Scored</option>', html)
         self.assertIn('<option value="needs_review">Needs review</option>', html)
+        self.assertIn('<option value="saved">Saved</option>', html)
+        self.assertIn('<option value="excluded">Excluded</option>', html)
         self.assertNotIn('<option value="not_interested"', html)
         self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
         self.assertIn('<div class="paper-meta">', html)

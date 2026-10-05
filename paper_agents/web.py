@@ -54,6 +54,8 @@ FILTERS = [
     ("all", "All papers"),
     ("has_feedback", "Scored"),
     ("needs_review", "Needs review"),
+    ("saved", "Saved"),
+    ("excluded", "Excluded"),
 ]
 SOURCE_FILTER_ALL = "all"
 
@@ -282,6 +284,53 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         field_name=form.get("field_name", [""])[0],
                         signal=form.get("signal", ["down"])[0],
                     )
+                except (ValueError, sqlite3.IntegrityError) as error:
+                    payload = json.dumps({"error": str(error)}).encode("utf-8")
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                else:
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            if parsed.path == "/saved-paper":
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Save papers from Project Paper")
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    result = toggle_saved_paper(
+                        db_path,
+                        paper_id=int(form.get("paper_id", [""])[0]),
+                    )
+                except (ValueError, sqlite3.IntegrityError) as error:
+                    payload = json.dumps({"error": str(error)}).encode("utf-8")
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                else:
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            if parsed.path == "/excluded-paper":
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Exclude papers from Project Paper")
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    result = toggle_excluded_paper(db_path, paper_id=int(form.get("paper_id", [""])[0]))
                 except (ValueError, sqlite3.IntegrityError) as error:
                     payload = json.dumps({"error": str(error)}).encode("utf-8")
                     self.send_response(HTTPStatus.BAD_REQUEST)
@@ -599,6 +648,58 @@ def render_review_queue(
           setTimeout(() => {{ button.textContent = originalText; }}, 1400);
         }});
       }});
+      document.querySelectorAll(".save-paper-button").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          button.disabled = true;
+          try {{
+            const response = await fetch("/saved-paper", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body: new URLSearchParams({{paper_id: button.dataset.paperId}}),
+            }});
+            if (!response.ok) throw new Error("Unable to save");
+            const result = await response.json();
+            button.classList.toggle("saved", result.saved);
+            button.setAttribute("aria-pressed", result.saved ? "true" : "false");
+            button.title = result.saved ? "Remove from saved papers" : "Save paper for later";
+            button.setAttribute("aria-label", button.title);
+            const notice = button.closest(".paper-form").querySelector(".submit-state");
+            if (notice) {{
+              notice.textContent = result.saved ? "Paper saved." : "Paper removed from saved.";
+              setTimeout(() => {{ notice.textContent = ""; }}, 1600);
+            }}
+            if (!result.saved && new URLSearchParams(window.location.search).get("filter") === "saved") {{
+              window.location.reload();
+              return;
+            }}
+          }} catch (error) {{
+            const notice = button.closest(".paper-form").querySelector(".submit-state");
+            if (notice) notice.textContent = "Could not update saved papers. Try again.";
+          }} finally {{
+            button.disabled = false;
+          }}
+        }});
+      }});
+      document.querySelectorAll(".exclude-paper-button").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          button.disabled = true;
+          try {{
+            const response = await fetch("/excluded-paper", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body: new URLSearchParams({{paper_id: button.dataset.paperId}}),
+            }});
+            if (!response.ok) throw new Error("Unable to exclude");
+            window.location.reload();
+          }} catch (error) {{
+            const notice = button.closest(".paper-form").querySelector(".submit-state");
+            if (notice) notice.textContent = "Could not update excluded papers. Try again.";
+            button.disabled = false;
+          }}
+        }});
+      }});
       document.querySelectorAll(".paper-form").forEach((form) => {{
         form.addEventListener("submit", (event) => {{
           const submitter = event.submitter;
@@ -643,6 +744,25 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     )
     rationale_html = render_match_rationale(card, signal_tags)
     feedback_summary = "View/edit feedback" if card.get("has_feedback") else "Add feedback"
+    saved = bool(card.get("is_saved"))
+    excluded = bool(card.get("is_excluded"))
+    save_title = "Remove from saved papers" if saved else "Save paper for later"
+    save_button = (
+        f'<button type="button" class="save-paper-button{" saved" if saved else ""}" '
+        f'data-paper-id="{card["id"]}" aria-pressed="{str(saved).lower()}" '
+        f'aria-label="{save_title}" title="{save_title}">'
+        '<svg class="bookmark-outline" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-6-4-6 4z"/></svg>'
+        '<svg class="bookmark-filled" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-6-4-6 4z"/></svg>'
+        '</button>'
+    )
+    exclude_title = "Restore paper to review" if excluded else "Exclude paper from review"
+    exclude_button = (
+        f'<button type="button" class="exclude-paper-button{" excluded" if excluded else ""}" '
+        f'data-paper-id="{card["id"]}" aria-pressed="{str(excluded).lower()}" '
+        f'aria-label="{exclude_title}" title="{exclude_title}">'
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M6 18 18 6"/></svg>'
+        '</button>'
+    )
 
     return f"""<article class="paper-card{compact_class}">
   <form method="post" action="/feedback" class="paper-form">
@@ -651,7 +771,8 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     <input type="hidden" name="return_to" value="{escape(return_to)}">
     <div class="paper-main">
       <div class="card-head">
-        <div>
+        <div class="card-title-row">
+          <div>
           <h2>{title_html}</h2>
           <div class="paper-meta">
             {source_badge}
@@ -661,6 +782,8 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
             {render_copy_control(card)}
             {render_pulled_date(card)}
           </div>
+          </div>
+          <div class="paper-collection-actions">{save_button}{exclude_button}</div>
         </div>
       </div>
       {rationale_html}
@@ -2173,7 +2296,10 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
     init_db(db_path)
     where_clauses = []
     params: list[Any] = []
-    if filter_value == "needs_review":
+    if filter_value == "excluded":
+        where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
+        where_clauses.append("EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id)")
+    elif filter_value == "needs_review":
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status IS NULL")
         where_clauses.append("latest_structured_feedback.paper_id IS NULL")
@@ -2186,12 +2312,17 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
             "OR LOWER(COALESCE(latest_feedback.notes, '')) LIKE '%score:%'"
             ")"
         )
+    elif filter_value == "saved":
+        where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
+        where_clauses.append("EXISTS (SELECT 1 FROM saved_papers WHERE saved_papers.paper_id = papers.id)")
     elif filter_value != "all":
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status = ?")
         params.append(filter_value)
     else:
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
+    if filter_value != "excluded":
+        where_clauses.append("NOT EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id)")
     if source_value != SOURCE_FILTER_ALL:
         where_clauses.append("EXISTS (SELECT 1 FROM paper_sources source_filter WHERE source_filter.paper_id = papers.id AND source_filter.source = ?)")
         params.append(source_value)
@@ -2304,7 +2435,9 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                 latest_structured_feedback.created_at,
                 latest_raw_feedback.received_at,
                 latest_raw_feedback.content,
-                COALESCE(latest_structured_feedback.created_at, latest_raw_feedback.received_at) AS latest_feedback_received_at
+                COALESCE(latest_structured_feedback.created_at, latest_raw_feedback.received_at) AS latest_feedback_received_at,
+                EXISTS (SELECT 1 FROM saved_papers WHERE saved_papers.paper_id = papers.id) AS is_saved,
+                EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id) AS is_excluded
             FROM papers
             LEFT JOIN latest_recommendation
               ON latest_recommendation.paper_id = papers.id
@@ -2362,6 +2495,8 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                     "ranking_reason": row[12],
                     "feedback_status": row[13],
                     "feedback_notes": row[20] or row[14],
+                    "is_saved": bool(row[22]),
+                    "is_excluded": bool(row[23]),
                     "artifacts": artifacts,
                     "summary": with_source_abstract(load_summary(summary_artifact), row[7]),
                     "summary_feedback_fields": load_summary_feedback_fields(
@@ -2815,6 +2950,55 @@ def toggle_summary_field_feedback(
     }
 
 
+def toggle_saved_paper(db_path: Path, *, paper_id: int) -> dict[str, Any]:
+    if paper_id <= 0:
+        raise ValueError("Invalid paper id")
+    init_db(db_path)
+    connection = connect_db(db_path)
+    try:
+        paper = connection.execute("SELECT id FROM papers WHERE id = ?", (paper_id,)).fetchone()
+        if paper is None:
+            raise ValueError("Paper not found")
+        existing = connection.execute(
+            "SELECT paper_id FROM saved_papers WHERE paper_id = ?",
+            (paper_id,),
+        ).fetchone()
+        if existing:
+            connection.execute("DELETE FROM saved_papers WHERE paper_id = ?", (paper_id,))
+            saved = False
+        else:
+            connection.execute("INSERT INTO saved_papers (paper_id) VALUES (?)", (paper_id,))
+            saved = True
+        connection.commit()
+    finally:
+        connection.close()
+    return {"paper_id": paper_id, "saved": saved}
+
+
+def toggle_excluded_paper(db_path: Path, *, paper_id: int) -> dict[str, Any]:
+    if paper_id <= 0:
+        raise ValueError("Invalid paper id")
+    init_db(db_path)
+    connection = connect_db(db_path)
+    try:
+        if connection.execute("SELECT id FROM papers WHERE id = ?", (paper_id,)).fetchone() is None:
+            raise ValueError("Paper not found")
+        existing = connection.execute(
+            "SELECT paper_id FROM excluded_papers WHERE paper_id = ?", (paper_id,)
+        ).fetchone()
+        if existing:
+            connection.execute("DELETE FROM excluded_papers WHERE paper_id = ?", (paper_id,))
+            excluded = False
+        else:
+            connection.execute("INSERT INTO excluded_papers (paper_id) VALUES (?)", (paper_id,))
+            connection.execute("DELETE FROM saved_papers WHERE paper_id = ?", (paper_id,))
+            excluded = True
+        connection.commit()
+    finally:
+        connection.close()
+    return {"paper_id": paper_id, "excluded": excluded}
+
+
 def start_profile_apply_worker(
     db_path: Path,
     *,
@@ -2997,6 +3181,21 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .paper-form { display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 12px; align-items: start; }
 .paper-main { min-width: 0; }
 .card-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; }
+.card-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.card-title-row > div { min-width: 0; }
+.paper-collection-actions { display: flex; flex: 0 0 auto; gap: 2px; }
+.save-paper-button, .exclude-paper-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 27px; min-height: 27px; border: 1px solid transparent; padding: 3px; color: var(--muted); background: transparent; opacity: 0.16; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease, background 120ms ease; }
+.paper-card:hover .save-paper-button, .paper-card:hover .exclude-paper-button { opacity: 0.36; }
+.save-paper-button:hover, .save-paper-button:focus-visible, .exclude-paper-button:hover, .exclude-paper-button:focus-visible { opacity: 0.8; color: var(--text); border-color: var(--border); background: rgba(148, 163, 184, 0.05); }
+.save-paper-button svg, .exclude-paper-button svg { width: 17px; height: 17px; }
+.save-paper-button .bookmark-outline { display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.save-paper-button .bookmark-filled { display: none; fill: currentColor; }
+.save-paper-button.saved { opacity: 1; color: var(--accent); border-color: rgba(56, 189, 248, 0.38); background: rgba(56, 189, 248, 0.10); }
+.save-paper-button.saved .bookmark-outline { display: none; }
+.save-paper-button.saved .bookmark-filled { display: block; }
+.exclude-paper-button svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.exclude-paper-button.excluded { opacity: 1; color: #fb7185; border-color: rgba(251, 113, 133, 0.38); background: rgba(251, 113, 133, 0.10); }
+.save-paper-button:disabled, .exclude-paper-button:disabled { cursor: wait; opacity: 0.45; }
 .paper-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.25; }
 .paper-meta .source-id { color: #75859a; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 .action-rail { display: grid; gap: 6px; }

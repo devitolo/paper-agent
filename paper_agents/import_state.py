@@ -55,6 +55,8 @@ ARXIV_PROGRESS_SCHEMA_MARKER = '-- Versioned arXiv offset traversal state; enabl
 ARXIV_PROGRESS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(ARXIV_PROGRESS_SCHEMA_MARKER, 1)[1]
 CORE_PROGRESS_SCHEMA_MARKER = '-- Versioned CORE v3 Works offset traversal state; enabled only by the opt-in trial.'
 CORE_PROGRESS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(CORE_PROGRESS_SCHEMA_MARKER, 1)[1]
+REVIEW_COLLECTIONS_SCHEMA_MARKER = '-- Personal review collections; isolated from feedback, ranking, and profile learning.'
+REVIEW_COLLECTIONS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(REVIEW_COLLECTIONS_SCHEMA_MARKER, 1)[1]
 
 
 def _schema_variants(sql):
@@ -126,6 +128,12 @@ def pre_core_progress_schemas():
     return _schema_variants(sql)
 
 
+def pre_review_collections_schemas():
+    """Accepted production schema before saved and excluded paper collections."""
+    sql = TRUSTED_SCHEMA.read_text().split(REVIEW_COLLECTIONS_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql)
+
+
 def apply_approved_post_import_schema_deltas(root):
     """Apply reviewed additive schema growth to already accepted imports only."""
     root = Path(root).absolute()
@@ -137,7 +145,9 @@ def apply_approved_post_import_schema_deltas(root):
         actual_schema = schema(connection)
         if actual_schema in trusted_schemas():
             return False
-        if actual_schema in pre_minilm_shadow_schemas():
+        if actual_schema in pre_review_collections_schemas():
+            delta_sql = REVIEW_COLLECTIONS_SCHEMA_SQL
+        elif actual_schema in pre_minilm_shadow_schemas():
             delta_sql = MINILM_SHADOW_SCHEMA_SQL
         elif actual_schema in pre_core_progress_schemas():
             delta_sql = CORE_PROGRESS_SCHEMA_SQL

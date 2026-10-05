@@ -171,6 +171,96 @@ class UIQueueRegressionTests(unittest.TestCase):
         self.assertIn("No papers found for this title search.", html)
         self.assertNotIn("No selected papers are waiting in the registry yet.", html)
 
+    def test_saved_papers_are_persistent_and_filterable_without_changing_review_state(self):
+        saved_paper = self.seed(1)
+        other_paper = self.seed(2)
+        self.connection.commit()
+
+        result = web.toggle_saved_paper(self.path, paper_id=saved_paper)
+        self.assertEqual(result, {"paper_id": saved_paper, "saved": True})
+        stored = self.connection.execute(
+            "SELECT paper_id FROM saved_papers WHERE paper_id = ?",
+            (saved_paper,),
+        ).fetchone()
+        self.assertEqual(stored, (saved_paper,))
+        self.assertIsNone(
+            self.connection.execute("SELECT status FROM feedback WHERE paper_id = ?", (saved_paper,)).fetchone()
+        )
+
+        page = web.load_review_page(
+            self.path,
+            filter_value="saved",
+            source_value="all",
+            sort_value="latest",
+        )
+        self.assertEqual(page["total"], 1)
+        self.assertEqual([card["id"] for card in page["cards"]], [saved_paper])
+        self.assertTrue(page["cards"][0]["is_saved"])
+        self.assertNotIn(other_paper, [card["id"] for card in page["cards"]])
+
+        html = web.render_review_queue(self.path, filter_value="saved")
+        self.assertIn('<option value="saved" selected>Saved</option>', html)
+        self.assertIn('class="save-paper-button saved"', html)
+        self.assertIn('aria-pressed="true"', html)
+        self.assertIn('title="Remove from saved papers"', html)
+
+        result = web.toggle_saved_paper(self.path, paper_id=saved_paper)
+        self.assertEqual(result, {"paper_id": saved_paper, "saved": False})
+        page = web.load_review_page(
+            self.path,
+            filter_value="saved",
+            source_value="all",
+            sort_value="latest",
+        )
+        self.assertEqual((page["total"], page["cards"]), (0, []))
+
+    def test_saved_paper_endpoint_rejects_unknown_paper(self):
+        with self.assertRaisesRegex(ValueError, "Paper not found"):
+            web.toggle_saved_paper(self.path, paper_id=999999)
+
+    def test_excluded_papers_leave_normal_views_and_can_be_restored(self):
+        excluded_paper = self.seed(1)
+        other_paper = self.seed(2)
+        self.connection.commit()
+        web.toggle_saved_paper(self.path, paper_id=excluded_paper)
+
+        result = web.toggle_excluded_paper(self.path, paper_id=excluded_paper)
+        self.assertEqual(result, {"paper_id": excluded_paper, "excluded": True})
+        self.assertIsNone(self.connection.execute(
+            "SELECT paper_id FROM saved_papers WHERE paper_id = ?", (excluded_paper,)
+        ).fetchone())
+        self.assertIsNone(self.connection.execute(
+            "SELECT status FROM feedback WHERE paper_id = ?", (excluded_paper,)
+        ).fetchone())
+
+        for filter_value in ("all", "needs_review", "saved"):
+            page = web.load_review_page(
+                self.path, filter_value=filter_value, source_value="all", sort_value="latest"
+            )
+            self.assertNotIn(excluded_paper, [card["id"] for card in page["cards"]])
+
+        page = web.load_review_page(
+            self.path, filter_value="excluded", source_value="all", sort_value="latest"
+        )
+        self.assertEqual([card["id"] for card in page["cards"]], [excluded_paper])
+        self.assertTrue(page["cards"][0]["is_excluded"])
+        self.assertNotIn(other_paper, [card["id"] for card in page["cards"]])
+        html = web.render_review_queue(self.path, filter_value="excluded")
+        self.assertIn('<option value="excluded" selected>Excluded</option>', html)
+        self.assertIn('class="exclude-paper-button excluded"', html)
+        self.assertIn('title="Restore paper to review"', html)
+
+        result = web.toggle_excluded_paper(self.path, paper_id=excluded_paper)
+        self.assertEqual(result, {"paper_id": excluded_paper, "excluded": False})
+        page = web.load_review_page(
+            self.path, filter_value="all", source_value="all", sort_value="latest"
+        )
+        self.assertIn(excluded_paper, [card["id"] for card in page["cards"]])
+
+    def test_excluded_paper_endpoint_rejects_unknown_paper(self):
+        with self.assertRaisesRegex(ValueError, "Paper not found"):
+            web.toggle_excluded_paper(self.path, paper_id=999999)
+
     def test_retired_minilm_eval_redirects_to_retrieval_experiment_and_leaves_navigation(self):
         class RequestSocket:
             def __init__(self, request):
