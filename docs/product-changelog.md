@@ -2,6 +2,18 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-10-05
+
+### Review Queue saved and excluded organization states
+
+Status: Implemented in production commit `75e14b6`.
+
+- Add subtle per-paper Save/Unsave and Exclude/Restore controls in the Review Queue.
+- Add Saved and Excluded to the main paper filter.
+- Hide excluded papers from All papers, Scored, Needs review, and Saved; users can open Excluded to restore them.
+- Excluding a saved paper clears its bookmark.
+- Keep Saved and Excluded as personal organization states only. They do not affect feedback, ranking, recommendations, profile learning, Scout guidance, or Curator scoring.
+
 ## 2026-10-04
 
 ### Review Queue title filter
