@@ -261,7 +261,7 @@ class UIQueueRegressionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Paper not found"):
             web.toggle_excluded_paper(self.path, paper_id=999999)
 
-    def test_retired_minilm_eval_redirects_to_retrieval_experiment_and_leaves_navigation(self):
+    def test_retrieval_experiments_are_retired_and_removed_from_navigation(self):
         class RequestSocket:
             def __init__(self, request):
                 self.request = request
@@ -273,21 +273,22 @@ class UIQueueRegressionTests(unittest.TestCase):
             def sendall(self, data):
                 self.response.extend(data)
 
-        for path in ("/minilm-eval", "/scout-eval"):
+        for path in ("/minilm-eval", "/retrieval-experiment", "/scout-eval"):
             request = RequestSocket(f"GET {path} HTTP/1.0\r\n\r\n".encode())
             web.make_handler(self.path)(request, ("127.0.0.1", 1), object())
             self.assertIn(b"303 See Other", request.response)
-            self.assertIn(b"Location: /retrieval-experiment", request.response)
+            self.assertIn(b"Location: /", request.response)
 
-        request = RequestSocket(
-            b"POST /minilm-eval/decision HTTP/1.0\r\nContent-Length: 0\r\n\r\n"
-        )
-        web.make_handler(self.path)(request, ("127.0.0.1", 1), object())
-        self.assertIn(b"HTTP/1.0 410 ", request.response)
+        for path in ("/minilm-eval/decision", "/retrieval-experiment/decision", "/scout-eval/decision"):
+            request = RequestSocket(
+                f"POST {path} HTTP/1.0\r\nContent-Length: 0\r\n\r\n".encode()
+            )
+            web.make_handler(self.path)(request, ("127.0.0.1", 1), object())
+            self.assertIn(b"HTTP/1.0 410 ", request.response)
 
         navigation = web.render_primary_nav("review")
         self.assertNotIn("MiniLM Eval", navigation)
-        self.assertIn("Retrieval Experiment", navigation)
+        self.assertNotIn("Retrieval Experiment", navigation)
 
     def test_more_than_fifty_pending_papers_are_not_silently_inaccessible(self):
         expected = {self.seed(number) for number in range(121)}

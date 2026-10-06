@@ -377,13 +377,17 @@ overlay = sys.argv[3]
 out: list[str] = []
 found = False
 found_minilm_eval = False
+found_minilm_shadow = False
 for line in source.read_text(encoding="utf-8").splitlines():
     if line.startswith("PAPER_MIGRATION_EXTRA_COMPOSE_FILES="):
         out.append(f"PAPER_MIGRATION_EXTRA_COMPOSE_FILES={overlay}")
         found = True
     elif line.startswith("PAPER_MINILM_EVAL_ENABLED="):
-        out.append("PAPER_MINILM_EVAL_ENABLED=1")
+        out.append("PAPER_MINILM_EVAL_ENABLED=0")
         found_minilm_eval = True
+    elif line.startswith("PAPER_MINILM_SHADOW_ENABLED="):
+        out.append("PAPER_MINILM_SHADOW_ENABLED=0")
+        found_minilm_shadow = True
     else:
         out.append(line)
 if not found:
@@ -395,7 +399,15 @@ if not found_minilm_eval:
     )
     if insert_at is None:
         raise SystemExit("cannot place PAPER_MINILM_EVAL_ENABLED in managed cron")
-    out.insert(insert_at, "PAPER_MINILM_EVAL_ENABLED=1")
+    out.insert(insert_at, "PAPER_MINILM_EVAL_ENABLED=0")
+if not found_minilm_shadow:
+    insert_at = next(
+        (index + 1 for index, line in enumerate(out) if line.startswith("PAPER_MINILM_EVAL_ENABLED=")),
+        None,
+    )
+    if insert_at is None:
+        raise SystemExit("cannot place PAPER_MINILM_SHADOW_ENABLED in managed cron")
+    out.insert(insert_at, "PAPER_MINILM_SHADOW_ENABLED=0")
 destination.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
   crontab "$RELEASE_DIR/crontab.next"
@@ -508,8 +520,8 @@ verification_minilm_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_eval_after
 expected_minilm_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
 verification_minilm_shadow_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_shadow_after_pipeline.sh" | awk '{print $1}')
 expected_minilm_shadow_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_shadow_after_pipeline.sh" | awk '{print $1}')
-verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=1$' "$RELEASE_DIR/crontab.next")
-verification_minilm_shadow_cron=$(grep -c '^PAPER_MINILM_SHADOW_ENABLED=1$' "$RELEASE_DIR/crontab.next" || true)
+verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=0$' "$RELEASE_DIR/crontab.next")
+verification_minilm_shadow_cron=$(grep -c '^PAPER_MINILM_SHADOW_ENABLED=0$' "$RELEASE_DIR/crontab.next")
 image_size_mib=$(sed -n 's/^image_size_mib=//p' "$RELEASE_DIR/image-metadata.env")
 image_layer_count=$(sed -n 's/^image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
 previous_image_layer_count=$(sed -n 's/^previous_image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
@@ -531,8 +543,8 @@ removed_image_layer_count=$(sed -n 's/^removed_image_layer_count=//p' "$RELEASE_
   printf 'removed_image_layer_count=%s\n' "$removed_image_layer_count"
   printf 'minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'minilm_shadow_runner_sha256=%s\n' "$verification_minilm_shadow_runner"
-  printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 1 || printf invalid)"
-  printf 'PAPER_MINILM_SHADOW_ENABLED=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 1 || printf 0)"
+  printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 0 || printf invalid)"
+  printf 'PAPER_MINILM_SHADOW_ENABLED=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 0 || printf invalid)"
 } | tee "$RELEASE_DIR/post-deploy-verification.txt"
 if [[ -n "$ARXIV_PROGRESS" && "$verification_arxiv_progress" != "$ARXIV_PROGRESS" ]]; then
   echo "Post-deploy verification failed: PAPER_ARXIV_PROGRESS=$verification_arxiv_progress, expected $ARXIV_PROGRESS" >&2
@@ -554,12 +566,12 @@ if [[ "$verification_minilm_shadow_runner" != "$expected_minilm_shadow_runner" ]
   echo "Post-deploy verification failed: MiniLM shadow runner mismatch" >&2
   exit 1
 fi
-if [[ "$verification_minilm_shadow_cron" -gt 1 ]]; then
-  echo "Post-deploy verification failed: PAPER_MINILM_SHADOW_ENABLED=1 is duplicated" >&2
+if [[ "$verification_minilm_shadow_cron" != 1 ]]; then
+  echo "Post-deploy verification failed: PAPER_MINILM_SHADOW_ENABLED=0 is missing or duplicated" >&2
   exit 1
 fi
 if [[ "$verification_minilm_cron" != 1 ]]; then
-  echo "Post-deploy verification failed: PAPER_MINILM_EVAL_ENABLED=1 is missing or duplicated" >&2
+  echo "Post-deploy verification failed: PAPER_MINILM_EVAL_ENABLED=0 is missing or duplicated" >&2
   exit 1
 fi
 phase_end
@@ -584,7 +596,7 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'verified_minilm_shadow_runner_sha256=%s\n' "$verification_minilm_shadow_runner"
   printf 'verified_minilm_eval_enabled=1\n'
-  printf 'verified_minilm_shadow_enabled=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 1 || printf 0)"
+  printf 'verified_minilm_shadow_enabled=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 0 || printf invalid)"
   printf 'total_deploy_seconds=%s\n' "$(( $(date +%s) - DEPLOY_STARTED_EPOCH ))"
   printf 'rollback_script=%s\n' "$RELEASE_DIR/rollback.sh"
 } >> "$RELEASE_DIR/update.env"
@@ -607,7 +619,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- PAPER_ARXIV_PROGRESS: \`$verification_arxiv_progress\`"
     echo "- PAPER_OPENALEX_CURSOR: \`$verification_openalex_cursor\`"
     echo "- PAPER_SEMANTIC_SCHOLAR_PROGRESS: \`$verification_semantic_scholar_progress\`"
-    echo "- PAPER_MINILM_EVAL_ENABLED: \`1\`"
+    echo "- PAPER_MINILM_EVAL_ENABLED: \`0\`"
+    echo "- PAPER_MINILM_SHADOW_ENABLED: \`0\`"
     echo "- MiniLM runner SHA256: \`$verification_minilm_runner\`"
     echo "- Evidence: \`$RELEASE_DIR\`"
     echo "- Rollback: \`$RELEASE_DIR/rollback.sh\`"
