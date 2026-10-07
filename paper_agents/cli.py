@@ -63,6 +63,7 @@ from paper_agents.scout import (
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile, save_profile
 from paper_agents.topics import select_topics_for_source
 from paper_agents.web import run_review_ui
+from paper_agents.zenml_pilot import import_zenml_pilot
 
 
 ENV_PATH = Path(".env")
@@ -131,6 +132,12 @@ def main() -> None:
         action="store_true",
         help="If a JSONL has no selected=true rows, recommend the first three rows",
     )
+
+    zenml_parser = subparsers.add_parser("zenml-pilot", help="Import a small ZenML industry-article pilot queue")
+    zenml_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
+    zenml_parser.add_argument("--fetch-limit", type=int, default=200, help="Number of ZenML rows to inspect")
+    zenml_parser.add_argument("--keep", type=int, default=5, help="Number of items to place in the review queue")
+    zenml_parser.add_argument("--dry-run", action="store_true", help="Preview selected items without writing to the database")
 
     run_parser = subparsers.add_parser("run", help="Run Scout, then Curator")
     run_parser.add_argument("--max-results", type=int, default=10, help="Number of arXiv results to fetch")
@@ -322,6 +329,19 @@ def main() -> None:
                 ),
             )
             return
+
+    if args.command == "zenml-pilot":
+        try:
+            output = import_zenml_pilot(
+                db_path=args.db,
+                fetch_limit=args.fetch_limit,
+                keep=args.keep,
+                dry_run=args.dry_run,
+            )
+        except RuntimeError as error:
+            raise SystemExit(str(error)) from error
+        print_section("ZenML pilot import", output)
+        return
 
     if args.command == "run":
         require_openai_api_key()
