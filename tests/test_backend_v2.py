@@ -964,6 +964,80 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, "already_recommended"))
 
+    def test_scout_keeps_curator_eligibility_labels_eligible(self):
+        candidates = [
+            candidate("2601.keepv1", "Agent reliability in production operations"),
+            candidate("2601.surveyv1", "A Survey of Agent Reliability Methods"),
+            candidate("2601.benchmarkv1", "A Benchmark for AIOps Incident Response"),
+            candidate("2601.posterv1", "Poster: Debugging LLM Agents"),
+            candidate("2601.withdrawnv1", "Withdrawn: Fault Localization with Agents"),
+            candidate("2601.contentsv1", "Table of Contents"),
+        ]
+        candidates[-1].metadata["type"] = "editorial"
+
+        result = ScoutAgent(source=FakeSource(candidates)).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(topics=["AIOps"], max_candidates=10),
+        )
+
+        self.assertEqual(result["stored_count"], 6)
+        self.assertEqual(result["eligible_count"], 6)
+        rows = self.connection.execute(
+            """
+            SELECT papers.title, scout_candidates.excluded, scout_candidates.exclusion_reason
+            FROM scout_candidates
+            JOIN papers ON papers.id = scout_candidates.paper_id
+            WHERE scout_candidates.scout_run_id = ?
+            ORDER BY scout_candidates.retrieval_order
+            """,
+            (result["scout_run_id"],),
+        ).fetchall()
+        self.assertTrue(all(row[1] == 0 and row[2] is None for row in rows))
+
+    def test_curator_records_eligibility_labels_and_blocks_invalid_records(self):
+        candidates = [
+            candidate("2601.keepv1", "Agent reliability in production operations"),
+            candidate("2601.surveyv1", "A Survey of Agent Reliability Methods"),
+            candidate("2601.benchmarkv1", "A Benchmark for AIOps Incident Response"),
+            candidate("2601.posterv1", "Poster: Debugging LLM Agents"),
+            candidate("2601.withdrawnv1", "Withdrawn: Fault Localization with Agents"),
+            candidate("2601.contentsv1", "Table of Contents"),
+            candidate("2601.nonenglishv1", "Analyse des incidents logiciels"),
+        ]
+        candidates[-2].metadata["type"] = "editorial"
+        candidates[-1].metadata["language"] = "fr"
+        ScoutAgent(source=FakeSource(candidates)).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(topics=["AIOps"], max_candidates=10),
+        )
+
+        result = CuratorAgent().run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            candidates=db.eligible_candidates_for_cycle(self.connection, self.cycle_id),
+            profile_version=db.current_profile_version(self.connection),
+            scout_attempt_count=1,
+            config=CuratorConfig(max_recommendations=3, min_quality_score=1, max_scout_attempts=1),
+        )
+
+        by_title = {evaluation["title"]: evaluation["curator_eligibility"] for evaluation in result["evaluations"]}
+        self.assertEqual(by_title["A Survey of Agent Reliability Methods"]["labels"], ["paper_type_survey"])
+        self.assertEqual(by_title["A Benchmark for AIOps Incident Response"]["labels"], ["paper_type_benchmark"])
+        self.assertEqual(by_title["Poster: Debugging LLM Agents"]["labels"], ["paper_type_poster_or_slides"])
+        self.assertEqual(by_title["Analyse des incidents logiciels"]["labels"], ["language_non_english"])
+        self.assertEqual(
+            by_title["Withdrawn: Fault Localization with Agents"]["disqualification_reason"],
+            "retracted_or_withdrawn",
+        )
+        self.assertEqual(by_title["Table of Contents"]["disqualification_reason"], "not_a_paper")
+        recommended_titles = {recommendation["title"] for recommendation in result["recommendations"]}
+        self.assertNotIn("Withdrawn: Fault Localization with Agents", recommended_titles)
+        self.assertNotIn("Table of Contents", recommended_titles)
+
     def test_non_arxiv_candidate_without_pdf_url_remains_curator_eligible(self):
         source = FakeSource(
             [
@@ -1279,7 +1353,7 @@ class BackendV2Tests(unittest.TestCase):
         source = FakeSource([
             ScoutCandidate(
                 source="arxiv", source_id="2601.badguidancev1",
-                title="Toy benchmark with weak evidence",
+                title="Toy example with weak evidence",
                 abstract="An illustrative paper with no production signal.",
                 authors=[], published="2026-01-01", updated=None,
                 url="https://example.test/bad", pdf_url=None, categories=["cs.SE"],

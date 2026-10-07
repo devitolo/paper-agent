@@ -618,6 +618,7 @@ def eligible_candidates_for_cycle(connection: sqlite3.Connection, workflow_cycle
             paper_sources.source_id,
             paper_sources.url,
             paper_sources.pdf_url,
+            paper_sources.metadata_json,
             scout_candidates.retrieval_order,
             scout_runs.id
         FROM scout_candidates
@@ -650,8 +651,9 @@ def eligible_candidates_for_cycle(connection: sqlite3.Connection, workflow_cycle
             "source_id": row[8],
             "url": row[9],
             "pdf_url": row[10],
-            "retrieval_order": row[11],
-            "scout_run_id": row[12],
+            "metadata": decode_json(row[11], {}),
+            "retrieval_order": row[12],
+            "scout_run_id": row[13],
         }
         for row in rows
     ]
