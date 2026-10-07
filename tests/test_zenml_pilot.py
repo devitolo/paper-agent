@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from paper_agents.db import connect_db, init_db
-from paper_agents.web import load_artifacts_for_paper, load_summary, render_match_rationale, source_badge_class, source_display_name
+from paper_agents.web import load_artifacts_for_paper, load_summary, render_match_rationale, render_source_reference, source_badge_class, source_display_name
 from paper_agents.zenml_pilot import SEED_EXCLUDED_URLS, import_zenml_pilot, select_zenml_candidates
 
 
@@ -108,6 +108,8 @@ class ZenMLPilotTests(unittest.TestCase):
                 summary = load_summary(artifacts.get("triage_summary"))
             self.assertEqual(source_display_name("zenml"), "ZenML")
             self.assertEqual(source_badge_class("zenml"), "source-badge-zenml")
+            self.assertEqual(render_source_reference({"source_id": "https://example.com/hema-ai-assistant", "url": "https://example.com/hema-ai-assistant"}), "")
+            self.assertIn("arXiv", render_source_reference({"source_id": "arXiv:1234.5678", "url": "https://example.com"}))
             self.assertEqual(summary["source_type"], "zenml_summary")
             html = render_match_rationale({"summary": summary, "rationale": "ZenML pilot"}, "")
             self.assertIn("ZenML discovery summary", html)
