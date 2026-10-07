@@ -136,7 +136,7 @@ def main() -> None:
     zenml_parser = subparsers.add_parser("zenml-pilot", help="Import a small ZenML industry-article pilot queue")
     zenml_parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite database path")
     zenml_parser.add_argument("--fetch-limit", type=int, default=200, help="Number of ZenML rows to inspect")
-    zenml_parser.add_argument("--keep", type=int, default=5, help="Number of items to place in the review queue")
+    zenml_parser.add_argument("--keep", type=int, default=3, help="Number of items to place in the review queue")
     zenml_parser.add_argument("--dry-run", action="store_true", help="Preview selected items without writing to the database")
 
     run_parser = subparsers.add_parser("run", help="Run Scout, then Curator")

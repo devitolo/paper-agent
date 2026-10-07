@@ -303,7 +303,7 @@ def import_zenml_pilot(
     *,
     db_path: Path = DEFAULT_DB_PATH,
     fetch_limit: int = 200,
-    keep: int = 5,
+    keep: int = 3,
     rows: list[dict[str, Any]] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
