@@ -59,8 +59,8 @@ REVIEW_COLLECTIONS_SCHEMA_MARKER = '-- Personal review collections; isolated fro
 REVIEW_COLLECTIONS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(REVIEW_COLLECTIONS_SCHEMA_MARKER, 1)[1]
 
 
-def _schema_variants(sql):
-    from .db import migrate_structured_feedback_score_to_real
+def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False):
+    from .db import migrate_structured_feedback_score_to_real, migrate_summary_field_quality_signals_to_three_state
     require(sql.count('score REAL,') == 1, 'Trusted score schema changed; review compatibility')
     variants = []
     for migrated in (False, True):
@@ -69,15 +69,31 @@ def _schema_variants(sql):
             connection.executescript(sql.replace('score REAL,', 'score INTEGER,') if migrated else sql)
             if migrated:
                 migrate_structured_feedback_score_to_real(connection)
+            if migrate_summary_quality:
+                migrate_summary_field_quality_signals_to_three_state(connection)
             variants.append(schema(connection))
         finally:
             connection.close()
+        if include_summary_quality_migration_rendering and "'too_generic'" in sql:
+            legacy_sql = sql.replace(
+                "signal TEXT NOT NULL CHECK (signal IN ('up', 'down', 'good', 'too_generic', 'bad')),",
+                "signal TEXT NOT NULL CHECK (signal IN ('up', 'down')),",
+            )
+            connection = sqlite3.connect(':memory:')
+            try:
+                connection.executescript(legacy_sql.replace('score REAL,', 'score INTEGER,') if migrated else legacy_sql)
+                if migrated:
+                    migrate_structured_feedback_score_to_real(connection)
+                migrate_summary_field_quality_signals_to_three_state(connection)
+                variants.append(schema(connection))
+            finally:
+                connection.close()
     return variants
 
 
 def trusted_schemas():
     """Fresh schema plus exact historical score-migration renderings."""
-    return _schema_variants(TRUSTED_SCHEMA.read_text())
+    return _schema_variants(TRUSTED_SCHEMA.read_text(), include_summary_quality_migration_rendering=True)
 
 
 def pre_openalex_schemas():
@@ -134,10 +150,20 @@ def pre_review_collections_schemas():
     return _schema_variants(sql)
 
 
+def pre_three_state_summary_signal_schemas():
+    """Accepted production schema before three-state section feedback signals."""
+    sql = TRUSTED_SCHEMA.read_text().replace(
+        "signal TEXT NOT NULL CHECK (signal IN ('up', 'down', 'good', 'too_generic', 'bad')),",
+        "signal TEXT NOT NULL CHECK (signal IN ('up', 'down')),",
+    )
+    return _schema_variants(sql, migrate_summary_quality=False)
+
+
 def apply_approved_post_import_schema_deltas(root):
     """Apply reviewed additive schema growth to already accepted imports only."""
     root = Path(root).absolute()
     database = root/'data/paper_agent.db'
+    from .db import migrate_summary_field_quality_signals_to_three_state
     connection = sqlite3.connect(database)
     try:
         require(connection.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'Imported SQLite integrity failed')
@@ -145,6 +171,11 @@ def apply_approved_post_import_schema_deltas(root):
         actual_schema = schema(connection)
         if actual_schema in trusted_schemas():
             return False
+        if actual_schema in pre_three_state_summary_signal_schemas():
+            with connection:
+                migrate_summary_field_quality_signals_to_three_state(connection)
+            require(schema(connection) in trusted_schemas(), 'Three-state summary feedback migration did not produce trusted schema')
+            return True
         if actual_schema in pre_review_collections_schemas():
             delta_sql = REVIEW_COLLECTIONS_SCHEMA_SQL
         elif actual_schema in pre_minilm_shadow_schemas():

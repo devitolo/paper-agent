@@ -352,6 +352,64 @@ INSERT INTO feedback_profile_apply_attempts(id,provider,dry_run,status,profile_v
             self.assertIn('summary_field_quality_signals', tables)
             self.assertIn(import_state.schema(c), import_state.trusted_schemas())
 
+    def test_approved_three_state_summary_signal_delta_preserves_existing_rows(self):
+        self.start()
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            c.executescript("""
+ALTER TABLE summary_field_quality_signals RENAME TO summary_field_quality_signals_new;
+CREATE TABLE summary_field_quality_signals (
+    id INTEGER PRIMARY KEY,
+    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    artifact_id INTEGER NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    field_name TEXT NOT NULL CHECK (field_name IN ('research_problem', 'why_it_matters', 'approach')),
+    signal TEXT NOT NULL CHECK (signal IN ('up', 'down')),
+    field_text TEXT NOT NULL,
+    model TEXT,
+    artifact_metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (artifact_id, field_name)
+);
+INSERT INTO summary_field_quality_signals (
+    id, paper_id, artifact_id, field_name, signal, field_text, model, artifact_metadata_json, created_at, updated_at
+)
+SELECT id, paper_id, artifact_id, field_name, signal, field_text, model, artifact_metadata_json, created_at, updated_at
+FROM summary_field_quality_signals_new;
+DROP TABLE summary_field_quality_signals_new;
+CREATE INDEX idx_summary_field_quality_signals_paper
+ON summary_field_quality_signals (paper_id);
+""")
+            c.execute("INSERT INTO papers (canonical_key, title) VALUES ('manual:paper', 'Paper')")
+            paper_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            c.execute(
+                "INSERT INTO artifacts (paper_id, artifact_type, path) VALUES (?, 'triage_summary', 'data/summary.json')",
+                (paper_id,),
+            )
+            artifact_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            c.execute(
+                "INSERT INTO summary_field_quality_signals (paper_id, artifact_id, field_name, signal, field_text) "
+                "VALUES (?, ?, 'approach', 'down', 'Generic approach')",
+                (paper_id, artifact_id),
+            )
+            self.assertIn(import_state.schema(c), import_state.pre_three_state_summary_signal_schemas())
+
+        self.assertTrue(import_state.apply_approved_post_import_schema_deltas(self.copy))
+
+        with fixture_connection(self.copy/'data/paper_agent.db') as c:
+            self.assertIn(import_state.schema(c), import_state.trusted_schemas())
+            self.assertEqual(
+                c.execute("SELECT signal FROM summary_field_quality_signals WHERE artifact_id = ?", (artifact_id,)).fetchone()[0],
+                'down',
+            )
+            c.execute(
+                "UPDATE summary_field_quality_signals SET signal = 'too_generic' WHERE artifact_id = ?",
+                (artifact_id,),
+            )
+            self.assertEqual(
+                c.execute("SELECT signal FROM summary_field_quality_signals WHERE artifact_id = ?", (artifact_id,)).fetchone()[0],
+                'too_generic',
+            )
+
     def test_approved_arxiv_progress_delta_applies_to_current_production_schema(self):
         self.start()
         with fixture_connection(self.copy/'data/paper_agent.db') as c:

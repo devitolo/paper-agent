@@ -2656,7 +2656,8 @@ class BackendV2Tests(unittest.TestCase):
             },
             compact=False,
         )
-        self.assertIn("<h3>Approach</h3><p>Not extracted yet.</p>", formula_html)
+        self.assertIn("<h3>Approach</h3>", formula_html)
+        self.assertIn("<p>Not extracted yet.</p>", formula_html)
         self.assertNotIn("RLCR", formula_html)
 
     def test_summary_field_feedback_toggles_and_preserves_displayed_qwen_context(self):
@@ -2689,6 +2690,7 @@ class BackendV2Tests(unittest.TestCase):
             paper_id=paper_id,
             artifact_id=artifact_id,
             field_name="approach",
+            signal="too_generic",
         )
 
         self.assertTrue(result["active"])
@@ -2699,26 +2701,29 @@ class BackendV2Tests(unittest.TestCase):
             """
         ).fetchone()
         self.assertEqual(row[0], "approach")
-        self.assertEqual(row[1], "down")
+        self.assertEqual(row[1], "too_generic")
         self.assertEqual(row[2], "A named framework without enough detail.")
         self.assertEqual(row[3], "qwen2.5:1.5b-instruct")
         self.assertEqual(json.loads(row[4]), {"extractor_version": "qwen-triage-v1"})
         html = web.render_review_queue(self.db_path)
-        self.assertNotIn("summary-feedback-button", html)
-        self.assertNotIn(">👍</button>", html)
-        self.assertNotIn(">👎</button>", html)
+        self.assertIn("summary-feedback-button", html)
+        self.assertIn('data-signal="good"', html)
+        self.assertIn('data-signal="too_generic"', html)
+        self.assertIn('data-signal="bad"', html)
+        self.assertIn("🫥", html)
 
         result = web.toggle_summary_field_feedback(
             self.db_path,
             paper_id=paper_id,
             artifact_id=artifact_id,
             field_name="approach",
+            signal="too_generic",
         )
 
         self.assertFalse(result["active"])
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM summary_field_quality_signals").fetchone()[0], 0)
 
-    def test_summary_field_feedback_switches_between_up_and_down(self):
+    def test_summary_field_feedback_switches_between_three_state_signals(self):
         paper_id, _ = self._seed_review_recommendation()
         summary_path = Path(self.tmp.name) / "summary-signal.json"
         summary_path.write_text('{"merged":{"research_problem":"Clear problem."}}', encoding="utf-8")
@@ -2731,22 +2736,22 @@ class BackendV2Tests(unittest.TestCase):
         )
         self.connection.commit()
 
-        up = web.toggle_summary_field_feedback(
+        good = web.toggle_summary_field_feedback(
             self.db_path, paper_id=paper_id, artifact_id=artifact_id,
-            field_name="research_problem", signal="up",
+            field_name="research_problem", signal="good",
         )
-        self.assertEqual((up["active"], up["signal"]), (True, "up"))
-        down = web.toggle_summary_field_feedback(
+        self.assertEqual((good["active"], good["signal"]), (True, "good"))
+        generic = web.toggle_summary_field_feedback(
             self.db_path, paper_id=paper_id, artifact_id=artifact_id,
-            field_name="research_problem", signal="down",
+            field_name="research_problem", signal="too_generic",
         )
-        self.assertEqual((down["active"], down["signal"]), (True, "down"))
+        self.assertEqual((generic["active"], generic["signal"]), (True, "too_generic"))
         self.assertEqual(
             self.connection.execute(
                 "SELECT signal FROM summary_field_quality_signals WHERE artifact_id = ?",
                 (artifact_id,),
             ).fetchone()[0],
-            "down",
+            "too_generic",
         )
 
     def test_summary_field_feedback_rejects_mismatched_artifact(self):

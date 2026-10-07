@@ -36,6 +36,7 @@ def init_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_
     with sqlite3.connect(db_path) as connection:
         connection.executescript(schema_sql)
         migrate_structured_feedback_score_to_real(connection)
+        migrate_summary_field_quality_signals_to_three_state(connection)
         connection.execute("PRAGMA foreign_keys = ON")
         tables = list_tables(connection)
 
@@ -82,6 +83,51 @@ def migrate_structured_feedback_score_to_real(connection: sqlite3.Connection) ->
     connection.execute("PRAGMA foreign_keys = ON")
     if violations:
         raise RuntimeError(f"structured_feedback score migration produced foreign-key violations: {violations}")
+
+
+def migrate_summary_field_quality_signals_to_three_state(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'summary_field_quality_signals'"
+    ).fetchone()
+    if row is None or "'too_generic'" in str(row[0]):
+        return
+
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS summary_field_quality_signals_new (
+            id INTEGER PRIMARY KEY,
+            paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+            artifact_id INTEGER NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+            field_name TEXT NOT NULL CHECK (field_name IN ('research_problem', 'why_it_matters', 'approach')),
+            signal TEXT NOT NULL CHECK (signal IN ('up', 'down', 'good', 'too_generic', 'bad')),
+            field_text TEXT NOT NULL,
+            model TEXT,
+            artifact_metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (artifact_id, field_name)
+        );
+
+        INSERT INTO summary_field_quality_signals_new (
+            id, paper_id, artifact_id, field_name, signal, field_text, model,
+            artifact_metadata_json, created_at, updated_at
+        )
+        SELECT
+            id, paper_id, artifact_id, field_name, signal, field_text, model,
+            artifact_metadata_json, created_at, updated_at
+        FROM summary_field_quality_signals;
+
+        DROP TABLE summary_field_quality_signals;
+        ALTER TABLE summary_field_quality_signals_new RENAME TO summary_field_quality_signals;
+        CREATE INDEX IF NOT EXISTS idx_summary_field_quality_signals_paper
+        ON summary_field_quality_signals (paper_id);
+        """
+    )
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    connection.execute("PRAGMA foreign_keys = ON")
+    if violations:
+        raise RuntimeError(f"summary_field_quality_signals migration produced foreign-key violations: {violations}")
 
 
 def reset_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:

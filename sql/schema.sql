@@ -349,7 +349,7 @@ CREATE TABLE IF NOT EXISTS summary_field_quality_signals (
     paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
     artifact_id INTEGER NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
     field_name TEXT NOT NULL CHECK (field_name IN ('research_problem', 'why_it_matters', 'approach')),
-    signal TEXT NOT NULL CHECK (signal IN ('up', 'down')),
+    signal TEXT NOT NULL CHECK (signal IN ('up', 'down', 'good', 'too_generic', 'bad')),
     field_text TEXT NOT NULL,
     model TEXT,
     artifact_metadata_json TEXT NOT NULL DEFAULT '{}',

@@ -75,6 +75,13 @@ SUMMARY_FEEDBACK_FIELDS = {
     "approach": "Approach",
 }
 
+SUMMARY_FEEDBACK_SIGNALS = {
+    "good": {"label": "Good", "icon": "👍", "description": "Useful for deciding whether to read."},
+    "too_generic": {"label": "Too generic", "icon": "🫥", "description": "Plausible but not specific enough."},
+    "bad": {"label": "Bad", "icon": "👎", "description": "Not useful, vague, too short, or repeats the title."},
+}
+LEGACY_SUMMARY_FEEDBACK_SIGNALS = {"up", "down"}
+
 
 def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEFAULT_DB_PATH) -> None:
     init_db(db_path)
@@ -269,7 +276,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         paper_id=int(form.get("paper_id", [""])[0]),
                         artifact_id=int(form.get("artifact_id", [""])[0]),
                         field_name=form.get("field_name", [""])[0],
-                        signal=form.get("signal", ["down"])[0],
+                        signal=form.get("signal", ["bad"])[0],
                     )
                 except (ValueError, sqlite3.IntegrityError) as error:
                     payload = json.dumps({"error": str(error)}).encode("utf-8")
@@ -606,6 +613,38 @@ def render_review_queue(
           await navigator.clipboard.writeText(button.dataset.copyValue);
           button.textContent = "Copied";
           setTimeout(() => {{ button.textContent = originalText; }}, 1400);
+        }});
+      }});
+      document.querySelectorAll(".summary-feedback-button").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          const controls = button.closest(".summary-feedback-controls");
+          const buttons = controls ? controls.querySelectorAll(".summary-feedback-button") : [button];
+          buttons.forEach((item) => {{ item.disabled = true; }});
+          try {{
+            const response = await fetch("/summary-field-feedback", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body: new URLSearchParams({{
+                paper_id: button.dataset.paperId,
+                artifact_id: button.dataset.artifactId,
+                field_name: button.dataset.fieldName,
+                signal: button.dataset.signal,
+              }}),
+            }});
+            if (!response.ok) throw new Error("feedback failed");
+            const result = await response.json();
+            buttons.forEach((item) => {{
+              const selected = result.active && item.dataset.signal === result.signal;
+              item.classList.toggle("selected", selected);
+              item.setAttribute("aria-pressed", selected ? "true" : "false");
+            }});
+          }} catch (error) {{
+            button.classList.add("feedback-error");
+            setTimeout(() => button.classList.remove("feedback-error"), 1800);
+          }} finally {{
+            buttons.forEach((item) => {{ item.disabled = false; }});
+          }}
         }});
       }});
       document.querySelectorAll(".save-paper-button").forEach((button) => {{
@@ -2156,10 +2195,41 @@ def render_summary(
     sections = []
     for field_name, heading in SUMMARY_FEEDBACK_FIELDS.items():
         text = escape(summary_display_text(summary.get(field_name)))
-        sections.append(f'<section><h3>{heading}</h3><p>{text}</p></section>')
+        controls = render_summary_feedback_controls(
+            paper_id=paper_id,
+            artifact_id=artifact.get("id") if artifact else None,
+            field_name=field_name,
+            active_signal=(feedback_fields or {}).get(field_name),
+        )
+        sections.append(
+            f'<section><div class="summary-heading"><h3>{heading}</h3>{controls}</div><p>{text}</p></section>'
+        )
     return f"""<div class="summary-grid">
     {''.join(sections)}
   </div>"""
+
+
+def render_summary_feedback_controls(
+    *,
+    paper_id: int | None,
+    artifact_id: int | None,
+    field_name: str,
+    active_signal: str | None,
+) -> str:
+    if paper_id is None or artifact_id is None:
+        return ""
+    buttons = []
+    for signal, meta in SUMMARY_FEEDBACK_SIGNALS.items():
+        selected = active_signal == signal
+        title = f"{meta['label']}: {meta['description']}"
+        buttons.append(
+            f'<button type="button" class="summary-feedback-button summary-feedback-{signal}{" selected" if selected else ""}" '
+            f'data-paper-id="{paper_id}" data-artifact-id="{artifact_id}" '
+            f'data-field-name="{escape(field_name)}" data-signal="{signal}" '
+            f'aria-label="{escape(title)}" title="{escape(title)}" '
+            f'aria-pressed="{str(selected).lower()}">{meta["icon"]}</button>'
+        )
+    return '<div class="summary-feedback-controls" role="group" aria-label="Section quality feedback">' + ''.join(buttons) + '</div>'
 
 
 def summary_display_text(value: Any, *, max_chars: int = 520) -> str:
@@ -2840,7 +2910,8 @@ def toggle_summary_field_feedback(
 ) -> dict[str, Any]:
     if field_name not in SUMMARY_FEEDBACK_FIELDS:
         raise ValueError("Invalid summary field")
-    if signal not in {"up", "down"}:
+    allowed_signals = set(SUMMARY_FEEDBACK_SIGNALS) | LEGACY_SUMMARY_FEEDBACK_SIGNALS
+    if signal not in allowed_signals:
         raise ValueError("Invalid summary field signal")
     init_db(db_path)
     with connect_db(db_path) as connection:
@@ -3189,6 +3260,13 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .summary-grid section { min-width: 0; }
 .summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
 .summary-heading h3 { margin-bottom: 0; }
+.summary-feedback-controls { display: inline-flex; gap: 2px; align-items: center; opacity: 0.12; transition: opacity 120ms ease; }
+.paper-card:hover .summary-feedback-controls, .summary-feedback-controls:focus-within { opacity: 0.36; }
+.summary-feedback-button { display: inline-flex; align-items: center; justify-content: center; width: 22px; min-height: 22px; border: 1px solid transparent; border-radius: 999px; padding: 0; color: var(--muted); background: transparent; font-size: 13px; line-height: 1; opacity: 0.55; }
+.summary-feedback-button:hover, .summary-feedback-button:focus-visible { opacity: 0.95; color: var(--text); border-color: var(--border); background: rgba(148, 163, 184, 0.06); }
+.summary-feedback-button.selected { opacity: 1; color: var(--text); border-color: rgba(56, 189, 248, 0.38); background: rgba(56, 189, 248, 0.10); }
+.summary-feedback-button.feedback-error { border-color: rgba(251, 113, 133, 0.68); color: #fb7185; }
+.summary-feedback-button:disabled { cursor: wait; opacity: 0.25; }
 .summary-grid p, .source-summary p, .compact-summary { color: var(--muted-strong); font-size: 12px; }
 .source-summary { margin: 8px 0; }
 .source-summary p {
