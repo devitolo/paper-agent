@@ -134,6 +134,11 @@ def main() -> int:
         if command == "check-app":
             with urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=5) as response:
                 return 0 if json.load(response)["ready"] else 1
+        if command == "check-state":
+            from paper_agents.import_state import validate_live_artifact_paths
+            count = validate_live_artifact_paths(Path("."))
+            print(json.dumps({"artifact_paths": "valid", "artifact_count": count}, sort_keys=True))
+            return 0
         if command == "check-model":
             print(json.dumps(check_model(float(os.environ.get("PAPER_MODEL_CHECK_TIMEOUT", "120")))))
             return 0
@@ -143,7 +148,7 @@ def main() -> int:
             from paper_agents.manual_scout import worker_main
             return worker_main(Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]) if len(sys.argv) == 5 else None)
         if command != "start":
-            raise RuntimeError("Expected start, check-app, check-model, check-gemini or manual-scout")
+            raise RuntimeError("Expected start, check-app, check-state, check-model, check-gemini or manual-scout")
         from paper_agents.web import run_review_ui
         if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
             from paper_agents.migration_lifecycle import lease, downgrade, validate_container_contract

@@ -3264,6 +3264,8 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .source-badge-semantic-scholar::before { content: "S"; }
 .source-badge-core { color: #86efac; background: rgba(34, 197, 94, 0.13); border-color: rgba(74, 222, 128, 0.58); }
 .source-badge-core::before { content: "C"; }
+.source-badge-zenml { color: #67e8f9; background: rgba(6, 182, 212, 0.13); border-color: rgba(34, 211, 238, 0.58); }
+.source-badge-zenml::before { content: "Z"; }
 .source-badge-unknown { color: var(--muted); background: rgba(148, 163, 184, 0.07); border-color: var(--border); }
 .source-badge-unknown::before { content: "?"; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
@@ -3435,6 +3437,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .source-badge-openalex { color: #7dd3fc; background: rgba(14, 165, 233, 0.14); border-color: rgba(56, 189, 248, 0.58); }
   .source-badge-semantic-scholar { color: #d8b4fe; background: rgba(126, 34, 206, 0.16); border-color: rgba(168, 85, 247, 0.58); }
   .source-badge-core { color: #86efac; background: rgba(34, 197, 94, 0.13); border-color: rgba(74, 222, 128, 0.58); }
+  .source-badge-zenml { color: #67e8f9; background: rgba(6, 182, 212, 0.13); border-color: rgba(34, 211, 238, 0.58); }
   .source-badge-unknown { color: var(--muted); background: rgba(148, 163, 184, 0.07); border-color: var(--border); }
   .chart-axis { stroke: #8b949e; }
   .chart-grid { stroke: #30363d; opacity: 1; }

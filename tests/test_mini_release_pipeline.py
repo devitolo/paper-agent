@@ -154,6 +154,18 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('scripts/backup_db.sh /app/data/paper_agent.db /backups', script)
         self.assertNotIn('\u201d', script)
 
+    def test_production_update_preflights_persisted_state_before_app_replacement(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        preflight = script.index('phase_start "preflight persisted state"')
+        stop = script.index('phase_start "stop app"')
+        recreate = script.index('phase_start "recreate app"')
+        self.assertLess(preflight, stop)
+        self.assertLess(preflight, recreate)
+        self.assertIn('--volumes-from paper-mini-production-app-1', script)
+        self.assertIn('-m paper_agents.package_runtime check-state', script)
+        self.assertIn('persisted-state-preflight.json', script)
+        self.assertIn('persisted-state-preflight.log', script)
+
     def test_production_update_can_persist_openalex_cursor_flag(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         self.assertIn('OPENALEX_CURSOR=${PAPER_MINI_OPENALEX_CURSOR:-}', script)

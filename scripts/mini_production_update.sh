@@ -472,6 +472,16 @@ if ! "${compose[@]}" exec -T app bash scripts/backup_db.sh /app/data/paper_agent
 fi
 phase_end
 
+phase_start "preflight persisted state"
+if ! docker run --rm --network none --volumes-from paper-mini-production-app-1 \
+  --user 10001:10001 --entrypoint python "$APP_IMAGE" \
+  -m paper_agents.package_runtime check-state \
+  > "$RELEASE_DIR/persisted-state-preflight.json" 2> "$RELEASE_DIR/persisted-state-preflight.log"; then
+  echo "Persisted state preflight failed before app replacement. Evidence: $RELEASE_DIR" >&2
+  exit 1
+fi
+phase_end
+
 phase_start "stop app"
 "${compose[@]}" stop app
 APP_REPLACEMENT_STARTED=1

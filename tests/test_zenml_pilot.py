@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from paper_agents.db import connect_db, init_db
+from paper_agents.import_state import validate_live_artifact_paths
 from paper_agents.web import load_artifacts_for_paper, load_summary, render_match_rationale, source_badge_class, source_display_name
 from paper_agents.zenml_pilot import SEED_EXCLUDED_URLS, import_zenml_pilot, select_zenml_candidates
 
@@ -87,7 +88,9 @@ class ZenMLPilotTests(unittest.TestCase):
 
     def test_import_creates_review_queue_records_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp:
-            db_path = Path(temp) / "paper_agent.db"
+            root = Path(temp)
+            db_path = root / "data" / "paper_agent.db"
+            db_path.parent.mkdir()
             init_db(db_path)
             first = import_zenml_pilot(db_path=db_path, rows=self.sample_rows(), keep=2)
             second = import_zenml_pilot(db_path=db_path, rows=self.sample_rows(), keep=2)
@@ -109,8 +112,10 @@ class ZenMLPilotTests(unittest.TestCase):
                 self.assertIsNotNone(artifact)
                 self.assertTrue(artifact["path"].startswith("data/zenml-pilot/"))
                 self.assertFalse(Path(artifact["path"]).is_absolute())
-                summary_path = db_path.parent.parent / artifact["path"]
+                summary_path = root / artifact["path"]
+                self.assertTrue(summary_path.is_file())
                 summary = load_summary({**artifact, "path": summary_path})
+            self.assertEqual(validate_live_artifact_paths(root), 2)
             self.assertEqual(source_display_name("zenml"), "ZenML")
             self.assertEqual(source_badge_class("zenml"), "source-badge-zenml")
             self.assertEqual(summary["source_type"], "zenml_summary")
