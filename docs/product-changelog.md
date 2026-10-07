@@ -2,6 +2,34 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-10-06
+
+### v0.2 quality and installability milestone
+
+Status: Active project milestone; production quality stack is ahead of public package acceptance.
+
+Decision: Treat current work as v0.2, with two linked themes: better recommendation quality and a refreshed path for another person to install and use Project Paper.
+
+Current production state:
+
+- Source coverage now includes improved OpenAlex retrieval, progressive Semantic Scholar retrieval, and opt-in CORE with API-key guidance.
+- Curator uses MiniLM for interest fit and Qwen3 4B for active evidence/type assessment on the top 10 preliminary candidates.
+- Qwen 2.5 1.5B remains the extraction model for Review Queue `Problem`, `Why it matters`, and `Approach`.
+- If Qwen3 times out, fails, or returns invalid output, Curator falls back to deterministic scoring.
+- Conceptual, architecture, framework, and threat-model papers are not penalized merely for being non-empirical; unsupported experimental claims remain weak.
+- MiniLM Eval and paired-shadow experiments are disabled as production navigation surfaces.
+- Section feedback uses `good`, `too_generic`, and `bad`, with selected controls visibly marked.
+- Mini production uses GitHub Actions and immutable image deployment from `mini-production`; normal work flows through `codex/*` branches into `main` before explicit promotion to production.
+- Scheduled Mini jobs share a global nonblocking job lease; overlapping jobs skip and record a `skipped_busy` Health event.
+
+Package/public-release boundary:
+
+- v0.1.3 already passed the earlier public package acceptance path and remains the supported simple install baseline.
+- v0.2 should refresh that evidence rather than restart productization from zero.
+- Do not claim a public v0.2 package until fresh acceptance proves the supported installer path works.
+- MiniLM is a likely v0.2 package candidate if installer and acceptance evidence support it cleanly.
+- Qwen3 Curator judging, optional CORE/Semantic Scholar/OpenAlex credentials, scheduled production jobs, and Mini deployment remain advanced/operator paths until public-package acceptance says otherwise.
+
 ## 2026-10-05
 
 ### Review Queue saved and excluded organization states

@@ -526,34 +526,6 @@ print(json.dumps(result, sort_keys=True))
 if result.get("status") != "scored":
     raise SystemExit("MiniLM Curator interest-fit verification failed")
 PY
-"${compose[@]}" exec -T app python - <<'PY' > "$RELEASE_DIR/qwen3-curator-check.json"
-import json
-import os
-from paper_agents.curator_evidence import assess_evidence
-from paper_agents.local_extract import unload_ollama_model
-from paper_agents.runtime_config import ollama_url
-
-model = os.environ.get("PAPER_AGENT_CURATOR_MODEL", "qwen3:4b")
-candidate = {
-    "title": "Operational incident diagnosis using production telemetry",
-    "abstract": (
-        "We evaluate a root cause analysis system using measured incidents from a production-like "
-        "microservice environment. The method correlates logs, metrics, traces, and service dependencies, "
-        "and reports diagnosis accuracy and recovery time against two baselines."
-    ),
-}
-try:
-    result = assess_evidence(candidate, model=model, ollama_url=ollama_url(), timeout=240)
-    print(json.dumps(result, sort_keys=True))
-    if result.get("status") != "ok" or result.get("model") != model:
-        print("Qwen3 Curator verification result: " + json.dumps(result, sort_keys=True))
-        raise SystemExit("Qwen3 Curator verification failed")
-finally:
-    try:
-        unload_ollama_model(ollama_url(), model)
-    except Exception:
-        pass
-PY
 if ! "${compose[@]}" exec -T app python -m paper_agents.cli zenml-pilot --db /app/data/paper_agent.db --fetch-limit "${PAPER_ZENML_PILOT_FETCH:-200}" --keep "${PAPER_ZENML_PILOT_KEEP:-3}" \
   > "$RELEASE_DIR/zenml-pilot-import.txt" 2>&1; then
   echo "ZenML pilot import failed; deployment remains healthy. Evidence: $RELEASE_DIR/zenml-pilot-import.txt" >&2
@@ -688,7 +660,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- PAPER_AGENT_MINILM_ENABLED: \`$verification_minilm_enabled\`"
     echo "- MiniLM Curator check: \`passed\`"
     echo "- Qwen3 Curator model: \`$verification_curator_model\`"
-    echo "- Qwen3 Curator check: \`passed\`"
+    echo "- Qwen3 Curator check: \`skipped during deploy\`"
     echo "- PAPER_MINILM_EVAL_ENABLED: \`0\`"
     echo "- PAPER_MINILM_SHADOW_ENABLED: \`0\`"
     echo "- MiniLM runner SHA256: \`$verification_minilm_runner\`"

@@ -20,10 +20,19 @@ The Mini production host inspected on 2026-09-25 is:
 - Secrets: existing private files referenced from
   `/home/devitolo/paper-mini-rehearsal/production-cutover/final-20260924-230636/production.env`.
 
-The deployment branch is `mini-production`. Pull requests to that branch run
-tests only. Pushes to that branch build and publish a `linux/amd64`
-`mini-production` image, then deploy that exact immutable digest on the
-self-hosted Mini runner.
+The official branches are:
+
+- `main`: canonical accepted project history and integration branch.
+- `mini-production`: current Mac mini deployment rail. Pushing here triggers
+  production deployment.
+- `release/0.1.x`: maintenance branch for the old 0.1.x line only.
+
+Normal work happens on temporary branches, usually `codex/<short-feature-name>`,
+then merges into `main` first. Validating on `main` must not deploy to the Mini.
+When the user explicitly says to release, promote, or push to production, promote
+`main` to `mini-production`. Pushes to `mini-production` build and publish a
+`linux/amd64` `mini-production` image, then deploy that exact immutable digest on
+the self-hosted Mini runner.
 
 ## SSH access policy
 
@@ -135,13 +144,17 @@ reboot.
 
 ## Production deployment flow
 
-1. Open a pull request targeting `mini-production`.
-2. GitHub-hosted runners run tests only.
-3. Merge to `mini-production`.
-4. GitHub-hosted runner builds and publishes the Mini image for `linux/amd64`.
-5. The deploy job runs on the self-hosted runner labeled
+1. Do work on a temporary branch, normally `codex/<short-feature-name>`.
+2. Merge accepted work into `main`.
+3. Validate on `main`; this must not deploy to the Mini.
+4. When the user explicitly approves release/promotion, promote `main` to
+   `mini-production`.
+5. Push to `mini-production`.
+6. GitHub-hosted runner runs tests, then builds and publishes the Mini image for
+   `linux/amd64`.
+7. The deploy job runs on the self-hosted runner labeled
    `project-paper-mini`.
-6. The deploy job:
+8. The deploy job:
    - logs in to GHCR using the job token;
    - pulls the exact `image@sha256` produced by the build job;
    - skips if that digest is already deployed;
@@ -160,6 +173,12 @@ Overlapping deployments are serialized by GitHub Actions concurrency and a host
 deployment lock. Queued stale deployments check the current remote branch head
 before mutating production and exit without replacing a newer deployment.
 Deployments are not canceled halfway through container replacement.
+
+Do not do normal feature development directly on `mini-production` unless it is
+an urgent hotfix. If a hotfix lands there first, back-merge or cherry-pick it to
+`main` afterward. Do not use `release/0.1.x` unless patching the old 0.1.x line.
+Delete or close temporary `codex/...` branches after merge/deploy/supersession;
+use tags as bookmarks for meaningful milestones or useful historical evidence.
 
 ## Scheduled jobs
 

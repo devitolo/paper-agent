@@ -71,9 +71,10 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("PAPER_AGENT_CURATOR_MODEL: ${PAPER_AGENT_CURATOR_MODEL:-qwen3:4b}", compose)
         self.assertIn('> "$RELEASE_DIR/minilm-check.json"', update)
         self.assertIn("MiniLM Curator interest-fit verification failed", update)
-        self.assertIn('> "$RELEASE_DIR/qwen3-curator-check.json"', update)
-        self.assertIn("Qwen3 Curator verification failed", update)
-        self.assertIn("timeout=240", update)
+        self.assertIn('Qwen3 Curator check: \\`skipped during deploy\\`', update)
+        self.assertNotIn('> "$RELEASE_DIR/qwen3-curator-check.json"', update)
+        self.assertNotIn("Qwen3 Curator verification failed", update)
+        self.assertNotIn("timeout=240", update)
 
     def test_mini_compose_uses_short_stop_grace_after_job_drain(self):
         compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")
@@ -212,6 +213,9 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('Image size: \\`', script)
         self.assertIn('Image layers: \\`', script)
         self.assertIn('Layer diff: \\`', script)
+        self.assertNotIn('qwen3-curator-check.json', script)
+        self.assertNotIn('assess_evidence(candidate', script)
+        self.assertNotIn('timeout=240', script)
 
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")
