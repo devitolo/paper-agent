@@ -526,6 +526,33 @@ print(json.dumps(result, sort_keys=True))
 if result.get("status") != "scored":
     raise SystemExit("MiniLM Curator interest-fit verification failed")
 PY
+"${compose[@]}" exec -T app python - <<'PY' > "$RELEASE_DIR/qwen3-curator-check.json"
+import json
+import os
+from paper_agents.curator_evidence import assess_evidence
+from paper_agents.local_extract import unload_ollama_model
+from paper_agents.runtime_config import ollama_url
+
+model = os.environ.get("PAPER_AGENT_CURATOR_MODEL", "qwen3:4b")
+candidate = {
+    "title": "Operational incident diagnosis using production telemetry",
+    "abstract": (
+        "We evaluate a root cause analysis system using measured incidents from a production-like "
+        "microservice environment. The method correlates logs, metrics, traces, and service dependencies, "
+        "and reports diagnosis accuracy and recovery time against two baselines."
+    ),
+}
+try:
+    result = assess_evidence(candidate, model=model, ollama_url=ollama_url(), timeout=120)
+    print(json.dumps(result, sort_keys=True))
+    if result.get("status") != "ok" or result.get("model") != model:
+        raise SystemExit("Qwen3 Curator verification failed")
+finally:
+    try:
+        unload_ollama_model(ollama_url(), model)
+    except Exception:
+        pass
+PY
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
 
@@ -536,6 +563,7 @@ verification_arxiv_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${P
 verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_OPENALEX_CURSOR:-unset}"')
 verification_semantic_scholar_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_SEMANTIC_SCHOLAR_PROGRESS:-unset}"')
 verification_minilm_enabled=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_AGENT_MINILM_ENABLED:-unset}"')
+verification_curator_model=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_AGENT_CURATOR_MODEL:-unset}"')
 verification_minilm_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
 expected_minilm_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
 verification_minilm_shadow_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_shadow_after_pipeline.sh" | awk '{print $1}')
@@ -555,6 +583,7 @@ removed_image_layer_count=$(sed -n 's/^removed_image_layer_count=//p' "$RELEASE_
   printf 'PAPER_OPENALEX_CURSOR=%s\n' "$verification_openalex_cursor"
   printf 'PAPER_SEMANTIC_SCHOLAR_PROGRESS=%s\n' "$verification_semantic_scholar_progress"
   printf 'PAPER_AGENT_MINILM_ENABLED=%s\n' "$verification_minilm_enabled"
+  printf 'PAPER_AGENT_CURATOR_MODEL=%s\n' "$verification_curator_model"
   printf 'image=%s\n' "$verification_image"
   printf 'image_size_mib=%s\n' "$image_size_mib"
   printf 'image_layer_count=%s\n' "$image_layer_count"
@@ -581,6 +610,10 @@ if [[ -n "$SEMANTIC_SCHOLAR_PROGRESS" && "$verification_semantic_scholar_progres
 fi
 if [[ "$verification_minilm_enabled" != 1 ]]; then
   echo "Post-deploy verification failed: PAPER_AGENT_MINILM_ENABLED=$verification_minilm_enabled, expected 1" >&2
+  exit 1
+fi
+if [[ "$verification_curator_model" != qwen3:4b ]]; then
+  echo "Post-deploy verification failed: PAPER_AGENT_CURATOR_MODEL=$verification_curator_model, expected qwen3:4b" >&2
   exit 1
 fi
 if [[ "$verification_minilm_runner" != "$expected_minilm_runner" ]]; then
@@ -613,6 +646,7 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_openalex_cursor=%s\n' "$verification_openalex_cursor"
   printf 'verified_semantic_scholar_progress=%s\n' "$verification_semantic_scholar_progress"
   printf 'verified_minilm_curator_enabled=%s\n' "$verification_minilm_enabled"
+  printf 'verified_curator_model=%s\n' "$verification_curator_model"
   printf 'verified_image_size_mib=%s\n' "$image_size_mib"
   printf 'verified_image_layer_count=%s\n' "$image_layer_count"
   printf 'verified_previous_image_layer_count=%s\n' "$previous_image_layer_count"
@@ -647,6 +681,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- PAPER_SEMANTIC_SCHOLAR_PROGRESS: \`$verification_semantic_scholar_progress\`"
     echo "- PAPER_AGENT_MINILM_ENABLED: \`$verification_minilm_enabled\`"
     echo "- MiniLM Curator check: \`passed\`"
+    echo "- Qwen3 Curator model: \`$verification_curator_model\`"
+    echo "- Qwen3 Curator check: \`passed\`"
     echo "- PAPER_MINILM_EVAL_ENABLED: \`0\`"
     echo "- PAPER_MINILM_SHADOW_ENABLED: \`0\`"
     echo "- MiniLM runner SHA256: \`$verification_minilm_runner\`"

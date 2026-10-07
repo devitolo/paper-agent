@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 from unittest.mock import patch
-from paper_agents import migration_job, migration_lifecycle
+from paper_agents import job_events, migration_job, migration_lifecycle
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -192,6 +192,24 @@ class HostCronTests(unittest.TestCase):
 
 
 class JobLeaseTests(unittest.TestCase):
+    def test_overlapping_scheduled_job_skips_and_records_health_event(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            events = root / 'job-events.jsonl'
+            env = {
+                'PAPER_AGENT_STARTUP_MODE': 'imported',
+                'PAPER_AGENT_LIFECYCLE_DIR': directory,
+                'PAPER_AGENT_JOB_EVENT_FILE': str(events),
+            }
+            with patch.dict(os.environ, env), patch.object(subprocess, 'Popen') as launch, \
+                    migration_lifecycle.lease(root, exclusive=True, name='.scheduled-job.lock'):
+                self.assertEqual(migration_job.run('arxiv'), 0)
+            launch.assert_not_called()
+            recorded = job_events.recent(events)
+            self.assertEqual(recorded[0]['status'], 'skipped_busy')
+            self.assertEqual(recorded[0]['job'], 'arxiv')
+            self.assertIn('another Project Paper job', recorded[0]['message'])
+
     def test_every_job_fails_busy_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict(os.environ, {'PAPER_AGENT_STARTUP_MODE':'imported',

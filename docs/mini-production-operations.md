@@ -148,3 +148,8 @@ operator explicitly closes the rollback window. Before any cleanup:
 This document does not itself authorize cleanup or rollback. A rollback must use
 the preserved cutover evidence and a separately approved operator procedure; do
 not improvise by enabling native services alongside the containers.
+# Curator model and scheduled-job safety
+
+Production uses `qwen3:4b` for active Curator evidence assessment and `qwen2.5:1.5b-instruct` for review-field extraction. Deployment runs a bounded Qwen3 assessment as a post-deploy check and fails the rollout if it cannot obtain a valid structured result. Curator unloads Qwen3 after each candidate batch. A runtime assessment failure falls back to the deterministic Curator score and does not stop the source pipeline.
+
+Only one managed scheduled job runs at a time. An overlapping invocation is skipped for that day, exits successfully, and records the reason in `data/job-events.jsonl`. The Health page shows the event under **Scheduled jobs** and raises a warning when the most recent event for that job is `skipped_busy`.

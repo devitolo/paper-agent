@@ -8,6 +8,7 @@ from .gemini_guardian import supervise
 from .gemini_process import _termination_as_exception, _cleanup_signals
 from .gemini_runtime import check_timeout
 from .migration_lifecycle import lease, check_descriptor
+from . import job_events
 
 SCRIPTS = {'arxiv':'nightly_pipeline.sh', 'openalex':'openalex_pipeline.sh',
            'semantic':'semantic_scholar_pipeline.sh',
@@ -43,27 +44,45 @@ def run(job):
         raise RuntimeError('Container cron requires imported runtime configuration')
     budget = float(os.environ.get('PAPER_AGENT_JOB_TIMEOUT', '1800'))
     check_timeout(budget)
-    with _termination_as_exception(), lease(Path(os.environ['PAPER_AGENT_LIFECYCLE_DIR'])) as descriptor:
-        reader, writer = os.pipe()
-        process = None
+    lifecycle_dir = Path(os.environ['PAPER_AGENT_LIFECYCLE_DIR'])
+    with _termination_as_exception(), lease(lifecycle_dir) as descriptor:
         try:
-            process = subprocess.Popen([sys.executable, '-m', 'paper_agents.migration_job',
-                '--watch', job, str(reader), str(descriptor), str(budget)],
-                pass_fds=(reader, descriptor), start_new_session=True)
+            job_lease = lease(lifecycle_dir, exclusive=True, name='.scheduled-job.lock')
+            job_descriptor = job_lease.__enter__()
+        except RuntimeError as error:
+            if str(error) != 'Runtime lifecycle busy':
+                raise
+            message = f"Skipped {job}: another Project Paper job was already running."
+            job_events.record(job, "skipped_busy", message)
+            print(message)
+            return 0
+        try:
+            job_events.record(job, "started", f"Started {job} scheduled job.")
+            reader, writer = os.pipe()
+            process = None
             try:
-                return process.wait(timeout=budget+3)
-            except subprocess.TimeoutExpired:
-                raise RuntimeError('Migration job cleanup pending; runtime lease retained.') from None
+                process = subprocess.Popen([sys.executable, '-m', 'paper_agents.migration_job',
+                    '--watch', job, str(reader), str(descriptor), str(budget)],
+                    pass_fds=(reader, descriptor, job_descriptor), start_new_session=True)
+                try:
+                    result = process.wait(timeout=budget+3)
+                    status = "completed" if result == 0 else "failed"
+                    job_events.record(job, status, f"{job} scheduled job {status}.")
+                    return result
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError('Migration job cleanup pending; runtime lease retained.') from None
+            finally:
+                # Closing liveness pipe also works when this caller is SIGKILLed.
+                os.close(reader); os.close(writer)
+                if process is not None:
+                    with _cleanup_signals():
+                        try:
+                            process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            # Never kill the watcher which owns descendants and the lease.
+                            raise RuntimeError('Migration job cleanup pending; runtime lease retained.') from None
         finally:
-            # Closing liveness pipe also works when this caller is SIGKILLed.
-            os.close(reader); os.close(writer)
-            if process is not None:
-                with _cleanup_signals():
-                    try:
-                        process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        # Never kill the watcher which owns descendants and the lease.
-                        raise RuntimeError('Migration job cleanup pending; runtime lease retained.') from None
+            job_lease.__exit__(None, None, None)
 
 
 def main():
