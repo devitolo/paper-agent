@@ -48,6 +48,84 @@ SEED_EXCLUDED_URLS = {
     "https://www.uber.com/au/en/blog/first-pass-prd/",
 }
 
+FALLBACK_PILOT_ROWS = [
+    {
+        "created_at": "2026-01-01T00:00:00Z",
+        "title": "Governed AI Enablement for a Banking Internal Developer Platform",
+        "industry": "Finance",
+        "year": 2026,
+        "source_url": "https://www.infoq.com/presentations/ai-platform-engineering-roundtable/?utm_campaign=infoq_content&utm_source=infoq&utm_medium=feed&utm_term=AI%2C+ML+%26+Data+Engineering-presentations",
+        "company": "dkb",
+        "application_tags": ["Internal Developer Platform", "AI Enablement"],
+        "tools_tags": ["LLMOps", "MCP"],
+        "extra_tags": ["Platform Engineering"],
+        "techniques_tags": ["Governance"],
+        "short_summary": "DKB describes governed AI enablement through an internal developer platform for banking engineering teams.",
+        "full_summary": "DKB describes how banking engineering teams can adopt AI through a governed internal developer platform, with attention to enablement, platform access, and operational controls.",
+        "webflow_url": "https://www.zenml.io/llmops-database",
+    },
+    {
+        "created_at": "2026-01-01T00:00:00Z",
+        "title": "Building an Agentic Software Factory for High-Velocity Development",
+        "industry": "Tech",
+        "year": 2026,
+        "source_url": "https://newsletter.pragmaticengineer.com/p/openai-software-factory",
+        "company": "openai",
+        "application_tags": ["Developer Productivity", "Software Factory"],
+        "tools_tags": ["Agents", "LLMs"],
+        "extra_tags": ["Engineering Workflows"],
+        "techniques_tags": ["Agentic Coding"],
+        "short_summary": "OpenAI's software-factory discussion is a practical case study in agentic development workflows and developer productivity.",
+        "full_summary": "The case study describes how agentic coding and software-factory practices can change engineering workflows, review, maintenance, and delivery speed.",
+        "webflow_url": "https://www.zenml.io/llmops-database",
+    },
+    {
+        "created_at": "2026-01-01T00:00:00Z",
+        "title": "Scaling Context-Aware Coding Agents with MCP Playbooks",
+        "industry": "Tech",
+        "year": 2026,
+        "source_url": "https://www.infoq.com/presentations/linkedin-context-engineering/?utm_campaign=infoq_content&utm_source=infoq&utm_medium=feed&utm_term=AI%2C+ML+%26+Data+Engineering-presentations",
+        "company": "linkedin",
+        "application_tags": ["Coding Agents", "Context Engineering"],
+        "tools_tags": ["MCP", "Agents"],
+        "extra_tags": ["Developer Productivity"],
+        "techniques_tags": ["Playbooks"],
+        "short_summary": "LinkedIn discusses context-aware coding agents and MCP playbooks for developer workflows.",
+        "full_summary": "LinkedIn describes how context engineering and MCP playbooks can help coding agents operate across developer workflows with more useful context.",
+        "webflow_url": "https://www.zenml.io/llmops-database",
+    },
+    {
+        "created_at": "2026-01-01T00:00:00Z",
+        "title": "Cloud-Based Agent Platform for Automated Engineering Tasks",
+        "industry": "Tech",
+        "year": 2026,
+        "source_url": "https://careersatdoordash.com/blog/delegating-engineering-work-to-cloud-based-agents/",
+        "company": "doordash",
+        "application_tags": ["Engineering Automation", "Agents"],
+        "tools_tags": ["Cloud Agents"],
+        "extra_tags": ["Developer Productivity"],
+        "techniques_tags": ["Task Delegation"],
+        "short_summary": "DoorDash describes delegating engineering work to cloud-based agents for automated development tasks.",
+        "full_summary": "DoorDash describes a cloud-based agent platform for delegating engineering work, improving developer workflows, and automating maintenance tasks.",
+        "webflow_url": "https://www.zenml.io/llmops-database",
+    },
+    {
+        "created_at": "2026-01-01T00:00:00Z",
+        "title": "Centralized Gateway for AI Agent-Tool Access",
+        "industry": "Tech",
+        "year": 2026,
+        "source_url": "https://careersatdoordash.com/blog/how-doordash-built-a-centralized-gateway-for-ai-agent-tool-access/",
+        "company": "doordash",
+        "application_tags": ["Agent Tool Access", "Platform Engineering"],
+        "tools_tags": ["MCP", "Agents"],
+        "extra_tags": ["Governance"],
+        "techniques_tags": ["Gateway"],
+        "short_summary": "DoorDash describes a centralized gateway for AI agent access to tools and internal systems.",
+        "full_summary": "DoorDash describes a centralized gateway that manages AI agent access to tools, helping internal teams govern agent capabilities and platform integration.",
+        "webflow_url": "https://www.zenml.io/llmops-database",
+    },
+]
+
 HIGH_VALUE_TERMS = {
     "assistant": 12,
     "assistants": 12,
@@ -240,7 +318,15 @@ def import_zenml_pilot(
             "items": [],
         }
 
-    fetched_rows = rows if rows is not None else fetch_zenml_rows(fetch_limit=fetch_limit)
+    fetch_error = None
+    if rows is not None:
+        fetched_rows = rows
+    else:
+        try:
+            fetched_rows = fetch_zenml_rows(fetch_limit=fetch_limit)
+        except Exception as error:
+            fetch_error = f"{type(error).__name__}: {error}"
+            fetched_rows = FALLBACK_PILOT_ROWS
     selected = select_zenml_candidates(
         fetched_rows,
         keep=keep,
@@ -251,6 +337,7 @@ def import_zenml_pilot(
             "status": "dry_run",
             "source": ZENML_SOURCE,
             "fetched_count": len(fetched_rows),
+            "fetch_error": fetch_error,
             "selected_count": len(selected),
             "items": summarize_items(selected),
         }
@@ -331,6 +418,7 @@ def import_zenml_pilot(
         "status": "imported",
         "source": ZENML_SOURCE,
         "fetched_count": len(fetched_rows),
+        "fetch_error": fetch_error,
         "imported_count": len(imported),
         "workflow_cycle_id": cycle_id,
         "items": imported,
