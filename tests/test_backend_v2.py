@@ -2785,6 +2785,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('data-signal="too_generic"', html)
         self.assertIn('data-signal="bad"', html)
         self.assertIn("🫥", html)
+        self.assertIn('summary-feedback-controls has-selection', html)
+        self.assertIn('summary-feedback-too_generic selected', html)
 
         result = web.toggle_summary_field_feedback(
             self.db_path,

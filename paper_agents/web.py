@@ -639,6 +639,7 @@ def render_review_queue(
               item.classList.toggle("selected", selected);
               item.setAttribute("aria-pressed", selected ? "true" : "false");
             }});
+            if (controls) controls.classList.toggle("has-selection", !!result.active);
           }} catch (error) {{
             button.classList.add("feedback-error");
             setTimeout(() => button.classList.remove("feedback-error"), 1800);
@@ -2229,7 +2230,8 @@ def render_summary_feedback_controls(
             f'aria-label="{escape(title)}" title="{escape(title)}" '
             f'aria-pressed="{str(selected).lower()}">{meta["icon"]}</button>'
         )
-    return '<div class="summary-feedback-controls" role="group" aria-label="Section quality feedback">' + ''.join(buttons) + '</div>'
+    active_class = " has-selection" if active_signal else ""
+    return f'<div class="summary-feedback-controls{active_class}" role="group" aria-label="Section quality feedback">' + ''.join(buttons) + '</div>'
 
 
 def summary_display_text(value: Any, *, max_chars: int = 520) -> str:
@@ -3262,6 +3264,8 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .summary-heading h3 { margin-bottom: 0; }
 .summary-feedback-controls { display: inline-flex; gap: 2px; align-items: center; opacity: 0.12; transition: opacity 120ms ease; }
 .paper-card:hover .summary-feedback-controls, .summary-feedback-controls:focus-within { opacity: 0.36; }
+.summary-feedback-controls.has-selection { opacity: 0.58; }
+.paper-card:hover .summary-feedback-controls.has-selection, .summary-feedback-controls.has-selection:focus-within { opacity: 0.78; }
 .summary-feedback-button { display: inline-flex; align-items: center; justify-content: center; width: 22px; min-height: 22px; border: 1px solid transparent; border-radius: 999px; padding: 0; color: var(--muted); background: transparent; font-size: 13px; line-height: 1; opacity: 0.55; }
 .summary-feedback-button:hover, .summary-feedback-button:focus-visible { opacity: 0.95; color: var(--text); border-color: var(--border); background: rgba(148, 163, 184, 0.06); }
 .summary-feedback-button.selected { opacity: 1; color: var(--text); border-color: rgba(56, 189, 248, 0.38); background: rgba(56, 189, 248, 0.10); }
