@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from paper_agents import db, telemetry
-from paper_agents.curator_evidence import assess_evidence
+from paper_agents.curator_evidence import DEFAULT_CURATOR_MODEL, assess_evidence
 from paper_agents.curator_interest import (
     default_interest_scorer,
     positive_interest_descriptions,
@@ -14,6 +14,7 @@ from paper_agents.curator_interest import (
 from paper_agents.curator_scoring import SCORING_VERSION, evaluate_candidate
 from paper_agents.paper_eligibility import curator_eligibility
 from paper_agents.runtime_config import ollama_url
+from paper_agents.local_extract import unload_ollama_model
 
 DEFAULT_MAX_RECOMMENDATIONS = 3
 DEFAULT_MIN_QUALITY_SCORE = 25.0
@@ -26,10 +27,11 @@ class CuratorConfig:
     max_scout_attempts: int = 3
     model: str = SCORING_VERSION
     evidence_enabled: bool = False
-    evidence_model: str = "qwen2.5:1.5b-instruct"
+    evidence_model: str = DEFAULT_CURATOR_MODEL
     evidence_ollama_url: str = field(default_factory=ollama_url)
     evidence_timeout: int = 45
     evidence_max_chars: int = 7000
+    evidence_candidate_limit: int = 10
     interest_fit_enabled: bool = True
     interest_descriptions: tuple[str, ...] = ()
     interest_fit_scorer: Callable[[str, str, str], float] | None = field(
@@ -71,16 +73,21 @@ class CuratorAgent:
             except Exception as error:
                 interest_runtime_error = str(error)
 
+        def apply_eligibility(evaluation: dict[str, Any], enriched: dict[str, Any]) -> None:
+            eligibility = curator_eligibility(enriched)
+            evaluation["curator_eligibility"] = eligibility
+            evaluation["score_components"]["curator_eligibility"] = eligibility
+            if eligibility["disqualified"]:
+                evaluation["score"] = 0.0
+                evaluation["rationale"] += f" Curator eligibility blocked recommendation: {eligibility['disqualification_reason']}."
+            elif eligibility["labels"]:
+                evaluation["rationale"] += " Curator labels: " + ", ".join(eligibility["labels"]) + "."
+
         evaluations = []
         for candidate in unique_candidates.values():
             with telemetry.span("curator.evaluate", paper_id=candidate["paper_id"],
                                 scout_candidate_id=candidate.get("scout_candidate_id"), scoring_version=SCORING_VERSION):
                 enriched = {**candidate, "evidence": db.paper_evidence_context(connection, candidate["paper_id"])}
-                if config.evidence_enabled:
-                    enriched["evidence_assessment"] = assess_evidence(
-                        enriched, model=config.evidence_model, ollama_url=config.evidence_ollama_url,
-                        timeout=config.evidence_timeout, max_chars=config.evidence_max_chars,
-                    )
                 if not config.interest_fit_enabled:
                     interest_fit = unavailable_interest_fit("disabled")
                 elif interest_runtime_error is not None:
@@ -90,17 +97,39 @@ class CuratorAgent:
                 else:
                     interest_fit = score_interest_fit(enriched, interests, interest_scorer)
                 evaluation = evaluate_candidate(enriched, profile)
-                eligibility = curator_eligibility(enriched)
-                evaluation["curator_eligibility"] = eligibility
-                evaluation["score_components"]["curator_eligibility"] = eligibility
-                if eligibility["disqualified"]:
-                    evaluation["score"] = 0.0
-                    evaluation["rationale"] += f" Curator eligibility blocked recommendation: {eligibility['disqualification_reason']}."
-                elif eligibility["labels"]:
-                    evaluation["rationale"] += " Curator labels: " + ", ".join(eligibility["labels"]) + "."
+                apply_eligibility(evaluation, enriched)
                 evaluation["interest_fit"] = interest_fit
                 evaluation["score_components"]["interest_fit"] = interest_fit
                 evaluations.append(evaluation)
+
+        evaluations.sort(
+            key=lambda item: (
+                item["interest_fit"]["status"] == "scored",
+                item["interest_fit"].get("score")
+                if item["interest_fit"]["status"] == "scored" else float("-inf"),
+                item["score"],
+                item.get("published") or "",
+            ),
+            reverse=True,
+        )
+        try:
+            if config.evidence_enabled:
+                for index, preliminary in enumerate(evaluations[:max(1, config.evidence_candidate_limit)]):
+                    enriched = {**preliminary, "evidence_assessment": assess_evidence(
+                        preliminary, model=config.evidence_model, ollama_url=config.evidence_ollama_url,
+                        timeout=config.evidence_timeout, max_chars=config.evidence_max_chars,
+                    )}
+                    evaluation = evaluate_candidate(enriched, profile)
+                    apply_eligibility(evaluation, enriched)
+                    evaluation["interest_fit"] = preliminary["interest_fit"]
+                    evaluation["score_components"]["interest_fit"] = preliminary["interest_fit"]
+                    evaluations[index] = evaluation
+        finally:
+            if config.evidence_enabled:
+                try:
+                    unload_ollama_model(config.evidence_ollama_url, config.evidence_model)
+                except (OSError, TimeoutError, ValueError):
+                    telemetry.event("curator_model_unload_failed", model=config.evidence_model)
         evaluations.sort(
             key=lambda item: (
                 item["interest_fit"]["status"] == "scored",
@@ -175,6 +204,7 @@ class CuratorAgent:
                             "prior_cycle_recommendations": len(prior_ids),
                             "evidence_enabled": config.evidence_enabled,
                             "evidence_model": config.evidence_model if config.evidence_enabled else None,
+                            "evidence_candidate_limit": config.evidence_candidate_limit,
                             "interest_fit_enabled": config.interest_fit_enabled,
                             "interest_fit_interests": interests,
                             "interest_fit_runtime_error": interest_runtime_error}), curator_run_id),
