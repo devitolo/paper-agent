@@ -192,6 +192,16 @@ class HostCronTests(unittest.TestCase):
 
 
 class JobLeaseTests(unittest.TestCase):
+    def test_job_event_default_follows_runtime_repo(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, {'PAPER_AGENT_REPO': directory}, clear=False,
+        ):
+            os.environ.pop('PAPER_AGENT_JOB_EVENT_FILE', None)
+            self.assertEqual(
+                job_events.event_path(),
+                Path(directory) / 'data' / 'job-events.jsonl',
+            )
+
     def test_overlapping_scheduled_job_skips_and_records_health_event(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
