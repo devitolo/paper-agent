@@ -88,6 +88,9 @@ class CuratorV3ScoringTests(unittest.TestCase):
 
 
 class CuratorV3EvidenceCallTests(unittest.TestCase):
+    def test_curator_allows_bounded_qwen3_cold_start(self):
+        self.assertEqual(CuratorConfig().evidence_timeout, 180)
+
     def test_malformed_response_becomes_unavailable_assessment(self):
         with patch("paper_agents.curator_evidence.call_ollama", return_value={"response": "not-json"}):
             result = assess_evidence({"title": "Test", "abstract": "Some abstract"})

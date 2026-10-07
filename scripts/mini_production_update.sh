@@ -543,9 +543,10 @@ candidate = {
     ),
 }
 try:
-    result = assess_evidence(candidate, model=model, ollama_url=ollama_url(), timeout=120)
+    result = assess_evidence(candidate, model=model, ollama_url=ollama_url(), timeout=240)
     print(json.dumps(result, sort_keys=True))
     if result.get("status") != "ok" or result.get("model") != model:
+        print("Qwen3 Curator verification result: " + json.dumps(result, sort_keys=True))
         raise SystemExit("Qwen3 Curator verification failed")
 finally:
     try:
