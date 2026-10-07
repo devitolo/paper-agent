@@ -55,6 +55,7 @@ calls one of these launcher jobs:
 | OpenAlex pipeline | `openalex` | daily 04:00 |
 | arXiv pipeline | `arxiv` | daily 05:00 |
 | Semantic Scholar pipeline | `semantic` | daily 06:00 |
+| CORE pipeline | `core` | daily trial source run; see live crontab |
 | Gemini profile comparison | `profile` | biweekly cadence checked by the Monday 02:00 wrapper; dry-run only |
 | SQLite backup | `backup` | Sunday 01:00 |
 
@@ -63,10 +64,49 @@ holds the shared runtime lifecycle lease across preflight, writes, descendant
 cleanup, and completion. Cron remains the only scheduling authority; the parked
 container scheduler must remain disabled.
 
-The committed `deploy/project-paper.crontab` on `main` still contains the former
-direct `.venv` commands. Until migration assets are integrated and that template
-is corrected, do not run `scripts/install_project_paper_cron.sh --apply`. Inspect
-and preserve the working schedule with `crontab -l`.
+The committed `deploy/project-paper.crontab` uses the container launcher. The
+installer refuses templates that still contain native `.venv` pipeline commands.
+Inspect the live schedule with `crontab -l` before and after any change.
+
+CORE is the fourth scheduled source under trial. It uses `CORE_API_KEY` from the
+production env file and should authenticate with `Authorization: Bearer
+[CORE_API_KEY]`; never put the real key in command lines, shell history, logs,
+docs, or chat. Register keys at <https://core.ac.uk/services/api>. For this
+private single-user Project Paper deployment, the Personal profile is usually
+appropriate unless the key is genuinely requested through an academic or
+institutional affiliation.
+
+The CORE adapter uses API v3 Works search as the discovery path because Works
+are deduplicated/enriched scholarly records. Do not switch the scheduled job to
+Outputs as the first discovery path; Outputs are raw harvested source records.
+Keep request budgets conservative, use roughly 3-second spacing, honor
+`X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
+`X-RateLimit-Retry-After`, and cool down immediately on HTTP 429. CORE's
+published limits are 100 tokens/day and 10 requests/minute unauthenticated, or
+1,000 tokens/day and 25 requests/minute for registered Personal users; simple
+queries usually cost 1 token and complex queries can cost 3-5.
+
+CORE is metadata-first in Project Paper. The first pass stores records and
+links, not bulk PDFs. If later selected-paper enrichment uses CORE full text,
+prefer the source-provided `downloadUrl`; do not bypass the CORE API/fileserver
+or systematically harvest PDFs. The current production launcher is
+`scripts/mini_container_job.sh core`, logs to `logs/pipeline-core.log`, runs
+Qwen Curator, and feeds MiniLM parallel evaluation when
+`PAPER_MINILM_EVAL_ENABLED=1`.
+
+## Releases
+
+Use [Mini self-hosted CI/CD](mini-self-hosted-cicd.md) for the preferred
+application deployment path. Use [Mini release runbook](mini-release-runbook.md)
+for manual fallback. Both paths are image-based: build and accept a
+`mini-production` image from a committed revision, then pull that immutable
+digest on the Mini and recreate the existing `app` service. Do not deploy
+application code by `git pull`, and do not rebuild on production.
+
+SSH is not the default operating path. Use the
+[Mini self-hosted CI/CD SSH access policy](mini-self-hosted-cicd.md#ssh-access-policy)
+and get explicit operator approval before opening a Mini shell for production
+work.
 
 ## Acceptance evidence
 

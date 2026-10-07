@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -225,6 +226,32 @@ def prepare_model(model: str = DEFAULT_MODEL, *, budget: int = 1800, attempts: i
     raise ModelPreparationError("model pull finished without making the model available")
 
 
+def verify_model_listing(payload: dict, model: str, expected_digest: str) -> dict:
+    """GET /api/tags digest is the full local manifest identity, not short CLI ID."""
+    if not isinstance(expected_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+        raise ModelPreparationError("Expected full lowercase 64-character model manifest digest")
+    validated_models(payload)
+    matches = [item for item in payload["models"] if item["name"] == model]
+    if len(matches) != 1 or matches[0].get("digest") != expected_digest:
+        raise ModelPreparationError("Required local model absent, ambiguous, or digest mismatch; no pull attempted")
+    if matches[0].get("model", model) != model:
+        raise ModelPreparationError("Model listing name/model mismatch")
+    return {"model":model, "digest":expected_digest, "identity":"verified", "inference":"unchecked"}
+
+
+def verify_model(model: str, expected_digest: str, *, budget: int = 30) -> dict:
+    # Validate before making even the single read-only API request.
+    if not isinstance(expected_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+        raise ModelPreparationError("Expected full lowercase 64-character model manifest digest")
+    if not 0 < budget <= 120:
+        raise ModelPreparationError("Verify-only budget must be within 1..120 seconds")
+    deadline = time.monotonic() + budget
+    with wall_clock_deadline(deadline):
+        payload = request_json("/api/tags", timeout=remaining_timeout(deadline), deadline=deadline)
+        remaining_timeout(deadline)
+        return verify_model_listing(payload, model, expected_digest)
+
+
 def positive_int_env(name: str, default: str) -> int:
     value = os.environ.get(name, default)
     if not value.isdigit() or int(value) <= 0:
@@ -238,6 +265,19 @@ def main() -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     try:
+        if os.environ.get("PAPER_MIGRATION_CONTRACT") == "1":
+            from paper_agents.migration_lifecycle import validate_container_contract
+            validate_container_contract()
+        mode = os.environ.get("PAPER_MODEL_MODE", "prepare")
+        if mode == "verify":
+            print(json.dumps(verify_model(os.environ.get("PAPER_AGENT_MODEL", DEFAULT_MODEL),
+                os.environ.get("PAPER_AGENT_EXPECTED_MODEL_DIGEST", ""),
+                budget=positive_int_env("PAPER_MODEL_VERIFY_TIMEOUT", "30"))))
+            return 0
+        if mode != "prepare":
+            raise ModelPreparationError("Invalid PAPER_MODEL_MODE")
+        if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
+            raise ModelPreparationError("Imported state requires verify-only model mode")
         prepare_model(os.environ.get("PAPER_AGENT_MODEL", DEFAULT_MODEL), budget=positive_int_env("PAPER_MODEL_PREPARE_TIMEOUT", "1800"), attempts=positive_int_env("PAPER_MODEL_PULL_ATTEMPTS", "2"))
         return 0
     except ModelPreparationError as error:

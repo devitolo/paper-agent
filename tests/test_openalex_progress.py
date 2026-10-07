@@ -3,6 +3,7 @@ from email.message import Message
 import io
 import json
 from pathlib import Path
+import ssl
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,7 +11,9 @@ import urllib.error
 import urllib.parse
 
 from paper_agents import db
-from paper_agents.openalex_progress import OpenAlexProgress, cooldown_seconds
+from paper_agents.openalex_progress import (
+    OpenAlexProgress, cooldown_seconds, transient_retry_seconds, transient_url_error,
+)
 from paper_agents.scout import OpenAlexSource
 from paper_agents.scout_agent import ScoutAgent, ScoutConfig
 
@@ -39,8 +42,7 @@ class ProgressTests(unittest.TestCase):
 
     def run_scout(self, response, **kwargs):
         cycle = db.create_workflow_cycle(self.c, mode='test', max_scout_attempts=1)
-        with patch.object(self.source, 'fetch_page', side_effect=response) as fetch, patch(
-                'paper_agents.scout_agent.topics_with_guidance', side_effect=lambda topics, _: topics):
+        with patch.object(self.source, 'fetch_page', side_effect=response) as fetch:
             result = ScoutAgent(self.source).run(self.c, workflow_cycle_id=cycle, attempt_number=1,
                 config=ScoutConfig(topics=kwargs.pop('topics', ['incident']),
                                    openalex_cursor_enabled=True, **kwargs))
@@ -118,6 +120,71 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(result['stored_count'], 1)
         self.assertEqual(fetch.call_count, 2)
         self.assertEqual(self.c.execute('SELECT COUNT(*) FROM openalex_page_dispositions').fetchone()[0], 1)
+
+    def test_transient_503_retries_once_and_keeps_cursor(self):
+        error = urllib.error.HTTPError('url', 503, 'unavailable', Message(), io.BytesIO())
+        p = self.progress()
+        result, fetch = self.fetch(p, [error, page([work(1)], 'next')])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(p.diagnostics['attempts'], 2)
+        self.assertEqual(p.diagnostics['transient_retries'], [{
+            'topic': 'incident', 'http_status': 503, 'delay_seconds': 0,
+        }])
+        self.save(p)
+        p = self.progress()
+        _, fetch = self.fetch(p, [page([], None)])
+        self.assertEqual(fetch.call_args.kwargs['cursor'], 'next')
+
+    def test_repeated_transient_failure_stops_after_one_retry(self):
+        errors = [
+            urllib.error.HTTPError('url', 503, 'unavailable', Message(), io.BytesIO()),
+            urllib.error.HTTPError('url', 503, 'unavailable', Message(), io.BytesIO()),
+        ]
+        p = self.progress()
+        _, fetch = self.fetch(p, errors, topics=['a', 'b'])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(p.diagnostics['attempts'], 2)
+        self.assertEqual(p.diagnostics['stop_reason'], 'source_error')
+        self.assertEqual(p.diagnostics['deferred_queries'], ['b'])
+
+    def test_transient_timeout_retries_once_and_records_safe_diagnostic(self):
+        error = urllib.error.URLError(TimeoutError('timed out'))
+        p = self.progress()
+        result, fetch = self.fetch(p, [error, page([work(1)], 'next')])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(p.diagnostics['transient_retries'], [{
+            'topic': 'incident', 'transport_error': 'TimeoutError', 'delay_seconds': 0,
+        }])
+
+    def test_repeated_transient_timeout_stops_after_one_retry(self):
+        errors = [
+            urllib.error.URLError(TimeoutError('timed out')),
+            urllib.error.URLError(TimeoutError('timed out')),
+        ]
+        p = self.progress()
+        _, fetch = self.fetch(p, errors, topics=['a', 'b'])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(p.diagnostics['attempts'], 2)
+        self.assertEqual(p.diagnostics['stop_reason'], 'source_error')
+        self.assertEqual(p.diagnostics['deferred_queries'], ['b'])
+
+    def test_permanent_url_and_certificate_errors_are_not_retried(self):
+        failures = [
+            urllib.error.URLError('unknown url type'),
+            urllib.error.URLError(ssl.SSLCertVerificationError(1, 'certificate verify failed')),
+        ]
+        for error in failures:
+            with self.subTest(reason=type(error.reason).__name__):
+                p = self.progress()
+                _, fetch = self.fetch(p, [error])
+                self.assertEqual(fetch.call_count, 1)
+                self.assertNotIn('transient_retries', p.diagnostics)
+
+    def test_temporary_dns_failure_is_transient(self):
+        error = urllib.error.URLError('Temporary failure in name resolution')
+        self.assertTrue(transient_url_error(error))
 
     def test_frozen_window_and_refresh_preserve_deep_cursor(self):
         p = self.progress(); self.fetch(p, [page([work(1)], 'deep')]); self.save(p)
@@ -214,6 +281,8 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(cooldown_seconds('Thu, 24 Sep 2026 00:02:00 GMT', self.now),120)
         for value in [None,'nonsense','NaN','-1']:
             self.assertTrue(60 <= cooldown_seconds(value,self.now) <= 90)
+        self.assertEqual(transient_retry_seconds('7', self.now, fallback=3), 7)
+        self.assertEqual(transient_retry_seconds(None, self.now, fallback=3), 3)
 
     def test_transport_sends_cursor_and_single_attempt(self):
         response = io.BytesIO(json.dumps(page([work(1)], 'next')).encode())

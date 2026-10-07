@@ -10,7 +10,7 @@ mkdir -p logs "$LOCK_DIR"
 exec 9>"$LOCK_PATH"
 if ! flock -n 9; then
   echo "Skipping Semantic Scholar pipeline: another run holds $LOCK_PATH."
-  exit 0
+  exit "${PAPER_AGENT_BUSY_EXIT_CODE:-0}"
 fi
 
 python3 -m paper_agents.cli pipeline-daily \

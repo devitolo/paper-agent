@@ -65,7 +65,7 @@ DEFAULT_PDF_DIR = Path("data/papers")
 DEFAULT_ARXIV_REQUEST_DELAY = 3.0
 DEFAULT_ARXIV_RETRIES = 3
 DEFAULT_ARXIV_TIMEOUT = 60
-SCOUT_SOURCES = ("arxiv", "semantic_scholar", "openalex")
+SCOUT_SOURCES = ("arxiv", "semantic_scholar", "openalex", "core")
 
 
 def _final_curl_headers(raw: bytes):
@@ -218,12 +218,21 @@ class ArxivSource:
             )
         return dedupe_candidates(candidates)[:max_results]
 
-    def _fetch_topic(self, topic: str, max_results: int) -> list[ET.Element]:
+    def fetch_page(self, topic: str, *, offset: int, page_size: int) -> dict[str, Any]:
+        entries = self._fetch_topic(topic, page_size, start=offset)
+        effective_size = 1 if self.single_result_mode else page_size
+        return {
+            "entries": entries,
+            "offset": offset,
+            "next": None if len(entries) < effective_size else offset + len(entries),
+        }
+
+    def _fetch_topic(self, topic: str, max_results: int, *, start: int = 0) -> list[ET.Element]:
         requested_results = 1 if self.single_result_mode else max_results
         params = urllib.parse.urlencode(
             {
                 "search_query": f'all:"{topic}"',
-                "start": 0,
+                "start": start,
                 "max_results": requested_results,
                 "sortBy": "submittedDate",
                 "sortOrder": "descending",
@@ -256,7 +265,7 @@ class ArxivSource:
                     )
                     self._record("degraded_mode", topic=topic, from_max_results=requested_results,
                                  to_max_results=1, reason="HTTP 406")
-                    return self._fetch_topic(topic, 1)
+                    return self._fetch_topic(topic, 1, start=start)
                 if error.code != 429 or attempt >= self.retries:
                     raise
                 delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After") if error.headers else None)
@@ -518,6 +527,46 @@ class SemanticScholarSource:
             headers["x-api-key"] = self.api_key
         return headers
 
+    def fetch_page(self, topic: str, *, offset: int, cutoff: str, page_size: int) -> dict[str, Any]:
+        """Fetch one normal-search page; progressive orchestration owns retries and state."""
+        params = urllib.parse.urlencode(
+            {
+                "query": topic,
+                "offset": offset,
+                "limit": page_size,
+                "publicationDateOrYear": f"{cutoff}:",
+                "fields": ",".join(
+                    [
+                        "paperId", "title", "abstract", "authors", "year",
+                        "publicationDate", "url", "openAccessPdf", "externalIds",
+                        "fieldsOfStudy", "publicationTypes", "venue",
+                    ]
+                ),
+            }
+        )
+        request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
+        self._record("request", topic=topic, offset=offset)
+        with telemetry.span("source.http", "TOOL", source=self.name), urllib.request.urlopen(
+            request, timeout=self.timeout
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError("Semantic Scholar page missing data")
+        returned_offset = payload.get("offset")
+        if not isinstance(returned_offset, int) or returned_offset != offset:
+            raise ValueError("Semantic Scholar returned an unexpected offset")
+        next_offset = payload.get("next")
+        if next_offset is not None and (
+            not isinstance(next_offset, int) or next_offset <= offset or next_offset > 1000
+        ):
+            raise ValueError("Semantic Scholar returned an invalid next offset")
+        if any(not isinstance(paper, dict) for paper in payload["data"]):
+            raise ValueError("Semantic Scholar page contains an invalid paper")
+        if len(payload["data"]) > page_size:
+            raise ValueError("Semantic Scholar exceeded requested page size")
+        self._record("success", topic=topic, offset=offset, entries=len(payload["data"]), next=next_offset)
+        return {"offset": offset, "next": next_offset, "data": payload["data"]}
+
     def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.isdigit():
             return float(retry_after)
@@ -528,6 +577,82 @@ class SemanticScholarSource:
                 pass
         return self.request_delay * (2 ** attempt)
 
+
+class CoreSource:
+    """CORE v3 Works metadata adapter used only by the opt-in trial path."""
+
+    name = "core"
+    api_url = "https://api.core.ac.uk/v3/search/works"
+
+    def __init__(
+        self,
+        request_delay: float = DEFAULT_ARXIV_REQUEST_DELAY,
+        retries: int = DEFAULT_ARXIV_RETRIES,
+        timeout: int = DEFAULT_ARXIV_TIMEOUT,
+        verbose: bool = True,
+        api_key: str | None = None,
+    ):
+        configured_delay = os.getenv("PAPER_CORE_REQUEST_DELAY")
+        self.request_delay = max(3.0, float(configured_delay) if configured_delay else request_delay)
+        self.retries = retries
+        self.timeout = timeout
+        self.verbose = verbose
+        self.api_key = api_key if api_key is not None else os.getenv("CORE_API_KEY")
+        self.last_diagnostics: dict[str, Any] = {}
+
+    def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
+        raise RuntimeError("CORE trial requires progressive retrieval (PAPER_CORE_SOURCE=1)")
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"User-Agent": "paper-agent/0.1", "Accept": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def fetch_page(self, topic: str, *, offset: int, cutoff: str, page_size: int) -> dict[str, Any]:
+        """Fetch one CORE Works search page; the coordinator owns budgets and state."""
+        if not self.api_key:
+            raise RuntimeError("CORE_API_KEY is required for the CORE trial")
+        cutoff_year = cutoff[:4]
+        # CORE models yearPublished as an integer; its query language expects a
+        # numeric comparison rather than a Lucene string range expression.
+        query = f"({topic.strip()}) AND yearPublished>={cutoff_year}"
+        params = urllib.parse.urlencode({
+            "q": query,
+            "offset": offset,
+            "limit": page_size,
+            "stats": "false",
+        })
+        request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
+        with telemetry.span("source.http", "TOOL", source=self.name), urllib.request.urlopen(
+            request, timeout=self.timeout
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+            raise ValueError("CORE page missing results")
+        returned_offset = payload.get("offset")
+        returned_limit = payload.get("limit")
+        total_hits = payload.get("totalHits", payload.get("total_hits"))
+        if not isinstance(returned_offset, int) or returned_offset != offset:
+            raise ValueError("CORE returned an unexpected offset")
+        if not isinstance(returned_limit, int) or returned_limit < len(payload["results"]):
+            raise ValueError("CORE returned an invalid limit")
+        if not isinstance(total_hits, int) or total_hits < 0:
+            raise ValueError("CORE returned invalid total_hits")
+        if any(not isinstance(work, dict) for work in payload["results"]):
+            raise ValueError("CORE page contains an invalid work")
+        if len(payload["results"]) > page_size:
+            raise ValueError("CORE exceeded requested page size")
+        next_offset = offset + len(payload["results"])
+        if not payload["results"] or next_offset >= total_hits:
+            next_offset = None
+        return {
+            "offset": offset,
+            "next": next_offset,
+            "results": payload["results"],
+            "total_hits": total_hits,
+            "search_id": payload.get("searchId", payload.get("search_id")),
+        }
 
 class OpenAlexSource:
     name = "openalex"
@@ -693,6 +818,8 @@ def create_scout_source(
         return SemanticScholarSource(request_delay=request_delay, retries=retries, timeout=timeout, verbose=verbose)
     if source_name == "openalex":
         return OpenAlexSource(request_delay=request_delay, retries=retries, timeout=timeout, verbose=verbose)
+    if source_name == "core":
+        return CoreSource(request_delay=request_delay, retries=retries, timeout=timeout, verbose=verbose)
     raise ValueError(f"Unsupported Scout source: {source_name}")
 
 
@@ -946,6 +1073,97 @@ def semantic_scholar_paper_to_candidate(paper: dict[str, Any]) -> ScoutCandidate
         categories=categories,
         primary_category=categories[0] if categories else None,
         metadata=metadata,
+    )
+
+
+def core_work_to_candidate(work: dict[str, Any]) -> ScoutCandidate:
+    """Normalize a CORE v3 Work without promoting supplied file links to downloads."""
+    work_id = str(work.get("id") or "").strip()
+    title = _clean(str(work.get("title") or ""))
+    abstract = _clean(str(work.get("abstract") or ""))
+    authors = []
+    for author in work.get("authors") or []:
+        value = author.get("name") if isinstance(author, dict) else author
+        cleaned = _clean(str(value or ""))
+        if cleaned:
+            authors.append(cleaned)
+
+    identifiers = work.get("identifiers")
+    identifier_map: dict[str, Any] = identifiers if isinstance(identifiers, dict) else {}
+    if isinstance(identifiers, list):
+        for item in identifiers:
+            if isinstance(item, dict):
+                key = item.get("type") or item.get("identifierType")
+                value = item.get("identifier") or item.get("value")
+                if key and value:
+                    identifier_map[str(key)] = value
+            elif isinstance(item, str) and ":" in item:
+                key, value = item.split(":", 1)
+                identifier_map[key] = value
+
+    def identifier(*names):
+        lowered = {str(key).casefold(): value for key, value in identifier_map.items()}
+        for name in names:
+            value = lowered.get(name.casefold())
+            if value:
+                return str(value).strip()
+        return None
+
+    doi = str(work.get("doi") or identifier("doi") or "").strip() or None
+    arxiv_id = str(
+        work.get("arxivId") or work.get("arxiv_id")
+        or identifier("arxiv", "arxivId", "arxiv_id") or ""
+    ).strip() or None
+    published_date = str(work.get("publishedDate") or work.get("published_date") or "").strip()
+    year = work.get("yearPublished") or work.get("year_published")
+    published = published_date or (str(year).strip() if year else "")
+    download_url = str(work.get("downloadUrl") or work.get("download_url") or "").strip() or None
+    source_fulltext_urls = work.get("sourceFulltextUrls") or work.get("source_fulltext_urls") or []
+    if not isinstance(source_fulltext_urls, list):
+        source_fulltext_urls = []
+    links = work.get("links") or []
+    if not isinstance(links, list):
+        links = [links] if isinstance(links, (str, dict)) else []
+
+    landing_urls = []
+    for value in links:
+        if isinstance(value, str):
+            candidate_url = value
+        elif isinstance(value, dict):
+            candidate_url = value.get("url") or value.get("href")
+        else:
+            candidate_url = None
+        candidate_url = str(candidate_url or "").strip()
+        if candidate_url:
+            landing_urls.append(candidate_url)
+    url = landing_urls[0] if landing_urls else (f"https://core.ac.uk/works/{work_id}" if work_id else "")
+    document_type = work.get("documentType") or work.get("document_type")
+    categories = [str(document_type).strip()] if document_type else []
+    data_providers = work.get("dataProviders") or work.get("data_providers") or []
+
+    return ScoutCandidate(
+        source="core",
+        source_id=work_id,
+        title=title,
+        abstract=abstract,
+        authors=authors,
+        published=published,
+        updated=None,
+        url=url,
+        # Trial policy: retain CORE file links as metadata; never auto-download them.
+        pdf_url=None,
+        doi=doi,
+        arxiv_id=arxiv_id,
+        categories=categories,
+        primary_category=categories[0] if categories else None,
+        metadata={
+            "download_url": download_url,
+            "source_fulltext_urls": [value for value in source_fulltext_urls if value],
+            "links": links,
+            "data_providers": data_providers,
+            "document_type": document_type,
+            "identifiers": identifiers,
+        },
     )
 
 

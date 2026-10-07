@@ -354,7 +354,6 @@ class BackendV2Tests(unittest.TestCase):
     def test_scout_daily_cli_empty_selection_does_not_apply_guidance_or_construct_source(self):
         with (
             patch("paper_agents.cli.select_topics_for_source", return_value=[]),
-            patch("paper_agents.cli.load_scout_guidance", return_value=ScoutGuidance(boost_terms=["incident response"])) as guidance,
             patch("paper_agents.cli.create_scout_source") as create_source,
             patch("paper_agents.cli.run_daily_scout") as run_scout,
             patch("paper_agents.cli.print_section") as print_section,
@@ -362,7 +361,6 @@ class BackendV2Tests(unittest.TestCase):
         ):
             cli.main()
 
-        guidance.assert_not_called()
         create_source.assert_not_called()
         run_scout.assert_not_called()
         self.assertEqual(print_section.call_args.args[1]["skipped_reason"], "no_eligible_configured_topics")
@@ -966,6 +964,80 @@ class BackendV2Tests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, "already_recommended"))
 
+    def test_scout_keeps_curator_eligibility_labels_eligible(self):
+        candidates = [
+            candidate("2601.keepv1", "Agent reliability in production operations"),
+            candidate("2601.surveyv1", "A Survey of Agent Reliability Methods"),
+            candidate("2601.benchmarkv1", "A Benchmark for AIOps Incident Response"),
+            candidate("2601.posterv1", "Poster: Debugging LLM Agents"),
+            candidate("2601.withdrawnv1", "Withdrawn: Fault Localization with Agents"),
+            candidate("2601.contentsv1", "Table of Contents"),
+        ]
+        candidates[-1].metadata["type"] = "editorial"
+
+        result = ScoutAgent(source=FakeSource(candidates)).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(topics=["AIOps"], max_candidates=10),
+        )
+
+        self.assertEqual(result["stored_count"], 6)
+        self.assertEqual(result["eligible_count"], 6)
+        rows = self.connection.execute(
+            """
+            SELECT papers.title, scout_candidates.excluded, scout_candidates.exclusion_reason
+            FROM scout_candidates
+            JOIN papers ON papers.id = scout_candidates.paper_id
+            WHERE scout_candidates.scout_run_id = ?
+            ORDER BY scout_candidates.retrieval_order
+            """,
+            (result["scout_run_id"],),
+        ).fetchall()
+        self.assertTrue(all(row[1] == 0 and row[2] is None for row in rows))
+
+    def test_curator_records_eligibility_labels_and_blocks_invalid_records(self):
+        candidates = [
+            candidate("2601.keepv1", "Agent reliability in production operations"),
+            candidate("2601.surveyv1", "A Survey of Agent Reliability Methods"),
+            candidate("2601.benchmarkv1", "A Benchmark for AIOps Incident Response"),
+            candidate("2601.posterv1", "Poster: Debugging LLM Agents"),
+            candidate("2601.withdrawnv1", "Withdrawn: Fault Localization with Agents"),
+            candidate("2601.contentsv1", "Table of Contents"),
+            candidate("2601.nonenglishv1", "Analyse des incidents logiciels"),
+        ]
+        candidates[-2].metadata["type"] = "editorial"
+        candidates[-1].metadata["language"] = "fr"
+        ScoutAgent(source=FakeSource(candidates)).run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            attempt_number=1,
+            config=ScoutConfig(topics=["AIOps"], max_candidates=10),
+        )
+
+        result = CuratorAgent().run(
+            self.connection,
+            workflow_cycle_id=self.cycle_id,
+            candidates=db.eligible_candidates_for_cycle(self.connection, self.cycle_id),
+            profile_version=db.current_profile_version(self.connection),
+            scout_attempt_count=1,
+            config=CuratorConfig(max_recommendations=3, min_quality_score=1, max_scout_attempts=1),
+        )
+
+        by_title = {evaluation["title"]: evaluation["curator_eligibility"] for evaluation in result["evaluations"]}
+        self.assertEqual(by_title["A Survey of Agent Reliability Methods"]["labels"], ["paper_type_survey"])
+        self.assertEqual(by_title["A Benchmark for AIOps Incident Response"]["labels"], ["paper_type_benchmark"])
+        self.assertEqual(by_title["Poster: Debugging LLM Agents"]["labels"], ["paper_type_poster_or_slides"])
+        self.assertEqual(by_title["Analyse des incidents logiciels"]["labels"], ["language_non_english"])
+        self.assertEqual(
+            by_title["Withdrawn: Fault Localization with Agents"]["disqualification_reason"],
+            "retracted_or_withdrawn",
+        )
+        self.assertEqual(by_title["Table of Contents"]["disqualification_reason"], "not_a_paper")
+        recommended_titles = {recommendation["title"] for recommendation in result["recommendations"]}
+        self.assertNotIn("Withdrawn: Fault Localization with Agents", recommended_titles)
+        self.assertNotIn("Table of Contents", recommended_titles)
+
     def test_non_arxiv_candidate_without_pdf_url_remains_curator_eligible(self):
         source = FakeSource(
             [
@@ -1266,29 +1338,31 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(guidance.feedback_count, 2)
         self.assertEqual(guidance.profile_version_id, self.profile_id)
 
-    def test_scout_agent_records_feedback_guidance_and_guided_topics(self):
-        feedback_paper_id, _ = db.upsert_paper(
+    def test_scout_agent_uses_only_explicit_topics_and_ignores_profile_preferences(self):
+        profile_version = db.current_profile_version(self.connection)
+        db.create_profile_version(
             self.connection,
-            {
-                "source": "semantic_scholar",
-                "source_id": "guidance-feedback",
-                "title": "RAG observability for production incidents",
-                "abstract": "Context grounding for incident response.",
+            profile=profile_version["profile"] | {
+                "interests": ["RAG context grounding"],
+                "positive_signals": ["incident response"],
+                "negative_signals": ["toy benchmark", "weak evidence"],
             },
+            source_structured_feedback_id=None,
+            change_summary="preferences must remain outside Scout",
         )
-        ingest_feedback_blob(
-            self.connection,
-            paper_id=feedback_paper_id,
-            recommendation_id=None,
-            content="Decision: keep\nScore: 5\nMore RAG context grounding for incident response.",
-            source="test",
-        )
-        source = FakeSource([candidate("2601.guidedv1", "Guided candidate")])
+        source = FakeSource([
+            ScoutCandidate(
+                source="arxiv", source_id="2601.badguidancev1",
+                title="Toy example with weak evidence",
+                abstract="An illustrative paper with no production signal.",
+                authors=[], published="2026-01-01", updated=None,
+                url="https://example.test/bad", pdf_url=None, categories=["cs.SE"],
+            ),
+            candidate("2601.goodguidancev1", "Incident response observability"),
+        ])
 
         result = ScoutAgent(source=source).run(
-            self.connection,
-            workflow_cycle_id=self.cycle_id,
-            attempt_number=1,
+            self.connection, workflow_cycle_id=self.cycle_id, attempt_number=1,
             config=ScoutConfig(topics=["microservice diagnosis"], max_candidates=5),
         )
 
@@ -1296,66 +1370,17 @@ class BackendV2Tests(unittest.TestCase):
             "SELECT topics_json, guidance_id, diagnostics_json FROM scout_runs WHERE id = ?",
             (result["scout_run_id"],),
         ).fetchone()
-        topics = json.loads(row[0])
-        diagnostics = json.loads(row[2])
-        guidance_row = self.connection.execute(
-            "SELECT active, metadata_json FROM scouting_guidance WHERE id = ?",
-            (row[1],),
-        ).fetchone()
-        self.assertIn("rag", topics)
-        self.assertEqual(guidance_row[0], 0)
-        self.assertEqual(json.loads(guidance_row[1])["source"], "feedback_profile")
-        self.assertIn("scout_guidance", diagnostics)
-        self.assertIn("rag", result["guidance"]["boost_terms"])
-
-    def test_scout_agent_excludes_clear_feedback_avoid_matches(self):
-        profile_version = db.current_profile_version(self.connection)
-        db.create_profile_version(
-            self.connection,
-            profile=profile_version["profile"] | {"negative_signals": ["toy benchmark", "weak evidence"]},
-            source_structured_feedback_id=None,
-            change_summary="test negative signals",
-        )
-        source = FakeSource(
-            [
-                ScoutCandidate(
-                    source="arxiv",
-                    source_id="2601.badguidancev1",
-                    title="Toy benchmark with weak evidence",
-                    abstract="An illustrative paper with no production signal.",
-                    authors=[],
-                    published="2026-01-01",
-                    updated=None,
-                    url="https://example.test/bad",
-                    pdf_url=None,
-                    categories=["cs.SE"],
-                ),
-                candidate("2601.goodguidancev1", "Incident response observability"),
-            ]
-        )
-
-        result = ScoutAgent(source=source).run(
-            self.connection,
-            workflow_cycle_id=self.cycle_id,
-            attempt_number=1,
-            config=ScoutConfig(topics=["AIOps"], max_candidates=5),
-        )
-
-        self.assertEqual(result["eligible_count"], 1)
+        self.assertEqual(json.loads(row[0]), ["microservice diagnosis"])
+        self.assertIsNone(row[1])
+        self.assertEqual(json.loads(row[2])["configured_topics"], ["microservice diagnosis"])
+        self.assertNotIn("scout_guidance", json.loads(row[2]))
+        self.assertNotIn("guidance", result)
+        self.assertEqual(result["eligible_count"], 2)
         rows = self.connection.execute(
-            """
-            SELECT papers.title, scout_candidates.excluded, scout_candidates.exclusion_reason,
-                   scout_candidates.source_diagnostics_json
-            FROM scout_candidates
-            JOIN papers ON papers.id = scout_candidates.paper_id
-            ORDER BY scout_candidates.retrieval_order
-            """
+            "SELECT excluded, exclusion_reason, source_diagnostics_json FROM scout_candidates ORDER BY retrieval_order"
         ).fetchall()
-        bad = next(row for row in rows if row[0] == "Toy benchmark with weak evidence")
-        self.assertEqual(bad[1], 1)
-        self.assertEqual(bad[2], "feedback_avoid_terms")
-        diagnostics = json.loads(bad[3])
-        self.assertEqual(diagnostics["feedback_guidance"]["feedback_avoid_hits"], ["toy benchmark", "weak evidence"])
+        self.assertEqual([(row[0], row[1]) for row in rows], [(0, None), (0, None)])
+        self.assertTrue(all("feedback_guidance" not in json.loads(row[2]) for row in rows))
 
     def test_topics_with_guidance_preserves_explicit_topic_and_bounds_expansion(self):
         guidance = build_scout_guidance(
@@ -2212,6 +2237,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("arXiv", html)
         self.assertIn('href="/topics"', html)
         self.assertIn('href="/health"', html)
+        self.assertNotIn('id="run-scout"', html)
+        self.assertNotIn('Local Qwen:', html)
+        self.assertNotIn('Status unavailable. Refresh this page to reconnect', html)
         self.assertIn('class="source-badge source-badge-arxiv"', html)
         self.assertIn('class="action-rail"', html)
         self.assertIn('<h1 class="brand-title">', html)
@@ -2228,6 +2256,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('<option value="all" selected>All papers</option>', html)
         self.assertIn('<option value="has_feedback">Scored</option>', html)
         self.assertIn('<option value="needs_review">Needs review</option>', html)
+        self.assertIn('<option value="saved">Saved</option>', html)
+        self.assertIn('<option value="excluded">Excluded</option>', html)
         self.assertNotIn('<option value="not_interested"', html)
         self.assertIn('<span>Match Score</span><strong>72.5</strong>', html)
         self.assertIn('<div class="paper-meta">', html)
@@ -2483,6 +2513,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(web.source_badge_class("arxiv"), "source-badge-arxiv")
         self.assertEqual(web.source_badge_class("openalex"), "source-badge-openalex")
         self.assertEqual(web.source_badge_class("semantic_scholar"), "source-badge-semantic-scholar")
+        self.assertEqual(web.source_badge_class("core"), "source-badge-core")
+        self.assertEqual(web.source_display_name("core"), "CORE")
         self.assertEqual(web.source_badge_class("custom_source"), "source-badge-unknown")
 
     def test_review_queue_filters_by_source_and_shows_multi_source_label(self):
@@ -2698,8 +2730,134 @@ class BackendV2Tests(unittest.TestCase):
             },
             compact=False,
         )
-        self.assertIn("<h3>Approach</h3><p>Not extracted yet.</p>", formula_html)
+        self.assertIn("<h3>Approach</h3>", formula_html)
+        self.assertIn("<p>Not extracted yet.</p>", formula_html)
         self.assertNotIn("RLCR", formula_html)
+
+    def test_summary_field_feedback_toggles_and_preserves_displayed_qwen_context(self):
+        paper_id, _ = self._seed_review_recommendation()
+        summary_path = Path(self.tmp.name) / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "merged": {
+                        "research_problem": "Diagnosing production incidents.",
+                        "why_it_matters": "Failures delay recovery.",
+                        "approach": "A named framework without enough detail.",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        artifact_id = db.insert_artifact(
+            self.connection,
+            paper_id,
+            artifact_type="triage_summary",
+            path=summary_path,
+            model="qwen2.5:1.5b-instruct",
+            metadata={"extractor_version": "qwen-triage-v1"},
+        )
+        self.connection.commit()
+
+        result = web.toggle_summary_field_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            artifact_id=artifact_id,
+            field_name="approach",
+            signal="too_generic",
+        )
+
+        self.assertTrue(result["active"])
+        row = self.connection.execute(
+            """
+            SELECT field_name, signal, field_text, model, artifact_metadata_json
+            FROM summary_field_quality_signals
+            """
+        ).fetchone()
+        self.assertEqual(row[0], "approach")
+        self.assertEqual(row[1], "too_generic")
+        self.assertEqual(row[2], "A named framework without enough detail.")
+        self.assertEqual(row[3], "qwen2.5:1.5b-instruct")
+        self.assertEqual(json.loads(row[4]), {"extractor_version": "qwen-triage-v1"})
+        html = web.render_review_queue(self.db_path)
+        self.assertIn("summary-feedback-button", html)
+        self.assertIn('data-signal="good"', html)
+        self.assertIn('data-signal="too_generic"', html)
+        self.assertIn('data-signal="bad"', html)
+        self.assertIn("🫥", html)
+
+        result = web.toggle_summary_field_feedback(
+            self.db_path,
+            paper_id=paper_id,
+            artifact_id=artifact_id,
+            field_name="approach",
+            signal="too_generic",
+        )
+
+        self.assertFalse(result["active"])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM summary_field_quality_signals").fetchone()[0], 0)
+
+    def test_summary_field_feedback_switches_between_three_state_signals(self):
+        paper_id, _ = self._seed_review_recommendation()
+        summary_path = Path(self.tmp.name) / "summary-signal.json"
+        summary_path.write_text('{"merged":{"research_problem":"Clear problem."}}', encoding="utf-8")
+        artifact_id = db.insert_artifact(
+            self.connection,
+            paper_id,
+            artifact_type="triage_summary",
+            path=summary_path,
+            model="qwen-test",
+        )
+        self.connection.commit()
+
+        good = web.toggle_summary_field_feedback(
+            self.db_path, paper_id=paper_id, artifact_id=artifact_id,
+            field_name="research_problem", signal="good",
+        )
+        self.assertEqual((good["active"], good["signal"]), (True, "good"))
+        generic = web.toggle_summary_field_feedback(
+            self.db_path, paper_id=paper_id, artifact_id=artifact_id,
+            field_name="research_problem", signal="too_generic",
+        )
+        self.assertEqual((generic["active"], generic["signal"]), (True, "too_generic"))
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT signal FROM summary_field_quality_signals WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()[0],
+            "too_generic",
+        )
+
+    def test_summary_field_feedback_rejects_mismatched_artifact(self):
+        paper_id, _ = self._seed_review_recommendation()
+        other_paper, _ = self._seed_review_recommendation(source_id="2607.other")
+        summary_path = Path(self.tmp.name) / "other-summary.json"
+        summary_path.write_text('{"merged":{"approach":"Other approach"}}', encoding="utf-8")
+        artifact_id = db.insert_artifact(
+            self.connection,
+            other_paper,
+            artifact_type="triage_summary",
+            path=summary_path,
+            model="qwen-test",
+        )
+        self.connection.commit()
+
+        with self.assertRaisesRegex(ValueError, "does not belong"):
+            web.toggle_summary_field_feedback(
+                self.db_path,
+                paper_id=paper_id,
+                artifact_id=artifact_id,
+                field_name="approach",
+            )
+
+        with self.assertRaisesRegex(ValueError, "Invalid summary field signal"):
+            web.toggle_summary_field_feedback(
+                self.db_path,
+                paper_id=other_paper,
+                artifact_id=artifact_id,
+                field_name="approach",
+                signal="sideways",
+            )
 
     def test_topics_page_renders_editable_topic_manager(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -3856,7 +4014,8 @@ class BackendV2Tests(unittest.TestCase):
         self._seed_scout_candidate(source="openalex", excluded=True, exclusion_reason="history")
         self.connection.commit()
 
-        html = web.render_health_page(self.db_path, days=21, source_value="openalex")
+        with patch.object(web, "packaged", return_value=True):
+            html = web.render_health_page(self.db_path, days=21, source_value="openalex")
 
         self.assertIn("Project Paper Health", html)
         self.assertIn('<form method="get" action="/health"', html)
@@ -3873,6 +4032,8 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Recommendation Gap", html)
         self.assertIn("Feedback/Profile Activity", html)
         self.assertIn('href="/topics">Topics</a>', html)
+        self.assertNotIn('id="run-scout"', html)
+        self.assertNotIn('Local Qwen:', html)
 
     def test_topics_page_renders_source_topic_inventory(self):
         html = web.render_topics_page()

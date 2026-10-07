@@ -32,7 +32,7 @@ mkdir -p "$LOCK_DIR"
 exec 9>"$LOCK_PATH"
 if ! flock -n 9; then
   echo "Skipping Gemini profile rebuild comparison: another run holds $LOCK_PATH."
-  exit 0
+  exit "${PAPER_AGENT_BUSY_EXIT_CODE:-0}"
 fi
 
 echo "Running Gemini profile rebuild comparison for $TODAY."

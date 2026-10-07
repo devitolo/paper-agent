@@ -238,9 +238,17 @@ def start(db_path: Path, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> dict:
     try:
         write_status(path, state)
         log = (path.parent / "scout-last.log").open("w", encoding="utf-8")
-        process = subprocess.Popen([sys.executable, "-m", "paper_agents.package_runtime", "manual-scout",
-                                    str(path), str(handle.fileno())],
-            pass_fds=(handle.fileno(),), stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        from contextlib import nullcontext
+        migration = os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported"
+        if migration:
+            from paper_agents.migration_lifecycle import lease
+        lifetime = lease(Path(os.environ["PAPER_AGENT_LIFECYCLE_DIR"])) if migration else nullcontext(None)
+        with lifetime as lifecycle_descriptor:
+            extra = [str(lifecycle_descriptor)] if migration else []
+            inherited = (handle.fileno(), lifecycle_descriptor) if migration else (handle.fileno(),)
+            process = subprocess.Popen([sys.executable, "-m", "paper_agents.package_runtime", "manual-scout",
+                                        str(path), str(handle.fileno()), *extra],
+                pass_fds=inherited, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         threading.Thread(target=_supervise, args=(process, handle, path, state, log), daemon=True,
                          name="paper-manual-scout").start()
         return state
@@ -286,11 +294,21 @@ def worker(db_path: Path, descriptor: int) -> int:
         _held.reset(token)
 
 
-def worker_main(db_path: Path, descriptor: int) -> int:
+def worker_main(db_path: Path, descriptor: int, lifecycle_descriptor: int | None = None) -> int:
     def deadline(signum, frame):
         raise TimeoutError("Manual Scout exceeded its 30-minute deadline")
     signal.signal(signal.SIGALRM, deadline)
     signal.alarm(RUN_TIMEOUT)
+    if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
+        from paper_agents.migration_lifecycle import lease, check_descriptor
+        directory = Path(os.environ["PAPER_AGENT_LIFECYCLE_DIR"])
+        if lifecycle_descriptor is None:
+            raise RuntimeError("Imported manual worker requires inherited lifecycle lease")
+        try:
+            check_descriptor(directory/".runtime.lock", lifecycle_descriptor)
+            return worker(db_path, descriptor)
+        finally:
+            os.close(lifecycle_descriptor)
     return worker(db_path, descriptor)
 
 

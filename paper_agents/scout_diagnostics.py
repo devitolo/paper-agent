@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import sqlite3
 
-SOURCES = {"arxiv", "openalex", "semantic_scholar"}
+SOURCES = {"arxiv", "openalex", "semantic_scholar", "core"}
 
 
 def _rows(connection, query, params=()):

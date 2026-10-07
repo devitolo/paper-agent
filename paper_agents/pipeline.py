@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Any
 
 from paper_agents import db, telemetry
@@ -163,6 +164,7 @@ def run_daily_pipeline(
                     evidence_enabled=True,
                     evidence_model=model,
                     evidence_ollama_url=ollama_url,
+                    interest_fit_enabled=os.getenv("PAPER_AGENT_MINILM_ENABLED", "1") == "1",
                 ),
             )
             for result in scout_results:

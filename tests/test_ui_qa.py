@@ -105,6 +105,191 @@ class UIQueueRegressionTests(unittest.TestCase):
                 for value, label in selections:
                     self.assertIn(f'<option value="{value}" selected>{label}</option>', html)
 
+    def test_review_queue_title_filter_is_case_insensitive_and_preserves_queue_state(self):
+        matching = self.seed(1)
+        other = self.seed(2)
+        self.connection.execute(
+            "UPDATE papers SET title='Context-Aware Incident Analysis' WHERE id=?",
+            (matching,),
+        )
+        self.connection.execute(
+            "UPDATE papers SET title='Unrelated telemetry survey' WHERE id=?",
+            (other,),
+        )
+        self.connection.commit()
+
+        result = web.load_review_page(
+            self.path,
+            filter_value="needs_review",
+            source_value="arxiv",
+            sort_value="latest",
+            title_query="context-aware",
+        )
+        self.assertEqual(result["total"], 1)
+        self.assertEqual([card["id"] for card in result["cards"]], [matching])
+
+        html = web.render_review_queue(
+            self.path,
+            filter_value="needs_review",
+            source_value="arxiv",
+            sort_value="latest",
+            view_value="compact",
+            title_query="  context-aware  ",
+        )
+        self.assertIn('class="title-search" open', html)
+        self.assertIn('aria-label="Filter papers by title"', html)
+        self.assertIn('name="title" type="search" value="context-aware"', html)
+        self.assertIn('name="title" value="context-aware"', html)
+        self.assertIn('aria-label="Clear title filter"', html)
+        self.assertIn("Context-Aware Incident Analysis", html)
+        self.assertNotIn("Unrelated telemetry survey", html)
+        self.assertIn("filter=needs_review", html)
+        self.assertIn("source=arxiv", html)
+        self.assertIn("view=compact", html)
+
+    def test_review_queue_title_filter_treats_like_wildcards_as_literal_text(self):
+        literal = self.seed(1)
+        wildcard_match = self.seed(2)
+        self.connection.execute("UPDATE papers SET title='Reliability 100% guide' WHERE id=?", (literal,))
+        self.connection.execute("UPDATE papers SET title='Reliability 1000 guide' WHERE id=?", (wildcard_match,))
+        self.connection.commit()
+
+        result = web.load_review_page(
+            self.path,
+            filter_value="all",
+            source_value="all",
+            sort_value="latest",
+            title_query="100%",
+        )
+        self.assertEqual([card["id"] for card in result["cards"]], [literal])
+
+    def test_review_queue_title_filter_has_specific_empty_state(self):
+        self.seed(1)
+        self.connection.commit()
+
+        html = web.render_review_queue(self.path, title_query="missing title")
+        self.assertIn("No papers found for this title search.", html)
+        self.assertNotIn("No selected papers are waiting in the registry yet.", html)
+
+    def test_saved_papers_are_persistent_and_filterable_without_changing_review_state(self):
+        saved_paper = self.seed(1)
+        other_paper = self.seed(2)
+        self.connection.commit()
+
+        result = web.toggle_saved_paper(self.path, paper_id=saved_paper)
+        self.assertEqual(result, {"paper_id": saved_paper, "saved": True})
+        stored = self.connection.execute(
+            "SELECT paper_id FROM saved_papers WHERE paper_id = ?",
+            (saved_paper,),
+        ).fetchone()
+        self.assertEqual(stored, (saved_paper,))
+        self.assertIsNone(
+            self.connection.execute("SELECT status FROM feedback WHERE paper_id = ?", (saved_paper,)).fetchone()
+        )
+
+        page = web.load_review_page(
+            self.path,
+            filter_value="saved",
+            source_value="all",
+            sort_value="latest",
+        )
+        self.assertEqual(page["total"], 1)
+        self.assertEqual([card["id"] for card in page["cards"]], [saved_paper])
+        self.assertTrue(page["cards"][0]["is_saved"])
+        self.assertNotIn(other_paper, [card["id"] for card in page["cards"]])
+
+        html = web.render_review_queue(self.path, filter_value="saved")
+        self.assertIn('<option value="saved" selected>Saved</option>', html)
+        self.assertIn('class="save-paper-button saved"', html)
+        self.assertIn('aria-pressed="true"', html)
+        self.assertIn('title="Remove from saved papers"', html)
+
+        result = web.toggle_saved_paper(self.path, paper_id=saved_paper)
+        self.assertEqual(result, {"paper_id": saved_paper, "saved": False})
+        page = web.load_review_page(
+            self.path,
+            filter_value="saved",
+            source_value="all",
+            sort_value="latest",
+        )
+        self.assertEqual((page["total"], page["cards"]), (0, []))
+
+    def test_saved_paper_endpoint_rejects_unknown_paper(self):
+        with self.assertRaisesRegex(ValueError, "Paper not found"):
+            web.toggle_saved_paper(self.path, paper_id=999999)
+
+    def test_excluded_papers_leave_normal_views_and_can_be_restored(self):
+        excluded_paper = self.seed(1)
+        other_paper = self.seed(2)
+        self.connection.commit()
+        web.toggle_saved_paper(self.path, paper_id=excluded_paper)
+
+        result = web.toggle_excluded_paper(self.path, paper_id=excluded_paper)
+        self.assertEqual(result, {"paper_id": excluded_paper, "excluded": True})
+        self.assertIsNone(self.connection.execute(
+            "SELECT paper_id FROM saved_papers WHERE paper_id = ?", (excluded_paper,)
+        ).fetchone())
+        self.assertIsNone(self.connection.execute(
+            "SELECT status FROM feedback WHERE paper_id = ?", (excluded_paper,)
+        ).fetchone())
+
+        for filter_value in ("all", "needs_review", "saved"):
+            page = web.load_review_page(
+                self.path, filter_value=filter_value, source_value="all", sort_value="latest"
+            )
+            self.assertNotIn(excluded_paper, [card["id"] for card in page["cards"]])
+
+        page = web.load_review_page(
+            self.path, filter_value="excluded", source_value="all", sort_value="latest"
+        )
+        self.assertEqual([card["id"] for card in page["cards"]], [excluded_paper])
+        self.assertTrue(page["cards"][0]["is_excluded"])
+        self.assertNotIn(other_paper, [card["id"] for card in page["cards"]])
+        html = web.render_review_queue(self.path, filter_value="excluded")
+        self.assertIn('<option value="excluded" selected>Excluded</option>', html)
+        self.assertIn('class="exclude-paper-button excluded"', html)
+        self.assertIn('title="Restore paper to review"', html)
+
+        result = web.toggle_excluded_paper(self.path, paper_id=excluded_paper)
+        self.assertEqual(result, {"paper_id": excluded_paper, "excluded": False})
+        page = web.load_review_page(
+            self.path, filter_value="all", source_value="all", sort_value="latest"
+        )
+        self.assertIn(excluded_paper, [card["id"] for card in page["cards"]])
+
+    def test_excluded_paper_endpoint_rejects_unknown_paper(self):
+        with self.assertRaisesRegex(ValueError, "Paper not found"):
+            web.toggle_excluded_paper(self.path, paper_id=999999)
+
+    def test_retrieval_experiments_are_retired_and_removed_from_navigation(self):
+        class RequestSocket:
+            def __init__(self, request):
+                self.request = request
+                self.response = bytearray()
+
+            def makefile(self, *args, **kwargs):
+                return io.BytesIO(self.request)
+
+            def sendall(self, data):
+                self.response.extend(data)
+
+        for path in ("/minilm-eval", "/retrieval-experiment", "/scout-eval"):
+            request = RequestSocket(f"GET {path} HTTP/1.0\r\n\r\n".encode())
+            web.make_handler(self.path)(request, ("127.0.0.1", 1), object())
+            self.assertIn(b"303 See Other", request.response)
+            self.assertIn(b"Location: /", request.response)
+
+        for path in ("/minilm-eval/decision", "/retrieval-experiment/decision", "/scout-eval/decision"):
+            request = RequestSocket(
+                f"POST {path} HTTP/1.0\r\nContent-Length: 0\r\n\r\n".encode()
+            )
+            web.make_handler(self.path)(request, ("127.0.0.1", 1), object())
+            self.assertIn(b"HTTP/1.0 410 ", request.response)
+
+        navigation = web.render_primary_nav("review")
+        self.assertNotIn("MiniLM Eval", navigation)
+        self.assertNotIn("Retrieval Experiment", navigation)
+
     def test_more_than_fifty_pending_papers_are_not_silently_inaccessible(self):
         expected = {self.seed(number) for number in range(121)}
         other = self.seed(122)

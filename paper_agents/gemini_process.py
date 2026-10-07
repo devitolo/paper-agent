@@ -165,6 +165,15 @@ def _signal_process(process: subprocess.Popen, force: bool) -> None:
 
 def _cleanup(process: subprocess.Popen) -> None:
     try:
+        if getattr(process, "paper_cleanup_grace", CLEANUP_GRACE_SECONDS) > CLEANUP_GRACE_SECONDS:
+            # The migration guardian owns detached descendants and the lease.
+            # Killing it on a cleanup deadline would orphan those descendants.
+            _signal_process(process, False)
+            try:
+                process.wait(timeout=process.paper_cleanup_grace)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError("Gemini guardian cleanup pending; runtime lease retained.") from None
+            return
         # Do not probe with killpg(..., 0): some hosts deny probes during group
         # teardown. Always complete TERM -> bounded grace -> KILL instead.
         try:
@@ -235,11 +244,13 @@ def _diagnostics(stdout: bytes | None, stderr: bytes | None, *, classify: bool =
 def run_gemini(command: list[str], timeout: int, *, stream_json: bool = False,
                metadata: dict | None = None, fail_fast_provider_errors: bool = False) -> str:
     process = None
-    with _termination_as_exception():
+    from .gemini_runtime import launch
+    with _termination_as_exception(), launch(command, timeout) as (command, options, grace):
         try:
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                       start_new_session=os.name == "posix")
+                                       start_new_session=os.name == "posix", **options)
+            process.paper_cleanup_grace = grace
             if stream_json:
                 return _read_completion(process, timeout, metadata, fail_fast_provider_errors)
             try:

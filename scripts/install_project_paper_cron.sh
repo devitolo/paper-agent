@@ -15,6 +15,16 @@ if [[ ! -f "$CRONTAB_TEMPLATE" ]]; then
   exit 1
 fi
 
+if ! grep -q 'scripts/mini_container_job.sh' "$CRONTAB_TEMPLATE"; then
+  echo "Refusing to install Project Paper cron: template does not use the container launcher." >&2
+  exit 1
+fi
+
+if grep -Eq '(^|[[:space:]])(\.venv|python3[[:space:]]+-m[[:space:]]+paper_agents\.cli|scripts/(nightly|openalex|semantic_scholar)_pipeline\.sh)' "$CRONTAB_TEMPLATE"; then
+  echo "Refusing to install Project Paper cron: template contains native runtime commands." >&2
+  exit 1
+fi
+
 current="$(mktemp)"
 filtered="$(mktemp)"
 next="$(mktemp)"

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import mimetypes
 import re
+import signal
 import sqlite3
 import threading
 import urllib.parse
@@ -52,6 +54,8 @@ FILTERS = [
     ("all", "All papers"),
     ("has_feedback", "Scored"),
     ("needs_review", "Needs review"),
+    ("saved", "Saved"),
+    ("excluded", "Excluded"),
 ]
 SOURCE_FILTER_ALL = "all"
 
@@ -65,6 +69,19 @@ VIEWS = [
     ("compact", "Condensed"),
 ]
 
+SUMMARY_FEEDBACK_FIELDS = {
+    "research_problem": "Problem",
+    "why_it_matters": "Why it matters",
+    "approach": "Approach",
+}
+
+SUMMARY_FEEDBACK_SIGNALS = {
+    "good": {"label": "Good", "icon": "👍", "description": "Useful for deciding whether to read."},
+    "too_generic": {"label": "Too generic", "icon": "🫥", "description": "Plausible but not specific enough."},
+    "bad": {"label": "Bad", "icon": "👎", "description": "Not useful, vague, too short, or repeats the title."},
+}
+LEGACY_SUMMARY_FEEDBACK_SIGNALS = {"up", "down"}
+
 
 def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEFAULT_DB_PATH) -> None:
     init_db(db_path)
@@ -72,12 +89,19 @@ def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEF
         from paper_agents.manual_scout import status as scout_status
         scout_status(db_path)
     server = ThreadingHTTPServer((host, port), make_handler(db_path))
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def stop_from_sigterm(signum, frame):
+        raise KeyboardInterrupt
+
     print(f"review UI running at http://{host}:{port}")
     try:
+        signal.signal(signal.SIGTERM, stop_from_sigterm)
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nreview UI stopped")
     finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
         server.server_close()
 
 
@@ -123,6 +147,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         sort_value=params.get("sort", ["latest"])[0],
                         view_value=params.get("view", ["full"])[-1],
                         page_value=params.get("page", ["1"])[0],
+                        title_query=params.get("title", [""])[0],
                     )
                 )
                 return
@@ -154,6 +179,11 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
                     )
                 )
+                return
+            if parsed.path in ("/minilm-eval", "/retrieval-experiment", "/scout-eval"):
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", "/")
+                self.end_headers()
                 return
             if parsed.path == "/topics":
                 params = urllib.parse.parse_qs(parsed.query)
@@ -231,6 +261,89 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self.send_response(HTTPStatus.SEE_OTHER)
                 self.send_header("Location", redirect_to)
                 self.end_headers()
+                return
+
+            if parsed.path == "/summary-field-feedback":
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Save feedback from Project Paper")
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    result = toggle_summary_field_feedback(
+                        db_path,
+                        paper_id=int(form.get("paper_id", [""])[0]),
+                        artifact_id=int(form.get("artifact_id", [""])[0]),
+                        field_name=form.get("field_name", [""])[0],
+                        signal=form.get("signal", ["bad"])[0],
+                    )
+                except (ValueError, sqlite3.IntegrityError) as error:
+                    payload = json.dumps({"error": str(error)}).encode("utf-8")
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                else:
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            if parsed.path == "/saved-paper":
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Save papers from Project Paper")
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    result = toggle_saved_paper(
+                        db_path,
+                        paper_id=int(form.get("paper_id", [""])[0]),
+                    )
+                except (ValueError, sqlite3.IntegrityError) as error:
+                    payload = json.dumps({"error": str(error)}).encode("utf-8")
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                else:
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            if parsed.path == "/excluded-paper":
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    self.send_error(HTTPStatus.FORBIDDEN, "Exclude papers from Project Paper")
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                form = urllib.parse.parse_qs(body)
+                try:
+                    result = toggle_excluded_paper(db_path, paper_id=int(form.get("paper_id", [""])[0]))
+                except (ValueError, sqlite3.IntegrityError) as error:
+                    payload = json.dumps({"error": str(error)}).encode("utf-8")
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                else:
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            if parsed.path in (
+                "/minilm-eval/decision",
+                "/retrieval-experiment/decision",
+                "/scout-eval/decision",
+            ):
+                self.send_error(HTTPStatus.GONE, "Retrieval experiments have been retired")
                 return
 
             if parsed.path != "/feedback":
@@ -408,14 +521,16 @@ def render_review_queue(
     sort_value: str = "latest",
     view_value: str = "full",
     page_value: str | int = 1,
+    title_query: str = "",
 ) -> str:
     filter_value = normalize_filter_value(filter_value)
     source_choices = load_source_filter_choices(db_path)
     source_value = normalize_choice(source_value, source_choices, SOURCE_FILTER_ALL)
     sort_value = normalize_choice(sort_value, SORTS, "latest")
     view_value = normalize_choice(view_value, VIEWS, "full")
+    title_query = normalize_title_query(title_query)
     result = load_review_page(db_path, filter_value=filter_value, source_value=source_value,
-                              sort_value=sort_value, page=page_value)
+                              sort_value=sort_value, page=page_value, title_query=title_query)
     cards = result["cards"]
     banners = []
     if scout_error:
@@ -427,20 +542,41 @@ def render_review_queue(
     if profile_apply_failed:
         banners.append('<div class="banner warning">Profile auto-apply failed. Feedback was saved; run feedback apply manually when ready.</div>')
     saved_banner = "".join(banners)
-    request_path = build_queue_href(filter_value, source_value, sort_value, view_value, result["page"])
-    pagination = render_queue_pagination(result, filter_value, source_value, sort_value, view_value)
+    request_path = build_queue_href(filter_value, source_value, sort_value, view_value, result["page"], title_query)
+    pagination = render_queue_pagination(result, filter_value, source_value, sort_value, view_value, title_query)
     card_html = "\n".join(render_card(card, view_value=view_value, return_to=request_path) for card in cards)
     if not card_html:
-        card_html = '<section class="empty">No selected papers are waiting in the registry yet.</section>'
+        empty_message = "No papers found for this title search." if title_query else "No selected papers are waiting in the registry yet."
+        card_html = f'<section class="empty">{empty_message}</section>'
+    clear_search_href = build_queue_href(filter_value, source_value, sort_value, view_value, 1)
+    search_open = " open" if title_query else ""
+    search_control = f"""
+      <details class="title-search"{search_open}>
+        <summary aria-label="Filter papers by title" title="Filter papers by title"><span aria-hidden="true">&#128269;</span></summary>
+        <form method="get" action="/" class="title-search-form">
+          <input type="hidden" name="filter" value="{escape(filter_value)}">
+          <input type="hidden" name="source" value="{escape(source_value)}">
+          <input type="hidden" name="sort" value="{escape(sort_value)}">
+          <input type="hidden" name="view" value="{escape(view_value)}">
+          <input type="hidden" name="page" value="1">
+          <label class="visually-hidden" for="title-search-input">Paper title</label>
+          <input id="title-search-input" name="title" type="search" value="{escape(title_query)}" placeholder="Filter by title, then press Enter" maxlength="200">
+          <a class="title-search-clear" href="{escape(clear_search_href)}" aria-label="Clear title filter" title="Clear title filter">&times;</a>
+        </form>
+      </details>
+    """
+    title_hidden = f'<input type="hidden" name="title" value="{escape(title_query)}">' if title_query else ""
     controls = f"""
       <form method="get" action="/" class="queue-controls">
         <input type="hidden" name="view" value="{view_value}">
         <input type="hidden" name="page" value="{result['page']}">
+        {title_hidden}
         {render_select(FILTERS, "filter", filter_value, "Queue")}
         {render_select(source_choices, "source", source_value, "Source")}
         {render_select(SORTS, "sort", sort_value, "Sort")}
         {render_view_toggle(view_value)}
       </form>
+      {search_control}
     """
 
     return f"""<!doctype html>
@@ -455,7 +591,6 @@ def render_review_queue(
   <main>
     {render_app_header("Review Queue", f"{result['total']} papers | {escape(filter_label(filter_value))} | {escape(selected_label(source_choices, source_value))} | sorted by {escape(selected_label(SORTS, sort_value)).lower()}", controls, "review")}
     {saved_banner}
-    {render_manual_scout_panel(db_path)}
     {pagination}
     <div class="cards">{card_html}</div>
     {pagination}
@@ -478,6 +613,90 @@ def render_review_queue(
           await navigator.clipboard.writeText(button.dataset.copyValue);
           button.textContent = "Copied";
           setTimeout(() => {{ button.textContent = originalText; }}, 1400);
+        }});
+      }});
+      document.querySelectorAll(".summary-feedback-button").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          const controls = button.closest(".summary-feedback-controls");
+          const buttons = controls ? controls.querySelectorAll(".summary-feedback-button") : [button];
+          buttons.forEach((item) => {{ item.disabled = true; }});
+          try {{
+            const response = await fetch("/summary-field-feedback", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body: new URLSearchParams({{
+                paper_id: button.dataset.paperId,
+                artifact_id: button.dataset.artifactId,
+                field_name: button.dataset.fieldName,
+                signal: button.dataset.signal,
+              }}),
+            }});
+            if (!response.ok) throw new Error("feedback failed");
+            const result = await response.json();
+            buttons.forEach((item) => {{
+              const selected = result.active && item.dataset.signal === result.signal;
+              item.classList.toggle("selected", selected);
+              item.setAttribute("aria-pressed", selected ? "true" : "false");
+            }});
+          }} catch (error) {{
+            button.classList.add("feedback-error");
+            setTimeout(() => button.classList.remove("feedback-error"), 1800);
+          }} finally {{
+            buttons.forEach((item) => {{ item.disabled = false; }});
+          }}
+        }});
+      }});
+      document.querySelectorAll(".save-paper-button").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          button.disabled = true;
+          try {{
+            const response = await fetch("/saved-paper", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body: new URLSearchParams({{paper_id: button.dataset.paperId}}),
+            }});
+            if (!response.ok) throw new Error("Unable to save");
+            const result = await response.json();
+            button.classList.toggle("saved", result.saved);
+            button.setAttribute("aria-pressed", result.saved ? "true" : "false");
+            button.title = result.saved ? "Remove from saved papers" : "Save paper for later";
+            button.setAttribute("aria-label", button.title);
+            const notice = button.closest(".paper-form").querySelector(".submit-state");
+            if (notice) {{
+              notice.textContent = result.saved ? "Paper saved." : "Paper removed from saved.";
+              setTimeout(() => {{ notice.textContent = ""; }}, 1600);
+            }}
+            if (!result.saved && new URLSearchParams(window.location.search).get("filter") === "saved") {{
+              window.location.reload();
+              return;
+            }}
+          }} catch (error) {{
+            const notice = button.closest(".paper-form").querySelector(".submit-state");
+            if (notice) notice.textContent = "Could not update saved papers. Try again.";
+          }} finally {{
+            button.disabled = false;
+          }}
+        }});
+      }});
+      document.querySelectorAll(".exclude-paper-button").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          button.disabled = true;
+          try {{
+            const response = await fetch("/excluded-paper", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body: new URLSearchParams({{paper_id: button.dataset.paperId}}),
+            }});
+            if (!response.ok) throw new Error("Unable to exclude");
+            window.location.reload();
+          }} catch (error) {{
+            const notice = button.closest(".paper-form").querySelector(".submit-state");
+            if (notice) notice.textContent = "Could not update excluded papers. Try again.";
+            button.disabled = false;
+          }}
         }});
       }});
       document.querySelectorAll(".paper-form").forEach((form) => {{
@@ -514,9 +733,35 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
     title_html = render_title_link(card)
     compact_class = " compact" if view_value == "compact" else ""
-    summary_html = render_summary(summary, compact=view_value == "compact")
+    summary_artifact = card.get("artifacts", {}).get("triage_summary")
+    summary_html = render_summary(
+        summary,
+        compact=view_value == "compact",
+        paper_id=card["id"],
+        artifact=summary_artifact,
+        feedback_fields=card.get("summary_feedback_fields", set()),
+    )
     rationale_html = render_match_rationale(card, signal_tags)
     feedback_summary = "View/edit feedback" if card.get("has_feedback") else "Add feedback"
+    saved = bool(card.get("is_saved"))
+    excluded = bool(card.get("is_excluded"))
+    save_title = "Remove from saved papers" if saved else "Save paper for later"
+    save_button = (
+        f'<button type="button" class="save-paper-button{" saved" if saved else ""}" '
+        f'data-paper-id="{card["id"]}" aria-pressed="{str(saved).lower()}" '
+        f'aria-label="{save_title}" title="{save_title}">'
+        '<svg class="bookmark-outline" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-6-4-6 4z"/></svg>'
+        '<svg class="bookmark-filled" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-6-4-6 4z"/></svg>'
+        '</button>'
+    )
+    exclude_title = "Restore paper to review" if excluded else "Exclude paper from review"
+    exclude_button = (
+        f'<button type="button" class="exclude-paper-button{" excluded" if excluded else ""}" '
+        f'data-paper-id="{card["id"]}" aria-pressed="{str(excluded).lower()}" '
+        f'aria-label="{exclude_title}" title="{exclude_title}">'
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M6 18 18 6"/></svg>'
+        '</button>'
+    )
 
     return f"""<article class="paper-card{compact_class}">
   <form method="post" action="/feedback" class="paper-form">
@@ -525,7 +770,8 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     <input type="hidden" name="return_to" value="{escape(return_to)}">
     <div class="paper-main">
       <div class="card-head">
-        <div>
+        <div class="card-title-row">
+          <div>
           <h2>{title_html}</h2>
           <div class="paper-meta">
             {source_badge}
@@ -535,6 +781,8 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
             {render_copy_control(card)}
             {render_pulled_date(card)}
           </div>
+          </div>
+          <div class="paper-collection-actions">{save_button}{exclude_button}</div>
         </div>
       </div>
       {rationale_html}
@@ -663,6 +911,279 @@ def discussion_summary_lines(summary: dict[str, Any]) -> list[str]:
 
 def format_user_score(score: float) -> str:
     return f"{float(score):.2f}".rstrip("0").rstrip(".")
+
+
+def render_retrieval_experiment_page(db_path: Path, *, run_id: int | None = None) -> str:
+    from paper_agents.minilm_shadow import load_shadow_review
+    data = load_shadow_review(db_path)
+    controls = ""
+    if not data["runs"]:
+        subtitle = "Waiting for a completed shadow run"
+        cards = '<section class="empty">No retrieval experiment outputs are available yet.</section>'
+    else:
+        subtitle = f'{data["reviewed_count"]}/{data["paper_count"]} papers reviewed'
+        cards = "".join(render_retrieval_experiment_card(item) for item in data["items"])
+        if not cards:
+            cards = '<section class="empty">No final experiment papers are available.</section>'
+
+    metric_rows = "".join(
+        f'<tr><td>{escape(source_display_name(metric["source"]))}</td>'
+        f'<td>{"Current" if metric["path"] == "baseline" else "MiniLM"}</td>'
+        f'<td>{metric["yes_count"]}/{metric["reviewed_count"]}</td>'
+        f'<td>{metric["sample_count"]}/{metric["reviewed_count"]}</td>'
+        f'<td>{format_user_score(metric["mean_usefulness"]) if metric["mean_usefulness"] is not None else "—"}</td></tr>'
+        for metric in data["metrics"]
+    )
+    comparison_text = "; ".join(
+        f'{source_display_name(row["source"])}: {row["yes_gain"]:+d} yes, {row["sample_gain"]:+d} yes/maybe'
+        for row in data["comparisons"]
+    )
+    metrics = (
+        '<details class="experiment-metrics"><summary>Accumulated results</summary>'
+        '<div class="table-wrap"><table><thead><tr><th>Source</th><th>Path</th><th>Yes</th>'
+        '<th>Yes or maybe</th><th>Mean usefulness</th></tr></thead><tbody>'
+        f'{metric_rows or "<tr><td colspan=\"5\">No reviewed results yet.</td></tr>"}'
+        '</tbody></table></div>'
+        f'<p class="muted">Shared outputs: {data["overlap_count"]}. '
+        f'Runs: {data["runtime"]["run_count"]}; failures: {data["runtime"]["failed_count"]}.'
+        f'{" MiniLM difference: " + escape(comparison_text) + "." if comparison_text else ""}</p></details>'
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Paper Retrieval Experiment</title><style>{page_css()}
+.experiment-help,.experiment-metrics{{margin:12px 0;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}}
+.experiment-cards{{display:grid;gap:12px}}.experiment-card{{padding:16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}}
+.experiment-actions{{display:grid;gap:10px;margin-top:14px}}.experiment-row{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}.experiment-row strong{{min-width:135px}}
+.experiment-choice.selected{{color:var(--accent-ink);border-color:var(--accent);background:var(--accent)}}.experiment-tags label{{color:var(--muted);font-size:12px}}
+.experiment-state{{min-height:18px;color:var(--muted);font-size:12px}}.experiment-metrics summary{{cursor:pointer;font-weight:700}}
+</style></head><body><main>{render_app_header("Retrieval Experiment", subtitle, controls, "retrieval_experiment")}
+<section class="experiment-help">For each paper, make one choice: read it, maybe read it, or skip it. Papers are shown once even when both experiment paths selected them.</section>
+{metrics}<div class="experiment-cards">{cards}</div>
+<script>
+document.querySelectorAll('.experiment-card').forEach((card) => {{
+  const save = async () => {{
+    const would = card.querySelector('[data-would].selected');
+    if (!would) return;
+    const usefulness = {{yes:'5', maybe:'3', no:'1'}}[would.dataset.would];
+    const body = new URLSearchParams({{output_id: card.dataset.outputId, would_sample: would.dataset.would, usefulness}});
+    const state = card.querySelector('.experiment-state'); state.textContent = 'Saving…';
+    try {{ const response = await fetch('/retrieval-experiment/decision', {{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body}}); if(!response.ok) throw new Error(); state.textContent='Saved'; card.parentElement.appendChild(card); }}
+    catch(error) {{ state.textContent='Could not save. Try again.'; }}
+  }};
+  card.querySelectorAll('[data-would]').forEach((button) => button.onclick=()=>{{card.querySelectorAll('[data-would]').forEach(x=>x.classList.remove('selected'));button.classList.add('selected');save();}});
+}});
+</script></main></body></html>"""
+
+
+def render_retrieval_experiment_card(item: dict[str, Any]) -> str:
+    would_buttons = "".join(
+        f'<button type="button" class="experiment-choice{" selected" if item["would_sample"] == value else ""}" data-would="{value}">{label}</button>'
+        for value, label in (("yes", "Read"), ("maybe", "Maybe"), ("no", "Skip"))
+    )
+    summary = "".join(
+        f'<section><h3>{label}</h3><p>{escape(value)}</p></section>'
+        for label, value in (("Problem", item["problem"]), ("Why it matters", item["why_it_matters"]), ("Approach", item["approach"]))
+        if value
+    )
+    return f"""<article class="experiment-card" data-output-id="{item['id']}">
+      <h2>{escape(item['title'])}</h2>
+      {f'<div class="summary-grid">{summary}</div>' if summary else ''}
+      <details><summary>Abstract</summary><p>{escape(item['abstract'] or 'No abstract available.')}</p></details>
+      <div class="experiment-actions">
+        <div class="experiment-row"><strong>Would you read this?</strong>{would_buttons}</div>
+        <span class="experiment-state">{'Saved' if item['would_sample'] else ''}</span>
+      </div>
+    </article>"""
+
+
+def render_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> str:
+    data = load_minilm_eval_page(db_path, run_value=run_value)
+    selected = data["selected_run"]
+    controls = ""
+    if selected is None:
+        content = '<section class="empty">No MiniLM Eval queue has been generated yet.</section>'
+        subtitle = "Waiting for the next scheduled Scout evaluation"
+    else:
+        cards = "".join(render_minilm_eval_card(item) for item in data["items"])
+        if not cards:
+            cards = '<section class="empty">No papers are available in this MiniLM Eval run.</section>'
+        content = f'<div class="minilm-eval-cards">{cards}</div>'
+        subtitle = (
+            f'{source_display_name(selected["source"])} Scout run #{selected["source_run_id"]} | '
+            f'{selected["decided_count"]}/{selected["paper_count"]} papers decided'
+        )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Paper MiniLM Eval</title>
+  <style>{page_css()}</style>
+</head>
+<body>
+  <main>
+    {render_app_header("MiniLM Eval", subtitle, controls, "minilm_eval")}
+    {content}
+    <script>
+      document.querySelectorAll(".minilm-eval-decision").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          if (button.disabled) return;
+          const card = button.closest(".minilm-eval-card");
+          const buttons = card.querySelectorAll(".minilm-eval-decision");
+          buttons.forEach((item) => item.disabled = true);
+          const body = new URLSearchParams({{
+            queue_item_id: button.dataset.queueItemId,
+            decision: button.dataset.decision,
+          }});
+          try {{
+            const response = await fetch("/minilm-eval/decision", {{
+              method: "POST",
+              headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+              body,
+            }});
+            if (!response.ok) throw new Error("save failed");
+            buttons.forEach((item) => {{
+              const selected = item === button;
+              item.classList.toggle("selected", selected);
+              item.setAttribute("aria-pressed", selected ? "true" : "false");
+            }});
+            const state = card.querySelector(".minilm-eval-state");
+            if (state) state.textContent = "Saved";
+            card.parentElement.appendChild(card);
+          }} catch (error) {{
+            const state = card.querySelector(".minilm-eval-state");
+            if (state) state.textContent = "Could not save. Try again.";
+          }} finally {{
+            buttons.forEach((item) => item.disabled = false);
+          }}
+        }});
+      }});
+    </script>
+  </main>
+</body>
+</html>"""
+
+
+def render_minilm_eval_card(item: dict[str, Any]) -> str:
+    decision_buttons = []
+    for value, label in (("send_to_curator", "Send to Curator"), ("maybe", "Maybe"), ("skip", "Skip")):
+        selected = item["decision"] == value
+        decision_buttons.append(
+            f'<button type="button" class="minilm-eval-decision{" selected" if selected else ""}" '
+            f'data-queue-item-id="{item["id"]}" data-decision="{value}" '
+            f'aria-pressed="{"true" if selected else "false"}">{label}</button>'
+        )
+    summary = "".join(
+        f'<section><h3>{label}</h3><p>{escape(value)}</p></section>'
+        for label, value in (
+            ("Problem", item.get("problem")),
+            ("Why it matters", item.get("why_it_matters")),
+            ("Approach", item.get("approach")),
+        )
+        if value
+    )
+    return f"""<article class="minilm-eval-card">
+      <div class="minilm-eval-content">
+        <div class="minilm-eval-card-head">
+          <span class="minilm-eval-rank">Paper {item['display_rank']} of {item['paper_count']}</span>
+        </div>
+        <h2>{escape(item['title'])}</h2>
+        <details class="minilm-eval-abstract" open><summary>Abstract</summary><p>{escape(item['abstract'] or 'No abstract available.')}</p></details>
+        {f'<div class="summary-grid minilm-eval-summary">{summary}</div>' if summary else ''}
+      </div>
+      <aside class="minilm-eval-action-rail">
+        <div class="minilm-eval-actions" role="group" aria-label="MiniLM Eval decision">{''.join(decision_buttons)}</div>
+        <span class="minilm-eval-state" aria-live="polite">{'Saved' if item['decision'] else ''}</span>
+      </aside>
+    </article>"""
+
+
+def load_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> dict[str, Any]:
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        run_rows = connection.execute(
+            """
+            SELECT er.id, er.source_run_id, sr.source, er.created_at,
+                   COUNT(DISTINCT q.paper_id), COUNT(DISTINCT d.paper_id)
+            FROM minilm_eval_runs er
+            JOIN scout_runs sr ON sr.id = er.source_run_id
+            LEFT JOIN minilm_eval_queue q ON q.eval_run_id = er.id
+            LEFT JOIN minilm_eval_decisions d ON d.eval_run_id = er.id
+            GROUP BY er.id
+            ORDER BY er.id DESC LIMIT 30
+            """
+        ).fetchall()
+        runs = [
+            {"id": row[0], "source_run_id": row[1], "source": row[2], "created_at": row[3],
+             "paper_count": row[4], "item_count": row[4], "decided_count": row[5]}
+            for row in run_rows
+        ]
+        selected_id = None
+        if run_value and run_value.isascii() and run_value.isdigit():
+            requested = int(run_value)
+            if any(run["id"] == requested for run in runs):
+                selected_id = requested
+        if selected_id is None and runs:
+            selected_id = next((run["id"] for run in reversed(runs) if run["decided_count"] < run["item_count"]), runs[0]["id"])
+        selected = next((run for run in runs if run["id"] == selected_id), None)
+        items = []
+        if selected:
+            rows = connection.execute(
+                """
+                SELECT
+                    MIN(q.id) AS representative_queue_item_id,
+                    q.paper_id,
+                    q.title_snapshot,
+                    q.abstract_snapshot,
+                    MAX(q.problem_snapshot),
+                    MAX(q.why_it_matters_snapshot),
+                    MAX(q.approach_snapshot),
+                    MIN(CASE q.recommendation_mode WHEN 'baseline' THEN q.rank_position END) AS baseline_rank,
+                    MIN(CASE q.recommendation_mode WHEN 'minilm_assisted' THEN q.rank_position END) AS minilm_rank,
+                    MAX(q.minilm_raw_logit),
+                    MAX(q.minilm_bucket),
+                    d.decision
+                FROM minilm_eval_queue q
+                LEFT JOIN minilm_eval_decisions d
+                  ON d.eval_run_id = q.eval_run_id AND d.paper_id = q.paper_id
+                WHERE q.eval_run_id = ?
+                GROUP BY q.paper_id
+                ORDER BY
+                    COALESCE(MIN(CASE q.recommendation_mode WHEN 'baseline' THEN q.rank_position END), 999999),
+                    COALESCE(MIN(CASE q.recommendation_mode WHEN 'minilm_assisted' THEN q.rank_position END), 999999),
+                    q.paper_id
+                """,
+                (selected_id,),
+            ).fetchall()
+            items = [
+                {
+                    "id": row[0],
+                    "paper_id": row[1],
+                    "display_rank": 0,
+                    "paper_count": len(rows),
+                    "title": row[2],
+                    "abstract": row[3],
+                    "problem": row[4],
+                    "why_it_matters": row[5],
+                    "approach": row[6],
+                    "baseline_rank": row[7],
+                    "minilm_rank": row[8],
+                    "minilm_raw_logit": row[9],
+                    "minilm_bucket": row[10],
+                    "decision": row[11],
+                }
+                for row in rows
+            ]
+            # Use a stable experiment-specific order that reveals neither lane.
+            items.sort(key=lambda item: (
+                item["decision"] is not None,
+                hashlib.sha256(
+                    f"minilm-eval:{selected_id}:{item['paper_id']}".encode("utf-8")
+                ).digest(),
+            ))
+            for index, item in enumerate(items, 1):
+                item["display_rank"] = index
+    return {"runs": runs, "selected_run": selected, "items": items}
 
 
 def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:
@@ -1650,7 +2171,14 @@ def render_pulled_date(card: dict[str, Any]) -> str:
     )
 
 
-def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
+def render_summary(
+    summary: dict[str, Any],
+    *,
+    compact: bool,
+    paper_id: int | None = None,
+    artifact: dict[str, Any] | None = None,
+    feedback_fields: dict[str, str] | None = None,
+) -> str:
     has_extracted_summary = any(summary.get(key) for key in ["research_problem", "why_it_matters", "approach"])
     source_abstract = summary.get("source_abstract")
     if not has_extracted_summary and source_abstract:
@@ -1664,11 +2192,44 @@ def render_summary(summary: dict[str, Any], *, compact: bool) -> str:
     problem = escape(summary_display_text(summary.get("research_problem")))
     if compact:
         return f'<div class="compact-summary"><strong>Problem:</strong> {problem}</div>'
+    sections = []
+    for field_name, heading in SUMMARY_FEEDBACK_FIELDS.items():
+        text = escape(summary_display_text(summary.get(field_name)))
+        controls = render_summary_feedback_controls(
+            paper_id=paper_id,
+            artifact_id=artifact.get("id") if artifact else None,
+            field_name=field_name,
+            active_signal=(feedback_fields or {}).get(field_name),
+        )
+        sections.append(
+            f'<section><div class="summary-heading"><h3>{heading}</h3>{controls}</div><p>{text}</p></section>'
+        )
     return f"""<div class="summary-grid">
-    <section><h3>Problem</h3><p>{problem}</p></section>
-    <section><h3>Why it matters</h3><p>{escape(summary_display_text(summary.get("why_it_matters")))}</p></section>
-    <section><h3>Approach</h3><p>{escape(summary_display_text(summary.get("approach")))}</p></section>
+    {''.join(sections)}
   </div>"""
+
+
+def render_summary_feedback_controls(
+    *,
+    paper_id: int | None,
+    artifact_id: int | None,
+    field_name: str,
+    active_signal: str | None,
+) -> str:
+    if paper_id is None or artifact_id is None:
+        return ""
+    buttons = []
+    for signal, meta in SUMMARY_FEEDBACK_SIGNALS.items():
+        selected = active_signal == signal
+        title = f"{meta['label']}: {meta['description']}"
+        buttons.append(
+            f'<button type="button" class="summary-feedback-button summary-feedback-{signal}{" selected" if selected else ""}" '
+            f'data-paper-id="{paper_id}" data-artifact-id="{artifact_id}" '
+            f'data-field-name="{escape(field_name)}" data-signal="{signal}" '
+            f'aria-label="{escape(title)}" title="{escape(title)}" '
+            f'aria-pressed="{str(selected).lower()}">{meta["icon"]}</button>'
+        )
+    return '<div class="summary-feedback-controls" role="group" aria-label="Section quality feedback">' + ''.join(buttons) + '</div>'
 
 
 def summary_display_text(value: Any, *, max_chars: int = 520) -> str:
@@ -1755,17 +2316,20 @@ REVIEW_PAGE_SIZE = 50
 
 
 def load_review_cards(db_path: Path, *, filter_value: str, source_value: str, sort_value: str,
-                      page: int = 1) -> list[dict[str, Any]]:
+                      page: int = 1, title_query: str = "") -> list[dict[str, Any]]:
     return load_review_page(db_path, filter_value=filter_value, source_value=source_value,
-                            sort_value=sort_value, page=page)["cards"]
+                            sort_value=sort_value, page=page, title_query=title_query)["cards"]
 
 
 def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sort_value: str,
-                     page: str | int = 1) -> dict[str, Any]:
+                     page: str | int = 1, title_query: str = "") -> dict[str, Any]:
     init_db(db_path)
     where_clauses = []
     params: list[Any] = []
-    if filter_value == "needs_review":
+    if filter_value == "excluded":
+        where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
+        where_clauses.append("EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id)")
+    elif filter_value == "needs_review":
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status IS NULL")
         where_clauses.append("latest_structured_feedback.paper_id IS NULL")
@@ -1778,15 +2342,24 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
             "OR LOWER(COALESCE(latest_feedback.notes, '')) LIKE '%score:%'"
             ")"
         )
+    elif filter_value == "saved":
+        where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
+        where_clauses.append("EXISTS (SELECT 1 FROM saved_papers WHERE saved_papers.paper_id = papers.id)")
     elif filter_value != "all":
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
         where_clauses.append("latest_feedback.status = ?")
         params.append(filter_value)
     else:
         where_clauses.append("latest_recommendation.paper_id IS NOT NULL")
+    if filter_value != "excluded":
+        where_clauses.append("NOT EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id)")
     if source_value != SOURCE_FILTER_ALL:
         where_clauses.append("EXISTS (SELECT 1 FROM paper_sources source_filter WHERE source_filter.paper_id = papers.id AND source_filter.source = ?)")
         params.append(source_value)
+    title_query = normalize_title_query(title_query)
+    if title_query:
+        where_clauses.append("papers.title COLLATE NOCASE LIKE ? ESCAPE '\\'")
+        params.append(f"%{escape_like_pattern(title_query)}%")
     where_clause = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
     if sort_value == "score":
@@ -1892,7 +2465,9 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                 latest_structured_feedback.created_at,
                 latest_raw_feedback.received_at,
                 latest_raw_feedback.content,
-                COALESCE(latest_structured_feedback.created_at, latest_raw_feedback.received_at) AS latest_feedback_received_at
+                COALESCE(latest_structured_feedback.created_at, latest_raw_feedback.received_at) AS latest_feedback_received_at,
+                EXISTS (SELECT 1 FROM saved_papers WHERE saved_papers.paper_id = papers.id) AS is_saved,
+                EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id) AS is_excluded
             FROM papers
             LEFT JOIN latest_recommendation
               ON latest_recommendation.paper_id = papers.id
@@ -1920,6 +2495,7 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
         for row in rows:
             paper_id = row[0]
             artifacts = load_artifacts_for_paper(connection, paper_id)
+            summary_artifact = artifacts.get("triage_summary")
             lightweight_score = parse_lightweight_feedback_score(row[14])
             user_score = row[16] if row[16] is not None else lightweight_score
             has_feedback = bool(
@@ -1949,8 +2525,14 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                     "ranking_reason": row[12],
                     "feedback_status": row[13],
                     "feedback_notes": row[20] or row[14],
+                    "is_saved": bool(row[22]),
+                    "is_excluded": bool(row[23]),
                     "artifacts": artifacts,
-                    "summary": with_source_abstract(load_summary(artifacts.get("triage_summary")), row[7]),
+                    "summary": with_source_abstract(load_summary(summary_artifact), row[7]),
+                    "summary_feedback_fields": load_summary_feedback_fields(
+                        connection,
+                        summary_artifact.get("id") if summary_artifact else None,
+                    ),
                 }
             )
     finally:
@@ -2038,19 +2620,23 @@ def render_primary_nav(current_page: str) -> str:
     )
 
 
-def build_queue_href(filter_value: str, source_value: str, sort_value: str, view_value: str, page: int = 1) -> str:
-    return "/?" + urllib.parse.urlencode({"filter": filter_value, "source": source_value, "sort": sort_value, "view": view_value, "page": page})
+def build_queue_href(filter_value: str, source_value: str, sort_value: str, view_value: str,
+                     page: int = 1, title_query: str = "") -> str:
+    params = {"filter": filter_value, "source": source_value, "sort": sort_value, "view": view_value, "page": page}
+    if title_query:
+        params["title"] = normalize_title_query(title_query)
+    return "/?" + urllib.parse.urlencode(params)
 
 
 def render_queue_pagination(result: dict[str, Any], filter_value: str, source_value: str,
-                            sort_value: str, view_value: str) -> str:
+                            sort_value: str, view_value: str, title_query: str = "") -> str:
     if result["pages"] <= 1:
         return ""
     links = []
     for target, label, symbol in [(result["page"] - 1, "Previous page", "&#8592;"),
                                   (result["page"] + 1, "Next page", "&#8594;")]:
         if 1 <= target <= result["pages"]:
-            href = build_queue_href(filter_value, source_value, sort_value, view_value, target)
+            href = build_queue_href(filter_value, source_value, sort_value, view_value, target, title_query)
             links.append(f'<a class="secondary-link" href="{escape(href)}" aria-label="{label}" title="{label}">{symbol}</a>')
         else:
             links.append(f'<span class="page-disabled" aria-disabled="true" aria-label="{label}">{symbol}</span>')
@@ -2069,6 +2655,14 @@ def add_query_param(path: str, key: str, value: str) -> str:
 def normalize_choice(value: str, choices: list[tuple[str, str]], default: str) -> str:
     allowed = {choice for choice, _ in choices}
     return value if value in allowed else default
+
+
+def normalize_title_query(value: Any) -> str:
+    return " ".join(str(value or "").split())[:200]
+
+
+def escape_like_pattern(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def selected_label(choices: list[tuple[str, str]], value: str) -> str:
@@ -2123,7 +2717,7 @@ def source_label(primary_source: str, sources: list[str]) -> str:
 
 def source_badge_class(source: str) -> str:
     normalized = source.replace("_", "-").lower()
-    if normalized not in {"arxiv", "openalex", "semantic-scholar"}:
+    if normalized not in {"arxiv", "openalex", "semantic-scholar", "core"}:
         normalized = "unknown"
     return f"source-badge-{normalized}"
 
@@ -2133,6 +2727,7 @@ def source_display_name(source: str) -> str:
         "arxiv": "arXiv",
         "semantic_scholar": "Semantic Scholar",
         "openalex": "OpenAlex",
+        "core": "CORE",
         "unknown": "Unknown",
     }
     return labels.get(source, source.replace("_", " ").title())
@@ -2161,6 +2756,24 @@ def load_artifacts_for_paper(connection: sqlite3.Connection, paper_id: int) -> d
             },
         )
     return artifacts
+
+
+def load_summary_feedback_fields(connection: sqlite3.Connection, artifact_id: int | None) -> dict[str, str]:
+    if artifact_id is None:
+        return {}
+    signals = {
+        row[0]: row[1]
+        for row in connection.execute(
+            "SELECT field_name, signal FROM summary_field_quality_signals WHERE artifact_id = ?",
+            (artifact_id,),
+        )
+    }
+    for row in connection.execute(
+        "SELECT field_name FROM summary_field_feedback WHERE artifact_id = ?",
+        (artifact_id,),
+    ):
+        signals.setdefault(row[0], "down")
+    return signals
 
 
 def load_artifact(db_path: Path, artifact_id: int) -> dict[str, Any] | None:
@@ -2256,6 +2869,11 @@ def save_feedback(
     if ingest_output is None or not gemini_enabled():
         return result
 
+    from paper_agents.gemini_runtime import readiness_error
+    if profile_provider_fn is None and (error := readiness_error()):
+        result["profile_apply_error"] = error
+        return result
+
     structured_feedback_id = ingest_output["structured_feedback_id"]
     if profile_apply_mode == "background":
         start_profile_apply_worker(
@@ -2280,6 +2898,135 @@ def save_feedback(
         result["profile_apply_error"] = str(error)
         print(f"feedback profile auto-apply failed: {error}")
     return result
+
+
+def toggle_summary_field_feedback(
+    db_path: Path,
+    *,
+    paper_id: int,
+    artifact_id: int,
+    field_name: str,
+    signal: str = "down",
+) -> dict[str, Any]:
+    if field_name not in SUMMARY_FEEDBACK_FIELDS:
+        raise ValueError("Invalid summary field")
+    allowed_signals = set(SUMMARY_FEEDBACK_SIGNALS) | LEGACY_SUMMARY_FEEDBACK_SIGNALS
+    if signal not in allowed_signals:
+        raise ValueError("Invalid summary field signal")
+    init_db(db_path)
+    with connect_db(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id, path, model, metadata_json
+            FROM artifacts
+            WHERE id = ? AND paper_id = ? AND artifact_type = 'triage_summary'
+            """,
+            (artifact_id, paper_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Summary artifact does not belong to this paper")
+        existing = connection.execute(
+            "SELECT id, signal FROM summary_field_quality_signals WHERE artifact_id = ? AND field_name = ?",
+            (artifact_id, field_name),
+        ).fetchone()
+        legacy_down = connection.execute(
+            "SELECT id FROM summary_field_feedback WHERE artifact_id = ? AND field_name = ?",
+            (artifact_id, field_name),
+        ).fetchone()
+        if existing and existing[1] == signal:
+            connection.execute("DELETE FROM summary_field_quality_signals WHERE id = ?", (existing[0],))
+            active = False
+        elif not existing and legacy_down and signal == "down":
+            connection.execute("DELETE FROM summary_field_feedback WHERE id = ?", (legacy_down[0],))
+            active = False
+        else:
+            artifact = {
+                "id": row[0],
+                "path": row[1],
+                "model": row[2],
+                "metadata": decode_json(row[3], {}),
+            }
+            summary = load_summary(artifact)
+            connection.execute(
+                """
+                INSERT INTO summary_field_quality_signals (
+                    paper_id, artifact_id, field_name, signal, field_text, model, artifact_metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(artifact_id, field_name) DO UPDATE SET
+                    signal = excluded.signal,
+                    field_text = excluded.field_text,
+                    model = excluded.model,
+                    artifact_metadata_json = excluded.artifact_metadata_json,
+                    updated_at = datetime('now')
+                """,
+                (
+                    paper_id,
+                    artifact_id,
+                    field_name,
+                    signal,
+                    summary_field_text(summary.get(field_name)),
+                    row[2],
+                    json.dumps(decode_json(row[3], {}), sort_keys=True),
+                ),
+            )
+            if legacy_down:
+                connection.execute("DELETE FROM summary_field_feedback WHERE id = ?", (legacy_down[0],))
+            active = True
+    return {
+        "active": active,
+        "field_name": field_name,
+        "field_label": SUMMARY_FEEDBACK_FIELDS[field_name],
+        "signal": signal,
+    }
+
+
+def toggle_saved_paper(db_path: Path, *, paper_id: int) -> dict[str, Any]:
+    if paper_id <= 0:
+        raise ValueError("Invalid paper id")
+    init_db(db_path)
+    connection = connect_db(db_path)
+    try:
+        paper = connection.execute("SELECT id FROM papers WHERE id = ?", (paper_id,)).fetchone()
+        if paper is None:
+            raise ValueError("Paper not found")
+        existing = connection.execute(
+            "SELECT paper_id FROM saved_papers WHERE paper_id = ?",
+            (paper_id,),
+        ).fetchone()
+        if existing:
+            connection.execute("DELETE FROM saved_papers WHERE paper_id = ?", (paper_id,))
+            saved = False
+        else:
+            connection.execute("INSERT INTO saved_papers (paper_id) VALUES (?)", (paper_id,))
+            saved = True
+        connection.commit()
+    finally:
+        connection.close()
+    return {"paper_id": paper_id, "saved": saved}
+
+
+def toggle_excluded_paper(db_path: Path, *, paper_id: int) -> dict[str, Any]:
+    if paper_id <= 0:
+        raise ValueError("Invalid paper id")
+    init_db(db_path)
+    connection = connect_db(db_path)
+    try:
+        if connection.execute("SELECT id FROM papers WHERE id = ?", (paper_id,)).fetchone() is None:
+            raise ValueError("Paper not found")
+        existing = connection.execute(
+            "SELECT paper_id FROM excluded_papers WHERE paper_id = ?", (paper_id,)
+        ).fetchone()
+        if existing:
+            connection.execute("DELETE FROM excluded_papers WHERE paper_id = ?", (paper_id,))
+            excluded = False
+        else:
+            connection.execute("INSERT INTO excluded_papers (paper_id) VALUES (?)", (paper_id,))
+            connection.execute("DELETE FROM saved_papers WHERE paper_id = ?", (paper_id,))
+            excluded = True
+        connection.commit()
+    finally:
+        connection.close()
+    return {"paper_id": paper_id, "excluded": excluded}
 
 
 def start_profile_apply_worker(
@@ -2383,7 +3130,7 @@ body { margin: 0; font: 13px/1.42 Inter, ui-sans-serif, -apple-system, BlinkMacS
 main { max-width: 1180px; margin: 0 auto; padding: 14px; }
 .topbar { display: grid; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 7px; margin-bottom: 10px; }
 .header-main { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 18px; align-items: center; }
-.header-controls { display: flex; justify-content: flex-end; }
+.header-controls { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; }
 h1 { margin: 0 0 2px; font-size: 18px; font-weight: 760; letter-spacing: 0; }
 .brand-title, .brand-home { display: flex; gap: 8px; align-items: center; }
 .brand-home { color: inherit; text-decoration: none; }
@@ -2398,6 +3145,15 @@ h3 { margin: 0 0 3px; font-size: 11px; font-weight: 760; color: var(--muted); le
 p { margin: 0; }
 .topbar p, .card-head p { color: var(--muted); font-size: 12px; }
 .queue-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: end; }
+.title-search { position: relative; }
+.title-search[open] { display: flex; align-items: center; gap: 5px; }
+.title-search summary { display: inline-flex; align-items: center; justify-content: center; width: 30px; min-height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(17, 26, 38, 0.72); cursor: pointer; list-style: none; }
+.title-search summary::-webkit-details-marker { display: none; }
+.title-search[open] summary { color: var(--text); border-color: rgba(56, 189, 248, 0.55); background: rgba(56, 189, 248, 0.10); }
+.title-search-form { display: flex; gap: 5px; align-items: center; }
+.title-search-form input[type="search"] { width: min(190px, 48vw); }
+.title-search-clear { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(17, 26, 38, 0.72); font-size: 18px; line-height: 1; text-decoration: none; }
+.title-search-clear:hover { color: var(--text); border-color: var(--border-strong); }
 .queue-pagination { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin: 12px 0; color: var(--muted-strong); }
 .queue-pagination a, .page-disabled { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; }
 .page-disabled { opacity: 0.4; }
@@ -2434,12 +3190,42 @@ button.primary { background: linear-gradient(180deg, #7dd3fc, var(--accent)); co
 button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong); }
 .banner { padding: 7px 9px; border: 1px solid rgba(52, 211, 153, 0.42); background: rgba(52, 211, 153, 0.12); border-radius: var(--radius-sm); margin-bottom: 8px; }
 .banner.warning { border-color: rgba(251, 191, 36, 0.48); background: rgba(251, 191, 36, 0.12); }
+.minilm-eval-cards { display: grid; gap: 10px; }
+.minilm-eval-card { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 16px; align-items: start; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); }
+.minilm-eval-content { min-width: 0; }
+.minilm-eval-card-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
+.minilm-eval-abstract { margin-top: 9px; color: var(--muted-strong); }
+.minilm-eval-abstract summary { cursor: pointer; color: var(--muted); font-size: 11px; font-weight: 720; text-transform: uppercase; }
+.minilm-eval-abstract p { margin-top: 5px; }
+.minilm-eval-summary { padding-top: 3px; border-top: 1px solid rgba(51, 70, 95, 0.55); }
+.minilm-eval-action-rail { display: grid; gap: 5px; }
+.minilm-eval-actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.minilm-eval-decision { min-height: 38px; font-weight: 700; color: var(--muted-strong); }
+.minilm-eval-decision:hover { border-color: var(--accent); color: var(--text); }
+.minilm-eval-decision.selected { color: var(--accent-ink); border-color: var(--accent); background: var(--accent); }
+.minilm-eval-decision:disabled { cursor: wait; opacity: 0.55; }
+.minilm-eval-state { display: block; min-height: 17px; margin-top: 5px; color: var(--muted); font-size: 11px; text-align: right; }
 .cards { display: grid; gap: 8px; }
 .paper-card, .empty { background: linear-gradient(180deg, rgba(21, 31, 45, 0.97), rgba(15, 23, 34, 0.98)); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.035); }
 .paper-card:hover { border-color: var(--border-strong); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(56, 189, 248, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.045); }
 .paper-form { display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 12px; align-items: start; }
 .paper-main { min-width: 0; }
 .card-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; }
+.card-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.card-title-row > div { min-width: 0; }
+.paper-collection-actions { display: flex; flex: 0 0 auto; gap: 2px; }
+.save-paper-button, .exclude-paper-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 27px; min-height: 27px; border: 1px solid transparent; padding: 3px; color: var(--muted); background: transparent; opacity: 0.16; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease, background 120ms ease; }
+.paper-card:hover .save-paper-button, .paper-card:hover .exclude-paper-button { opacity: 0.36; }
+.save-paper-button:hover, .save-paper-button:focus-visible, .exclude-paper-button:hover, .exclude-paper-button:focus-visible { opacity: 0.8; color: var(--text); border-color: var(--border); background: rgba(148, 163, 184, 0.05); }
+.save-paper-button svg, .exclude-paper-button svg { width: 17px; height: 17px; }
+.save-paper-button .bookmark-outline { display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.save-paper-button .bookmark-filled { display: none; fill: currentColor; }
+.save-paper-button.saved { opacity: 1; color: var(--accent); border-color: rgba(56, 189, 248, 0.38); background: rgba(56, 189, 248, 0.10); }
+.save-paper-button.saved .bookmark-outline { display: none; }
+.save-paper-button.saved .bookmark-filled { display: block; }
+.exclude-paper-button svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.exclude-paper-button.excluded { opacity: 1; color: #fb7185; border-color: rgba(251, 113, 133, 0.38); background: rgba(251, 113, 133, 0.10); }
+.save-paper-button:disabled, .exclude-paper-button:disabled { cursor: wait; opacity: 0.45; }
 .paper-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.25; }
 .paper-meta .source-id { color: #75859a; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 .action-rail { display: grid; gap: 6px; }
@@ -2466,10 +3252,21 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .source-badge-openalex::before { content: "O"; }
 .source-badge-semantic-scholar { color: #d8b4fe; background: rgba(126, 34, 206, 0.16); border-color: rgba(168, 85, 247, 0.58); }
 .source-badge-semantic-scholar::before { content: "S"; }
+.source-badge-core { color: #86efac; background: rgba(34, 197, 94, 0.13); border-color: rgba(74, 222, 128, 0.58); }
+.source-badge-core::before { content: "C"; }
 .source-badge-unknown { color: var(--muted); background: rgba(148, 163, 184, 0.07); border-color: var(--border); }
 .source-badge-unknown::before { content: "?"; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
 .summary-grid section { min-width: 0; }
+.summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
+.summary-heading h3 { margin-bottom: 0; }
+.summary-feedback-controls { display: inline-flex; gap: 2px; align-items: center; opacity: 0.12; transition: opacity 120ms ease; }
+.paper-card:hover .summary-feedback-controls, .summary-feedback-controls:focus-within { opacity: 0.36; }
+.summary-feedback-button { display: inline-flex; align-items: center; justify-content: center; width: 22px; min-height: 22px; border: 1px solid transparent; border-radius: 999px; padding: 0; color: var(--muted); background: transparent; font-size: 13px; line-height: 1; opacity: 0.55; }
+.summary-feedback-button:hover, .summary-feedback-button:focus-visible { opacity: 0.95; color: var(--text); border-color: var(--border); background: rgba(148, 163, 184, 0.06); }
+.summary-feedback-button.selected { opacity: 1; color: var(--text); border-color: rgba(56, 189, 248, 0.38); background: rgba(56, 189, 248, 0.10); }
+.summary-feedback-button.feedback-error { border-color: rgba(251, 113, 133, 0.68); color: #fb7185; }
+.summary-feedback-button:disabled { cursor: wait; opacity: 0.25; }
 .summary-grid p, .source-summary p, .compact-summary { color: var(--muted-strong); font-size: 12px; }
 .source-summary { margin: 8px 0; }
 .source-summary p {
@@ -2625,6 +3422,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .source-badge-arxiv { color: #ffd166; background: rgba(251, 191, 36, 0.13); border-color: rgba(251, 191, 36, 0.58); }
   .source-badge-openalex { color: #7dd3fc; background: rgba(14, 165, 233, 0.14); border-color: rgba(56, 189, 248, 0.58); }
   .source-badge-semantic-scholar { color: #d8b4fe; background: rgba(126, 34, 206, 0.16); border-color: rgba(168, 85, 247, 0.58); }
+  .source-badge-core { color: #86efac; background: rgba(34, 197, 94, 0.13); border-color: rgba(74, 222, 128, 0.58); }
   .source-badge-unknown { color: var(--muted); background: rgba(148, 163, 184, 0.07); border-color: var(--border); }
   .chart-axis { stroke: #8b949e; }
   .chart-grid { stroke: #30363d; opacity: 1; }
@@ -2658,6 +3456,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .header-controls { justify-content: flex-start; }
   .queue-controls, .primary-nav { justify-content: flex-start; }
   .summary-grid { grid-template-columns: 1fr; }
+  .minilm-eval-card { grid-template-columns: 1fr; }
   .pulled-date { margin-left: 0; text-align: left; }
   .feedback-state { text-align: left; grid-column: 1 / -1; }
   .health-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
