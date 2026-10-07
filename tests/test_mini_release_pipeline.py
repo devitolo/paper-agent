@@ -73,6 +73,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("MiniLM Curator interest-fit verification failed", update)
         self.assertIn('> "$RELEASE_DIR/qwen3-curator-check.json"', update)
         self.assertIn("Qwen3 Curator verification failed", update)
+        self.assertIn("timeout=240", update)
 
     def test_mini_compose_uses_short_stop_grace_after_job_drain(self):
         compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")

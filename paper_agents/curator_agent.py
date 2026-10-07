@@ -29,7 +29,7 @@ class CuratorConfig:
     evidence_enabled: bool = False
     evidence_model: str = DEFAULT_CURATOR_MODEL
     evidence_ollama_url: str = field(default_factory=ollama_url)
-    evidence_timeout: int = 45
+    evidence_timeout: int = 180
     evidence_max_chars: int = 7000
     evidence_candidate_limit: int = 10
     interest_fit_enabled: bool = True
