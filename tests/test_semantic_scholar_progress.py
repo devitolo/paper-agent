@@ -49,9 +49,7 @@ class SemanticScholarProgressTests(unittest.TestCase):
 
     def run_scout(self, responses, **kwargs):
         cycle = db.create_workflow_cycle(self.connection, mode="test", max_scout_attempts=1)
-        with patch.object(self.source, "fetch_page", side_effect=responses) as fetch, patch(
-            "paper_agents.scout_agent.topics_with_guidance", side_effect=lambda topics, _: topics
-        ):
+        with patch.object(self.source, "fetch_page", side_effect=responses) as fetch:
             result = ScoutAgent(self.source).run(
                 self.connection,
                 workflow_cycle_id=cycle,

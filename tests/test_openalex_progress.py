@@ -42,8 +42,7 @@ class ProgressTests(unittest.TestCase):
 
     def run_scout(self, response, **kwargs):
         cycle = db.create_workflow_cycle(self.c, mode='test', max_scout_attempts=1)
-        with patch.object(self.source, 'fetch_page', side_effect=response) as fetch, patch(
-                'paper_agents.scout_agent.topics_with_guidance', side_effect=lambda topics, _: topics):
+        with patch.object(self.source, 'fetch_page', side_effect=response) as fetch:
             result = ScoutAgent(self.source).run(self.c, workflow_cycle_id=cycle, attempt_number=1,
                 config=ScoutConfig(topics=kwargs.pop('topics', ['incident']),
                                    openalex_cursor_enabled=True, **kwargs))

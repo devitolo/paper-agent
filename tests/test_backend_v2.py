@@ -354,7 +354,6 @@ class BackendV2Tests(unittest.TestCase):
     def test_scout_daily_cli_empty_selection_does_not_apply_guidance_or_construct_source(self):
         with (
             patch("paper_agents.cli.select_topics_for_source", return_value=[]),
-            patch("paper_agents.cli.load_scout_guidance", return_value=ScoutGuidance(boost_terms=["incident response"])) as guidance,
             patch("paper_agents.cli.create_scout_source") as create_source,
             patch("paper_agents.cli.run_daily_scout") as run_scout,
             patch("paper_agents.cli.print_section") as print_section,
@@ -362,7 +361,6 @@ class BackendV2Tests(unittest.TestCase):
         ):
             cli.main()
 
-        guidance.assert_not_called()
         create_source.assert_not_called()
         run_scout.assert_not_called()
         self.assertEqual(print_section.call_args.args[1]["skipped_reason"], "no_eligible_configured_topics")
@@ -1266,29 +1264,31 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(guidance.feedback_count, 2)
         self.assertEqual(guidance.profile_version_id, self.profile_id)
 
-    def test_scout_agent_records_feedback_guidance_and_guided_topics(self):
-        feedback_paper_id, _ = db.upsert_paper(
+    def test_scout_agent_uses_only_explicit_topics_and_ignores_profile_preferences(self):
+        profile_version = db.current_profile_version(self.connection)
+        db.create_profile_version(
             self.connection,
-            {
-                "source": "semantic_scholar",
-                "source_id": "guidance-feedback",
-                "title": "RAG observability for production incidents",
-                "abstract": "Context grounding for incident response.",
+            profile=profile_version["profile"] | {
+                "interests": ["RAG context grounding"],
+                "positive_signals": ["incident response"],
+                "negative_signals": ["toy benchmark", "weak evidence"],
             },
+            source_structured_feedback_id=None,
+            change_summary="preferences must remain outside Scout",
         )
-        ingest_feedback_blob(
-            self.connection,
-            paper_id=feedback_paper_id,
-            recommendation_id=None,
-            content="Decision: keep\nScore: 5\nMore RAG context grounding for incident response.",
-            source="test",
-        )
-        source = FakeSource([candidate("2601.guidedv1", "Guided candidate")])
+        source = FakeSource([
+            ScoutCandidate(
+                source="arxiv", source_id="2601.badguidancev1",
+                title="Toy benchmark with weak evidence",
+                abstract="An illustrative paper with no production signal.",
+                authors=[], published="2026-01-01", updated=None,
+                url="https://example.test/bad", pdf_url=None, categories=["cs.SE"],
+            ),
+            candidate("2601.goodguidancev1", "Incident response observability"),
+        ])
 
         result = ScoutAgent(source=source).run(
-            self.connection,
-            workflow_cycle_id=self.cycle_id,
-            attempt_number=1,
+            self.connection, workflow_cycle_id=self.cycle_id, attempt_number=1,
             config=ScoutConfig(topics=["microservice diagnosis"], max_candidates=5),
         )
 
@@ -1296,66 +1296,17 @@ class BackendV2Tests(unittest.TestCase):
             "SELECT topics_json, guidance_id, diagnostics_json FROM scout_runs WHERE id = ?",
             (result["scout_run_id"],),
         ).fetchone()
-        topics = json.loads(row[0])
-        diagnostics = json.loads(row[2])
-        guidance_row = self.connection.execute(
-            "SELECT active, metadata_json FROM scouting_guidance WHERE id = ?",
-            (row[1],),
-        ).fetchone()
-        self.assertIn("rag", topics)
-        self.assertEqual(guidance_row[0], 0)
-        self.assertEqual(json.loads(guidance_row[1])["source"], "feedback_profile")
-        self.assertIn("scout_guidance", diagnostics)
-        self.assertIn("rag", result["guidance"]["boost_terms"])
-
-    def test_scout_agent_excludes_clear_feedback_avoid_matches(self):
-        profile_version = db.current_profile_version(self.connection)
-        db.create_profile_version(
-            self.connection,
-            profile=profile_version["profile"] | {"negative_signals": ["toy benchmark", "weak evidence"]},
-            source_structured_feedback_id=None,
-            change_summary="test negative signals",
-        )
-        source = FakeSource(
-            [
-                ScoutCandidate(
-                    source="arxiv",
-                    source_id="2601.badguidancev1",
-                    title="Toy benchmark with weak evidence",
-                    abstract="An illustrative paper with no production signal.",
-                    authors=[],
-                    published="2026-01-01",
-                    updated=None,
-                    url="https://example.test/bad",
-                    pdf_url=None,
-                    categories=["cs.SE"],
-                ),
-                candidate("2601.goodguidancev1", "Incident response observability"),
-            ]
-        )
-
-        result = ScoutAgent(source=source).run(
-            self.connection,
-            workflow_cycle_id=self.cycle_id,
-            attempt_number=1,
-            config=ScoutConfig(topics=["AIOps"], max_candidates=5),
-        )
-
-        self.assertEqual(result["eligible_count"], 1)
+        self.assertEqual(json.loads(row[0]), ["microservice diagnosis"])
+        self.assertIsNone(row[1])
+        self.assertEqual(json.loads(row[2])["configured_topics"], ["microservice diagnosis"])
+        self.assertNotIn("scout_guidance", json.loads(row[2]))
+        self.assertNotIn("guidance", result)
+        self.assertEqual(result["eligible_count"], 2)
         rows = self.connection.execute(
-            """
-            SELECT papers.title, scout_candidates.excluded, scout_candidates.exclusion_reason,
-                   scout_candidates.source_diagnostics_json
-            FROM scout_candidates
-            JOIN papers ON papers.id = scout_candidates.paper_id
-            ORDER BY scout_candidates.retrieval_order
-            """
+            "SELECT excluded, exclusion_reason, source_diagnostics_json FROM scout_candidates ORDER BY retrieval_order"
         ).fetchall()
-        bad = next(row for row in rows if row[0] == "Toy benchmark with weak evidence")
-        self.assertEqual(bad[1], 1)
-        self.assertEqual(bad[2], "feedback_avoid_terms")
-        diagnostics = json.loads(bad[3])
-        self.assertEqual(diagnostics["feedback_guidance"]["feedback_avoid_hits"], ["toy benchmark", "weak evidence"])
+        self.assertEqual([(row[0], row[1]) for row in rows], [(0, None), (0, None)])
+        self.assertTrue(all("feedback_guidance" not in json.loads(row[2]) for row in rows))
 
     def test_topics_with_guidance_preserves_explicit_topic_and_bounds_expansion(self):
         guidance = build_scout_guidance(

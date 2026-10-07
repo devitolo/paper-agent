@@ -60,7 +60,6 @@ from paper_agents.scout import (
     create_scout_source,
     run_daily_scout,
 )
-from paper_agents.scout_guidance import guidance_summary, load_scout_guidance, topics_with_guidance
 from paper_agents.store import DEFAULT_PROFILE_PATH, load_profile, save_profile
 from paper_agents.topics import select_topics_for_source
 from paper_agents.web import run_review_ui
@@ -351,13 +350,7 @@ def main() -> None:
             print("skipped_reason: no_eligible_configured_topics")
             print_section("Daily scout", {"source": args.source, "candidates": [], "skipped_reason": "no_eligible_configured_topics"})
             return
-        scout_guidance = None
-        scout_guidance_summary = {}
-        init_db(args.db)
-        with connect_db(args.db) as connection:
-            scout_guidance = load_scout_guidance(connection)
-            scout_guidance_summary = guidance_summary(scout_guidance)
-        topics = topics_with_guidance(base_topics, scout_guidance)
+        topics = base_topics
         source_seen_ids = seen_source_ids(args.db, source=args.source) if not args.include_seen else set()
         try:
             output = run_daily_scout(
@@ -379,7 +372,6 @@ def main() -> None:
                 timeout=args.source_timeout,
                 seen_source_ids=source_seen_ids,
                 include_seen=args.include_seen,
-                guidance=scout_guidance_summary,
             )
         except RuntimeError as error:
             raise SystemExit(str(error)) from error
@@ -425,15 +417,6 @@ def main() -> None:
             raise SystemExit(str(error)) from error
         if output.get("skipped_reason"):
             print("skipped_reason: no_eligible_configured_topics")
-        for scout_result in output.get("scout_results", []):
-            guidance = scout_result.get("guidance") or {}
-            if guidance:
-                print(
-                    "Scout guidance: "
-                    f"boost={guidance.get('boost_terms', [])[:5]} "
-                    f"avoid={guidance.get('avoid_terms', [])[:5]} "
-                    f"feedback_count={guidance.get('feedback_count', 0)}"
-                )
         print_section("Pipeline review cards", {"cards": output["cards"]})
         return
 

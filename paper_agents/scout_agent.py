@@ -20,13 +20,6 @@ from paper_agents.scout import (
     SemanticScholarSource,
     dedupe_candidates,
 )
-from paper_agents.scout_guidance import (
-    apply_guidance_to_candidates,
-    guidance_summary,
-    guidance_text,
-    load_scout_guidance,
-    topics_with_guidance,
-)
 
 DEFAULT_TARGET_CANDIDATES = 20
 DEFAULT_MIN_ELIGIBLE_CANDIDATES = 10
@@ -72,23 +65,6 @@ class ScoutAgent:
             timeout=config.timeout,
         )
         telemetry.attributes(workflow_cycle_id=workflow_cycle_id, attempt=attempt_number, source=source.name)
-        active_guidance = db.active_scouting_guidance(connection)
-        scout_guidance = load_scout_guidance(connection)
-        guided_topics = topics_with_guidance(config.topics, scout_guidance)
-        guidance_id = db.create_scouting_guidance(
-            connection,
-            curator_run_id=None,
-            guidance_text=guidance_text(scout_guidance),
-            metadata={
-                "source": "feedback_profile",
-                "guidance": scout_guidance.as_dict(),
-                "base_topics": config.topics,
-                "guided_topics": guided_topics,
-                "active_curator_guidance_id": active_guidance["id"] if active_guidance else None,
-                "active_curator_guidance_text": active_guidance.get("guidance_text") if active_guidance else None,
-            },
-            active=False,
-        )
         db.update_workflow_state(connection, workflow_cycle_id, "scouting")
         db.increment_scout_attempts(connection, workflow_cycle_id)
         scout_run_id = db.insert_scout_run(
@@ -99,17 +75,13 @@ class ScoutAgent:
             target_candidates=config.target_candidates,
             max_candidates=config.max_candidates,
             freshness_months=config.freshness_months,
-            topics=guided_topics,
-            guidance_id=guidance_id,
-            diagnostics={
-                "scout_guidance": guidance_summary(scout_guidance),
-                "base_topics": config.topics,
-                "active_curator_guidance_text": active_guidance.get("guidance_text") if active_guidance else None,
-            },
+            topics=config.topics,
+            guidance_id=None,
+            diagnostics={"configured_topics": config.topics},
         )
 
         # Source requests may spend minutes retrying rate limits. Persist the run
-        telemetry.attributes(scout_run_id=scout_run_id, guidance_id=guidance_id)
+        telemetry.attributes(scout_run_id=scout_run_id)
         # setup first so another scheduled pipeline is not blocked meanwhile.
         connection.commit()
 
@@ -122,12 +94,12 @@ class ScoutAgent:
             from paper_agents.arxiv_progress import ArxivProgress
             progress = ArxivProgress(connection, source)
             candidates = progress.fetch(
-                guided_topics,
+                config.topics,
                 freshness_months=config.freshness_months,
                 max_candidates=config.max_candidates,
                 errors=errors,
             )
-            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
+            ordered_candidates = [(candidate, {}) for candidate in candidates]
             source_diagnostics = progress.diagnostics
             refill_diagnostics = {
                 "stop_reason": source_diagnostics["stop_reason"],
@@ -145,7 +117,7 @@ class ScoutAgent:
                 max_candidates=config.max_candidates,
                 errors=errors,
             )
-            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
+            ordered_candidates = [(candidate, {}) for candidate in candidates]
             source_diagnostics = progress.diagnostics
             refill_diagnostics = {
                 "stop_reason": source_diagnostics["stop_reason"],
@@ -156,9 +128,9 @@ class ScoutAgent:
                 config.openalex_cursor_enabled or os.getenv("PAPER_OPENALEX_CURSOR") == "1"):
             from paper_agents.openalex_progress import OpenAlexProgress
             progress = OpenAlexProgress(connection, source)
-            candidates = progress.fetch(guided_topics, freshness_months=config.freshness_months,
+            candidates = progress.fetch(config.topics, freshness_months=config.freshness_months,
                                         max_candidates=config.max_candidates, errors=errors)
-            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
+            ordered_candidates = [(candidate, {}) for candidate in candidates]
             source_diagnostics = progress.diagnostics
             refill_diagnostics = {"stop_reason": source_diagnostics["stop_reason"],
                                   "rounds": [], "mode": "cursor_v1"}
@@ -168,16 +140,15 @@ class ScoutAgent:
             progress = CoreProgress(connection, source)
             candidates = progress.fetch(config.topics, freshness_months=config.freshness_months,
                                         max_candidates=config.max_candidates, errors=errors)
-            guided_candidates = apply_guidance_to_candidates(candidates, scout_guidance)
+            ordered_candidates = [(candidate, {}) for candidate in candidates]
             source_diagnostics = progress.diagnostics
             refill_diagnostics = {"stop_reason": source_diagnostics["stop_reason"],
                                   "rounds": [], "mode": "offset_v1"}
         else:
-            candidates, guided_candidates, refill_diagnostics, source_diagnostics = self._fetch_candidate_pool(
+            candidates, ordered_candidates, refill_diagnostics, source_diagnostics = self._fetch_candidate_pool(
                 connection,
                 source=source,
-                source_topics=config.topics if source.name == "semantic_scholar" else guided_topics,
-                guidance=scout_guidance,
+                source_topics=config.topics,
                 config=config,
                 errors=errors,
             )
@@ -187,7 +158,7 @@ class ScoutAgent:
                 connection.execute("BEGIN IMMEDIATE")
                 progress.checkpoint(scout_run_id)
             stored: list[dict[str, Any]] = []
-            for index, (candidate, guidance_diagnostics) in enumerate(guided_candidates, 1):
+            for index, (candidate, source_annotation) in enumerate(ordered_candidates, 1):
                 candidate_dict = sanitize_candidate(candidate.as_dict())
                 paper_id, is_new = db.upsert_paper(connection, candidate_dict)
                 seen_in_current_cycle = db.paper_has_scout_candidate_in_cycle(
@@ -196,17 +167,14 @@ class ScoutAgent:
                     workflow_cycle_id=workflow_cycle_id,
                     before_scout_run_id=scout_run_id,
                 )
-                feedback_excluded = bool(guidance_diagnostics.get("feedback_guidance_excluded"))
                 already_recommended = db.paper_has_prior_recommendation(
                     connection,
                     paper_id=paper_id,
                     before_scout_run_id=scout_run_id,
                 )
-                excluded = feedback_excluded or already_recommended or (not is_new and not seen_in_current_cycle)
+                excluded = already_recommended or (not is_new and not seen_in_current_cycle)
                 exclusion_reason = None
-                if feedback_excluded:
-                    exclusion_reason = "feedback_avoid_terms"
-                elif already_recommended:
+                if already_recommended:
                     exclusion_reason = "already_recommended"
                 elif excluded:
                     exclusion_reason = "previously_discovered"
@@ -221,7 +189,7 @@ class ScoutAgent:
                     source_query=(candidate.metadata or {}).get("query_topic"),
                     source_diagnostics={
                         "primary_category": candidate.primary_category,
-                        "feedback_guidance": guidance_diagnostics,
+                        **source_annotation,
                     },
                 )
                 stored.append(
@@ -242,12 +210,8 @@ class ScoutAgent:
                 diagnostics={
                     "fetched_count": len(candidates),
                     "stored_count": len(stored),
-                    "scout_guidance": guidance_summary(scout_guidance),
-                    "base_topics": config.topics,
-                    "guided_topics": guided_topics,
-                    "source_topics": config.topics
-                    if source.name == "semantic_scholar"
-                    else guided_topics,
+                    "configured_topics": config.topics,
+                    "source_topics": config.topics,
                     "source_diagnostics": source_diagnostics,
                     "refill": refill_diagnostics,
                 },
@@ -263,12 +227,8 @@ class ScoutAgent:
                 "scout_run_id": scout_run_id,
                 "source": source.name,
                 "attempt_number": attempt_number,
-                "guidance": guidance_summary(scout_guidance),
-                "base_topics": config.topics,
-                "guided_topics": guided_topics,
-                "source_topics": config.topics
-                if source.name == "semantic_scholar"
-                else guided_topics,
+                "configured_topics": config.topics,
+                "source_topics": config.topics,
                 "fetched_count": len(candidates),
                 "stored_count": len(stored),
                 "eligible_count": len([candidate for candidate in stored if not candidate["excluded"]]),
@@ -284,7 +244,6 @@ class ScoutAgent:
         *,
         source: PaperSource,
         source_topics: list[str],
-        guidance,
         config: ScoutConfig,
         errors: list[str],
     ) -> tuple[list[Any], list[tuple[Any, dict[str, Any]]], dict[str, Any], dict[str, Any]]:
@@ -295,7 +254,7 @@ class ScoutAgent:
             if row[0]
         }
         candidates: list[Any] = []
-        guided_candidates: list[tuple[Any, dict[str, Any]]] = []
+        ordered_candidates: list[tuple[Any, dict[str, Any]]] = []
         source_diagnostics: dict[str, Any] = {}
         rounds: list[dict[str, Any]] = []
         requested_limit = max(1, config.max_candidates)
@@ -322,12 +281,11 @@ class ScoutAgent:
                 break
 
             candidates = dedupe_candidates([*candidates, *fetched])
-            guided_candidates = apply_guidance_to_candidates(candidates, guidance)
+            ordered_candidates = [(candidate, {}) for candidate in candidates]
             estimated_eligible = sum(
                 1
-                for candidate, diagnostics in guided_candidates
+                for candidate, _ in ordered_candidates
                 if db.canonical_key_for_candidate(sanitize_candidate(candidate.as_dict())) not in known_keys
-                and not diagnostics.get("feedback_guidance_excluded")
             )
             source_diagnostics = dict(getattr(source, "last_diagnostics", {}) or {})
             rounds.append(
@@ -354,7 +312,7 @@ class ScoutAgent:
                 break
             requested_limit += max(1, config.max_candidates)
 
-        return candidates, guided_candidates, {
+        return candidates, ordered_candidates, {
             "minimum_eligible_candidates": target,
             "rounds": rounds,
             "stop_reason": stop_reason,
