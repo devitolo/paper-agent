@@ -12,6 +12,7 @@ from paper_agents.curator_interest import (
     unavailable_interest_fit,
 )
 from paper_agents.curator_scoring import SCORING_VERSION, evaluate_candidate
+from paper_agents.paper_eligibility import curator_eligibility
 from paper_agents.runtime_config import ollama_url
 
 DEFAULT_MAX_RECOMMENDATIONS = 3
@@ -89,6 +90,14 @@ class CuratorAgent:
                 else:
                     interest_fit = score_interest_fit(enriched, interests, interest_scorer)
                 evaluation = evaluate_candidate(enriched, profile)
+                eligibility = curator_eligibility(enriched)
+                evaluation["curator_eligibility"] = eligibility
+                evaluation["score_components"]["curator_eligibility"] = eligibility
+                if eligibility["disqualified"]:
+                    evaluation["score"] = 0.0
+                    evaluation["rationale"] += f" Curator eligibility blocked recommendation: {eligibility['disqualification_reason']}."
+                elif eligibility["labels"]:
+                    evaluation["rationale"] += " Curator labels: " + ", ".join(eligibility["labels"]) + "."
                 evaluation["interest_fit"] = interest_fit
                 evaluation["score_components"]["interest_fit"] = interest_fit
                 evaluations.append(evaluation)
