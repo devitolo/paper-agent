@@ -777,7 +777,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
           <div class="paper-meta">
             {source_badge}
             <span>{escape(card.get("published") or "date unknown")}</span>
-            {render_source_reference(card)}
+            <span class="source-id">{escape(card["source_id"])}</span>
             {render_pdf_control(card)}
             {render_copy_control(card)}
             {render_pulled_date(card)}
@@ -805,15 +805,6 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     </div>
   </form>
 </article>"""
-
-
-def render_source_reference(card: dict[str, Any]) -> str:
-    source_id = str(card.get("source_id") or "").strip()
-    if not source_id or source_id == "unknown":
-        return ""
-    if source_id.startswith("http://") or source_id.startswith("https://") or source_id == str(card.get("url") or ""):
-        return ""
-    return f'<span class="source-id">{escape(source_id)}</span>'
 
 
 def render_user_score(score: float | None) -> str:
