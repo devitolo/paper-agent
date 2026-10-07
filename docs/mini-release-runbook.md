@@ -9,6 +9,11 @@ For the automated GitHub Actions path with a self-hosted Mini deployment runner,
 use [Mini self-hosted CI/CD](mini-self-hosted-cicd.md). The manual commands in
 this file remain the fallback procedure.
 
+Current branch policy: normal work starts on a temporary `codex/...` branch,
+merges into `main`, and only then promotes `main` to `mini-production` when the
+user explicitly approves a production release. Do not use this fallback runbook
+to bypass that review and promotion flow.
+
 ## Policy
 
 - Deploy application changes by building a tested `mini-production` image from a

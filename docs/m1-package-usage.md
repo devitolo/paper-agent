@@ -7,6 +7,14 @@ operator's production Mini uses a separate containerized deployment described
 in [Mini production operations](mini-production-operations.md); it is not this
 first-user package.
 
+The current project direction is v0.2: recommendation quality plus a refreshed
+installability path. The v0.1.3 public package is the last accepted first-user
+baseline and should be treated as the supported simple path until v0.2 package
+acceptance is run. Do not assume production-only additions such as Qwen3 Curator
+judging, CORE, scheduled source jobs, Mini production deployment, or optional
+source credentials are part of the public install path until a clean v0.2
+acceptance record says so.
+
 The supported pairing is Linux x86-64 with Docker Engine/Linux amd64 containers. macOS Apple Silicon with Docker Desktop/Linux arm64 containers also passed acceptance. CPU inference is the baseline. Have Git and a writable clone of this repository, and start Docker with Compose v2 first; no host Python, Ollama, cron, systemd, or provider keys are needed. The installer checks provisional Docker RAM (4 GiB) and installation-filesystem free space (6 GiB) thresholds. These are configurable preflight guards; Docker's separate VM/disk-image capacity must also be sufficient.
 
 From a clean clone, run:
@@ -109,4 +117,5 @@ Known M1 limits:
 - The public Project Paper image has arm64 and amd64 variants with SBOM and provenance attestations.
 - No packaged automatic schedule is installed.
 - OpenAlex, Semantic Scholar, and Gemini are not part of the default packaged flow.
+- MiniLM may become part of v0.2 if installer and acceptance evidence support it cleanly. Qwen 2.5 extraction remains the expected packaged default. Qwen3 Curator judging should stay optional/advanced until public-package acceptance proves it is safe to require.
 - Upgrade/rollback remains deferred; packaged same-image backup/restore has a separate documented drill.

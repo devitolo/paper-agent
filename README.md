@@ -35,6 +35,12 @@ Project Paper is designed around recommendation quality, not collecting the larg
 
 Project Paper is a working local product, not just an AI experiment. The supported Docker Compose path has passed exact-image acceptance on Ubuntu x86-64 and macOS Apple Silicon, with a loopback web UI, persistent local state, local Qwen inference, Review Queue, feedback storage, diagnostics, and packaged backup/restore.
 
+## Current v0.2 Focus
+
+The current v0.2 work is about recommendation quality and the path to a cleaner installable product. Production now combines improved multi-source retrieval, MiniLM interest-fit scoring, and a bounded local Qwen3 Curator judge for the strongest preliminary candidates, while Qwen 2.5 continues to extract the Review Queue's Problem / Why it matters / Approach fields. If the Qwen3 judgment path times out, fails, or returns invalid output, Curator falls back to deterministic scoring instead of treating the model failure as a paper-quality signal.
+
+The public package remains the simple supported starting point described below. v0.2 package acceptance has not yet been run, so richer production capabilities such as Qwen3 Curator judging, optional CORE/Semantic Scholar/OpenAlex credentials, scheduled Mini jobs, and Mini production deployment remain advanced/operator paths until they pass clean public-package acceptance.
+
 ## First Supported Path
 
 > **First supported release:** the installer-fronted Docker Compose path and manual in-product Scout have passed exact-image acceptance on Ubuntu x86-64. The same v0.1.3 image also passed macOS Apple Silicon acceptance. See the [package usage guide](docs/m1-package-usage.md), [acceptance report](docs/m1-qa-report.md), and [productization plan](docs/productization-plan.md).
@@ -77,6 +83,7 @@ External discussion is a manual handoff. Review the copied content before sendin
 - [Backup and restore](docs/package-backup.md)
 - [Release acceptance evidence](docs/m1-qa-report.md)
 - [Productization scope and remaining gates](docs/productization-plan.md)
+- [AI/model stack and v0.2 boundaries](docs/ai-stack.md)
 - [Architecture](docs/architecture.md)
 - [Mini production container operations](docs/mini-production-operations.md)
 - [Native Mini and historical prototype reference](docs/native-operations-history.md)

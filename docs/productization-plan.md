@@ -2,6 +2,13 @@
 
 Status: M1.1 installer/Compose packaging and M1.2 manual discovery are implemented on `main`. Independent code QA passes and the exact public image pair passed full Ubuntu x86-64 acceptance on 2026-09-11. macOS Apple Silicon passed the v0.1.3 fresh-install acceptance gate on 2026-09-12. See [live M1 acceptance](m1-qa-report.md).
 
+v0.2 should refresh this accepted path rather than restart from zero. The richer
+production stack now includes MiniLM interest fit and Qwen3 Curator judging, but
+those are not public-package claims until a fresh v0.2 installer/acceptance pass
+proves they are safe to include. Keep optional source credentials, scheduled
+Mini jobs, and Mini production deployment in advanced/operator docs unless the
+v0.2 package explicitly qualifies them.
+
 ## Brief and revised direction
 
 Make the existing product portable enough that another technically competent user can install and use it without its creator. The first milestone is **Fresh Install Produces Papers**: clone → minimal configuration → Docker Compose → prepared local Qwen → open UI → configure topics → run bootstrap discovery → see recommendations → restart and retain data.

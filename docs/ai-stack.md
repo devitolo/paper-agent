@@ -1,129 +1,80 @@
 # AI Stack
 
-This document describes the target AI stack strategy. The current prototype uses OpenAI only; Gemini, local models, and provider-agnostic interfaces are planned work.
+This document records the current AI/model boundaries for Project Paper. It
+separates the public package baseline from the richer production Mini stack so
+release claims do not drift.
 
-## Cloud Providers
+## Current v0.2 Direction
 
-The scouting layer must support interchangeable providers.
+v0.2 is about recommendation quality and installability. The product goal is a
+small number of technical papers genuinely worth the user's time, not a larger
+pile of loosely related papers.
 
-Initial target providers:
+Current production quality work separates several concerns:
 
-- ChatGPT/Codex client
-- Gemini client
+- source retrieval quality: arXiv, improved OpenAlex retrieval, progressive
+  Semantic Scholar retrieval, and opt-in CORE;
+- topical interest fit: MiniLM scores title/abstract fit before active Curator
+  evaluation;
+- evidence judgment: Qwen3 4B assesses research type and evidence quality for
+  the top preliminary candidates;
+- review summaries: Qwen 2.5 1.5B extracts the Review Queue fields `Problem`,
+  `Why it matters`, and `Approach`;
+- feedback/profile learning: user feedback remains stored separately and can
+  guide future retrieval and profile updates.
 
-Possible future providers:
+MiniLM Eval and paired-shadow experiments are disabled as production navigation
+surfaces. Their historical tables/tests may remain for migration compatibility
+and future analysis, but current recommendation behavior uses the active Curator
+path rather than those temporary evaluation pages.
 
-- OpenAI API
-- Gemini API
-- Anthropic API
-- Other local or hosted models
+## Production Mini Stack
 
-Provider selection should be configuration-driven:
+The production Mini uses local models with distinct responsibilities:
 
-```yaml
-scout:
-  provider: chatgpt
-  max_queries: 3
-  max_candidates: 40
-```
+- **MiniLM:** topical interest fit from title and abstract. This helps decide
+  which candidates deserve deeper Curator attention.
+- **Qwen3 4B:** active Curator evidence assessment for the top 10 preliminary
+  candidates. It can adjust Curator scoring through structured assessment.
+- **Qwen 2.5 1.5B:** extraction model for `Problem`, `Why it matters`, and
+  `Approach`.
+- **Gemini:** optional low-volume profile synthesis and rebuild workflows.
 
-Switching providers should not require changes to downstream processing.
+Qwen3 failure must not become a paper-quality signal. If Qwen3 times out, fails,
+or returns invalid output, Curator falls back to deterministic scoring.
+Conceptual, architecture, framework, and threat-model papers are not penalized
+merely because they are non-empirical; unsupported experimental claims remain
+weak evidence.
 
-## Common Provider Interface
+## Public Package Boundary
 
-Each provider should accept a normalized request and return normalized paper records.
+The accepted public package baseline is still v0.1.3. It provides a local-first
+Compose install, manual arXiv discovery, local Qwen 2.5 extraction, Review
+Queue, feedback storage, diagnostics, and packaged backup/restore. It does not
+require OpenAI, Gemini, OpenAlex, Semantic Scholar, CORE, host cron, systemd, or
+Mini production deployment.
 
-Example request:
+v0.2 package acceptance has not yet been run. Until it is, do not claim that a
+fresh public install requires or fully supports the production Mini stack.
+MiniLM can be included in v0.2 if installer and acceptance evidence support it
+cleanly. Qwen3 Curator judging should remain optional/advanced until public
+package acceptance proves it is safe to require.
 
-```json
-{
-  "topic": "multi-agent systems for scientific literature review",
-  "max_queries": 3,
-  "max_candidates": 40,
-  "date_range": "last 12 months",
-  "exclude_seen": true
-}
-```
+## Optional Sources and Cloud Use
 
-Example normalized result:
+Advanced/operator source adapters include OpenAlex, Semantic Scholar, and CORE.
+They have source-specific API and rate-limit rules and should stay out of the
+default first-user path unless packaged acceptance covers them.
 
-```json
-{
-  "title": "Example paper",
-  "authors": ["A. Researcher"],
-  "year": 2026,
-  "doi": "10.xxxx/example",
-  "arxiv_id": null,
-  "source_url": "https://example.org/paper",
-  "pdf_url": "https://example.org/paper.pdf",
-  "abstract": "Paper abstract",
-  "provider": "chatgpt",
-  "search_run_id": "run-id"
-}
-```
+Cloud model use is optional and low-volume. External Paper Discussion remains a
+manual handoff: Project Paper owns discovery, recommendation, local review
+state, feedback storage, and personalization; the user can use a preferred
+external reading or AI workflow for deep paper discussion.
 
-The current `ResearchScout` can inform this interface, but it should be refactored away from direct OpenAI coupling before additional providers are added.
+## Future Hosted Direction
 
-## Local Model Strategy
-
-Do not hard-code the local LLM yet.
-
-Model selection is a benchmark task. Candidate model families may include:
-
-- Qwen
-- Gemma
-- Phi
-- Small Llama-family models
-- Other compact quantized models
-
-The model must be tested on the actual Project Paper workload.
-
-Target tasks:
-
-- Title and abstract relevance scoring
-- Structured metadata extraction
-- Short summaries
-- Preference-based ranking
-- Duplicate or near-duplicate judgment
-- Identification of methodology and claims
-
-The Mac mini is expected to support only small quantized models comfortably. Deep synthesis should remain a cloud task unless benchmarks prove otherwise.
-
-## Cost And Quota Strategy
-
-Treat ChatGPT and Gemini subscription quotas as limited premium resources.
-
-Use a funnel:
-
-```text
-Broad deterministic search
-      |
-      v
-Local duplicate and history filters
-      |
-      v
-Cloud review of titles and abstracts
-      |
-      v
-Download selected papers
-      |
-      v
-Local model processing
-      |
-      v
-Cloud escalation for only the best or hardest papers
-```
-
-Initial trial budget:
-
-- Maximum 3 research queries
-- Maximum 40 candidate abstracts
-- Maximum 10 selected downloads
-- Maximum 5 cloud escalations
-- One final result summary
-
-These are starting limits, not permanent settings.
-
-Primary metric:
-
-> Provider quota or cost per new, useful paper.
+The next productization topic is whether Project Paper should run on AWS while
+staying simple. Treat that as a productization investigation, not a current
+runtime requirement. Any hosted path must preserve the public/local install
+story, avoid surprise credential or data exposure, and keep recommendation
+quality evidence separate from deployment mechanics.
