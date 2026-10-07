@@ -10,7 +10,10 @@ from typing import Any
 
 
 def event_path() -> Path:
-    return Path(os.environ.get("PAPER_AGENT_JOB_EVENT_FILE", "/app/data/job-events.jsonl"))
+    configured = os.environ.get("PAPER_AGENT_JOB_EVENT_FILE")
+    if configured:
+        return Path(configured)
+    return Path(os.environ.get("PAPER_AGENT_REPO", "/app")) / "data" / "job-events.jsonl"
 
 
 def record(job: str, status: str, message: str, *, path: Path | None = None) -> dict[str, Any]:
