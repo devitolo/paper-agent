@@ -98,6 +98,19 @@ class DegradedArxivSource(RecordingSource):
         return result
 
 
+class ExhaustedArxivSource(RecordingSource):
+    name = "arxiv"
+
+    def __init__(self):
+        super().__init__([])
+        self.last_diagnostics = {}
+
+    def fetch(self, topics, max_results, freshness_months):
+        result = super().fetch(topics, max_results, freshness_months)
+        self.last_diagnostics = {"stop_reason": "traversals_exhausted_until_refresh"}
+        return result
+
+
 class FakeHttpResponse:
     def __init__(self, payload):
         self.payload = payload
@@ -256,6 +269,25 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(len(pm_topics), 2)
         self.assertFalse(set(am_topics) & set(pm_topics))
         self.assertEqual(set(am_topics) | set(pm_topics), {"query 0", "query 1", "query 2", "query 3"})
+
+    def test_source_topic_selection_fills_after_scarce_high_priority_topic(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [
+                TopicEntry("high", "High", "high query", ["arxiv"], "daily", "high", True),
+                TopicEntry("normal-a", "Normal A", "normal query a", ["arxiv"], "daily", "normal", True),
+                TopicEntry("normal-b", "Normal B", "normal query b", ["arxiv"], "daily", "normal", True),
+            ],
+            config_path,
+        )
+
+        selected = select_topics_for_source(
+            "arxiv", today=date(2026, 1, 2), path=config_path, count=2, slot=0,
+        )
+
+        self.assertEqual(selected[0], "high query")
+        self.assertEqual(len(selected), 2)
+        self.assertIn(selected[1], {"normal query a", "normal query b"})
 
     def test_source_topic_selection_does_not_repeat_scarce_am_topics_in_pm(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -1233,6 +1265,28 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(len(result["scout_results"]), 1)
         self.assertFalse(result["curator"]["requested_rescout"])
         self.assertIn("reduced-coverage", result["curator"]["rescout_reason"])
+
+    def test_pipeline_stops_after_one_attempt_when_arxiv_traversals_are_exhausted(self):
+        db_path = Path(self.tmp.name) / "pipeline_exhausted.db"
+        db.init_db(db_path)
+        source = ExhaustedArxivSource()
+
+        with (
+            patch("paper_agents.pipeline.create_scout_source", return_value=source),
+            patch("paper_agents.pipeline.load_profile", return_value={
+                "interests": ["AIOps"], "positive_signals": [], "negative_signals": []
+            }),
+        ):
+            result = run_daily_pipeline(
+                topics=["AIOps"], fetch_limit=2, keep_limit=3,
+                max_scout_attempts=3, min_quality_score=100,
+                db_path=db_path, mode="test", source_name="arxiv",
+            )
+
+        self.assertEqual(source.max_results_calls, [2])
+        self.assertEqual(len(result["scout_results"]), 1)
+        self.assertFalse(result["curator"]["requested_rescout"])
+        self.assertIn("exhausted until refresh", result["curator"]["rescout_reason"])
 
     def test_pipeline_does_not_hold_write_lock_during_source_fetch(self):
         db_path = Path(self.tmp.name) / "pipeline_concurrency.db"

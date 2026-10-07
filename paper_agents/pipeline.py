@@ -182,6 +182,15 @@ def run_daily_pipeline(
                 curator_result = {**curator_result, "requested_rescout": False,
                                   "rescout_reason": reason}
                 break
+            if scout_result.get("source_stop_reason") == "traversals_exhausted_until_refresh":
+                reason = "Rescout suppressed because every selected source traversal is exhausted until refresh."
+                db.update_curator_rescout(
+                    connection, curator_result["curator_run_id"], requested=False, reason=reason,
+                )
+                db.update_workflow_state(connection, cycle_id, "recommendations_ready")
+                curator_result = {**curator_result, "requested_rescout": False,
+                                  "rescout_reason": reason}
+                break
             telemetry.event("rescout", attempt=attempt)
 
         if curator_result is not None:

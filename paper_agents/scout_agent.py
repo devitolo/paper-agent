@@ -235,6 +235,7 @@ class ScoutAgent:
                 "warnings": warnings,
                 "errors": errors,
                 "source_degraded": source_diagnostics.get("coverage_mode") == "single_result_406_fallback",
+                "source_stop_reason": source_diagnostics.get("stop_reason"),
                 "candidates": stored,
             }
 
@@ -300,6 +301,9 @@ class ScoutAgent:
 
             if source_diagnostics.get("coverage_mode") == "single_result_406_fallback":
                 stop_reason = "source_degraded"
+                break
+            if source_diagnostics.get("stop_reason") == "traversals_exhausted_until_refresh":
+                stop_reason = "traversals_exhausted_until_refresh"
                 break
             if source.name in {"arxiv", "semantic_scholar"} and getattr(source, "cooldown_active", False):
                 stop_reason = "source_cooldown"

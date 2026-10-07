@@ -18,6 +18,7 @@ from paper_agents.local_extract import unload_ollama_model
 
 DEFAULT_MAX_RECOMMENDATIONS = 3
 DEFAULT_MIN_QUALITY_SCORE = 25.0
+DEFAULT_EVIDENCE_MIN_INTEREST_SCORE = -3.0
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class CuratorConfig:
     evidence_timeout: int = 180
     evidence_max_chars: int = 7000
     evidence_candidate_limit: int = 10
+    evidence_min_interest_score: float = DEFAULT_EVIDENCE_MIN_INTEREST_SCORE
     interest_fit_enabled: bool = True
     interest_descriptions: tuple[str, ...] = ()
     interest_fit_scorer: Callable[[str, str, str], float] | None = field(
@@ -83,6 +85,26 @@ class CuratorAgent:
             elif eligibility["labels"]:
                 evaluation["rationale"] += " Curator labels: " + ", ".join(eligibility["labels"]) + "."
 
+        def apply_interest_gate(evaluation: dict[str, Any]) -> bool:
+            interest_fit = evaluation["interest_fit"]
+            blocked = (
+                interest_fit.get("status") == "scored"
+                and float(interest_fit["score"]) < config.evidence_min_interest_score
+            )
+            gate = {
+                "status": "blocked" if blocked else "passed",
+                "minimum_score": config.evidence_min_interest_score,
+                "score": interest_fit.get("score"),
+            }
+            evaluation["score_components"]["interest_fit_gate"] = gate
+            if blocked:
+                evaluation["score"] = 0.0
+                evaluation["rationale"] += (
+                    f" MiniLM interest fit {float(interest_fit['score']):.2f} was below the "
+                    f"{config.evidence_min_interest_score:.2f} evidence-review gate."
+                )
+            return blocked
+
         evaluations = []
         for candidate in unique_candidates.values():
             with telemetry.span("curator.evaluate", paper_id=candidate["paper_id"],
@@ -100,6 +122,7 @@ class CuratorAgent:
                 apply_eligibility(evaluation, enriched)
                 evaluation["interest_fit"] = interest_fit
                 evaluation["score_components"]["interest_fit"] = interest_fit
+                apply_interest_gate(evaluation)
                 evaluations.append(evaluation)
 
         evaluations.sort(
@@ -114,7 +137,11 @@ class CuratorAgent:
         )
         try:
             if config.evidence_enabled:
-                for index, preliminary in enumerate(evaluations[:max(1, config.evidence_candidate_limit)]):
+                evidence_candidates = [
+                    (index, evaluation) for index, evaluation in enumerate(evaluations)
+                    if evaluation["score_components"]["interest_fit_gate"]["status"] != "blocked"
+                ][:max(1, config.evidence_candidate_limit)]
+                for index, preliminary in evidence_candidates:
                     enriched = {**preliminary, "evidence_assessment": assess_evidence(
                         preliminary, model=config.evidence_model, ollama_url=config.evidence_ollama_url,
                         timeout=config.evidence_timeout, max_chars=config.evidence_max_chars,
@@ -123,6 +150,7 @@ class CuratorAgent:
                     apply_eligibility(evaluation, enriched)
                     evaluation["interest_fit"] = preliminary["interest_fit"]
                     evaluation["score_components"]["interest_fit"] = preliminary["interest_fit"]
+                    apply_interest_gate(evaluation)
                     evaluations[index] = evaluation
         finally:
             if config.evidence_enabled:
@@ -161,6 +189,10 @@ class CuratorAgent:
         )
 
         for evaluation in evaluations:
+            quality_threshold_met = (
+                evaluation["score"] >= config.min_quality_score
+                and evaluation["score_components"]["interest_fit_gate"]["status"] != "blocked"
+            )
             db.insert_curator_evaluation(
                 connection,
                 curator_run_id=curator_run_id,
@@ -169,11 +201,13 @@ class CuratorAgent:
                 score=evaluation["score"],
                 rationale=evaluation["rationale"],
                 matched_signals=evaluation["matched_signals"],
-                quality_threshold_met=evaluation["score"] >= config.min_quality_score,
+                quality_threshold_met=quality_threshold_met,
             )
 
         recommendations = [
-            evaluation for evaluation in evaluations if evaluation["score"] >= config.min_quality_score
+            evaluation for evaluation in evaluations
+            if evaluation["score"] >= config.min_quality_score
+            and evaluation["score_components"]["interest_fit_gate"]["status"] != "blocked"
         ][:remaining]
         for index, recommendation in enumerate(recommendations, 1):
             recommendation_id = db.insert_recommendation(
@@ -205,6 +239,7 @@ class CuratorAgent:
                             "evidence_enabled": config.evidence_enabled,
                             "evidence_model": config.evidence_model if config.evidence_enabled else None,
                             "evidence_candidate_limit": config.evidence_candidate_limit,
+                            "evidence_min_interest_score": config.evidence_min_interest_score,
                             "interest_fit_enabled": config.interest_fit_enabled,
                             "interest_fit_interests": interests,
                             "interest_fit_runtime_error": interest_runtime_error}), curator_run_id),

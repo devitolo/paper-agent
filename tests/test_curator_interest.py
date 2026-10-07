@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from paper_agents import db
 from paper_agents.curator_agent import CuratorAgent, CuratorConfig
@@ -82,7 +83,7 @@ class CuratorInterestFitTests(unittest.TestCase):
                 profile_version=db.current_profile_version(connection), scout_attempt_count=1,
                 config=CuratorConfig(
                     min_quality_score=0, max_recommendations=2, max_scout_attempts=1,
-                    interest_fit_scorer=lambda title, _abstract, _interest: 9.0 if "High" in title else -4.0,
+                    interest_fit_scorer=lambda title, _abstract, _interest: 9.0 if "High" in title else -2.0,
                 ),
             )
 
@@ -94,6 +95,40 @@ class CuratorInterestFitTests(unittest.TestCase):
             self.assertEqual(metadata["interest_fit_interests"], ["production incident diagnosis"])
             self.assertEqual(metadata["evaluations"][str(high_id)]["interest_fit"]["score"], 9.0)
             self.assertEqual(profile_id, db.current_profile_version(connection)["id"])
+
+    def test_very_weak_interest_fit_is_rejected_before_qwen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "interest-gate.db"
+            db.init_db(path)
+            connection = db.connect_db(path)
+            self.addCleanup(connection.close)
+            cycle = db.create_workflow_cycle(connection, mode="test", max_scout_attempts=1)
+            weak_id, _ = db.upsert_paper(connection, {
+                "source": "openalex", "source_id": "weak", "title": "Weak fit paper", "abstract": ABSTRACT,
+            })
+            strong_id, _ = db.upsert_paper(connection, {
+                "source": "openalex", "source_id": "strong", "title": "Strong fit paper", "abstract": ABSTRACT,
+            })
+            with patch("paper_agents.curator_agent.assess_evidence", return_value={
+                "status": "unavailable", "research_type": "unknown", "evidence_quality": "unknown",
+                "overclaim_risk": "unknown", "provenance": "source_abstract",
+            }) as judge:
+                result = CuratorAgent().run(
+                    connection, workflow_cycle_id=cycle,
+                    candidates=[{"paper_id": weak_id, "title": "Weak fit paper", "abstract": ABSTRACT},
+                                {"paper_id": strong_id, "title": "Strong fit paper", "abstract": ABSTRACT}],
+                    profile_version=None, scout_attempt_count=1,
+                    config=CuratorConfig(
+                        min_quality_score=0, max_recommendations=2, max_scout_attempts=1,
+                        evidence_enabled=True, interest_descriptions=("production operations",),
+                        interest_fit_scorer=lambda title, *_args: -4.0 if "Weak" in title else 2.0,
+                    ),
+                )
+            self.assertEqual(judge.call_count, 1)
+            weak = next(item for item in result["evaluations"] if item["paper_id"] == weak_id)
+            self.assertEqual(weak["score"], 0.0)
+            self.assertEqual(weak["score_components"]["interest_fit_gate"]["status"], "blocked")
+            self.assertNotIn(weak_id, {item["paper_id"] for item in result["recommendations"]})
 
 
 if __name__ == "__main__":

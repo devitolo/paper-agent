@@ -120,6 +120,25 @@ def _validate_response(value: Any) -> dict[str, Any]:
     return value
 
 
+def _parse_response(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("model response envelope is not an object")
+    response = raw.get("response")
+    if not isinstance(response, str):
+        raise ValueError("model response is missing text")
+    return _validate_response(json.loads(response))
+
+
+def _correction_prompt(response: str, error: Exception) -> str:
+    schema = {field: "string" for field in REQUIRED_EVIDENCE_FIELDS}
+    return (
+        "Correct the malformed evidence assessment below. Return only one valid JSON object with every "
+        "required field. Preserve the intended assessment; do not add evidence not present in the original.\n"
+        f"Required schema: {json.dumps(schema, separators=(',', ':'))}\n"
+        f"Validation error: {error}\nMalformed response:\n{response[:5000]}"
+    )
+
+
 @telemetry.traced("curator.evidence", prompt_version=EVIDENCE_VERSION)
 def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_CURATOR_MODEL,
                     ollama_url: str = DEFAULT_OLLAMA_URL, timeout: int = 45,
@@ -142,13 +161,26 @@ def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_CURATOR_M
             think=False,
             keep_alive="5m",
         )
-        if not isinstance(raw, dict):
-            raise ValueError("model response envelope is not an object")
-        response = raw.get("response")
-        if not isinstance(response, str):
-            raise ValueError("model response is missing text")
-        parsed = json.loads(response)
-        assessment = _normalize(_validate_response(parsed), provenance)
+        try:
+            parsed = _parse_response(raw)
+        except (ValueError, json.JSONDecodeError) as first_error:
+            elapsed = time.monotonic() - started
+            remaining = timeout - elapsed
+            response = raw.get("response") if isinstance(raw, dict) else ""
+            if remaining < 1 or not isinstance(response, str) or not response.strip():
+                raise
+            telemetry.event("curator_evidence_correction", model=model)
+            corrected = call_ollama(
+                ollama_url,
+                model,
+                _correction_prompt(response, first_error),
+                max(1, int(remaining)),
+                options={"num_ctx": 4096, "num_predict": 220, "temperature": 0},
+                think=False,
+                keep_alive="5m",
+            )
+            parsed = _parse_response(corrected)
+        assessment = _normalize(parsed, provenance)
     except (OSError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         telemetry.failure("invalid_response" if isinstance(exc, ValueError) else "network")
         assessment = _normalize({}, provenance, status="unavailable", error=str(exc))
