@@ -172,7 +172,16 @@ def schema_text() -> str:
 
 
 @telemetry.traced("ollama.generate", "LLM")
-def call_ollama(url: str, model: str, prompt: str, timeout: int) -> dict[str, Any]:
+def call_ollama(
+    url: str,
+    model: str,
+    prompt: str,
+    timeout: int,
+    *,
+    options: dict[str, Any] | None = None,
+    think: bool | None = None,
+    keep_alive: str | int | None = None,
+) -> dict[str, Any]:
     telemetry.attributes(model=model, provider="ollama")
     payload = {
         "model": model,
@@ -180,6 +189,12 @@ def call_ollama(url: str, model: str, prompt: str, timeout: int) -> dict[str, An
         "format": "json",
         "stream": False,
     }
+    if options is not None:
+        payload["options"] = options
+    if think is not None:
+        payload["think"] = think
+    if keep_alive is not None:
+        payload["keep_alive"] = keep_alive
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -190,6 +205,18 @@ def call_ollama(url: str, model: str, prompt: str, timeout: int) -> dict[str, An
     if isinstance(result, dict):
         telemetry.attributes(prompt_tokens=result.get("prompt_eval_count"), completion_tokens=result.get("eval_count"))
     return result
+
+
+def unload_ollama_model(url: str, model: str, timeout: int = 30) -> None:
+    """Ask Ollama to release one model without affecting pipeline success."""
+    payload = {"model": model, "keep_alive": 0, "stream": False}
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        json.load(response)
 
 
 def normalize_extraction(value: Any) -> dict[str, str | None]:

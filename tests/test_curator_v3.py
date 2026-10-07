@@ -57,11 +57,12 @@ class CuratorV3ScoringTests(unittest.TestCase):
         self.assertEqual(generic["score"], none["score"])
         self.assertGreater(specific["score"], none["score"])
 
-    def test_unavailable_judge_is_conservative_and_bounded(self):
+    def test_unavailable_judge_preserves_deterministic_score(self):
+        baseline = evaluate_candidate(self.candidate, {"interests": ["root cause analysis observability"]})
         result = evaluate_candidate(self.candidate | {
             "evidence_assessment": {"status": "unavailable", "error": "timeout"},
         }, {"interests": ["root cause analysis observability"]})
-        self.assertLessEqual(result["score"], 70)
+        self.assertEqual(result["score"], baseline["score"])
         self.assertEqual(result["score_components"]["evidence_assessment"]["error"], "timeout")
 
     def test_broad_vision_without_demonstrated_work_stays_out_of_top_tier(self):
@@ -100,7 +101,7 @@ class CuratorV3EvidenceCallTests(unittest.TestCase):
             ):
                 result = assess_evidence({"title": "Test", "abstract": "Some abstract"})
             self.assertEqual(result["status"], "unavailable")
-            self.assertEqual(result["model"], "qwen2.5:1.5b-instruct")
+            self.assertEqual(result["model"], "qwen3:4b")
             self.assertIn("wall_clock_sec", result)
 
     def test_null_wrong_type_invalid_enum_and_missing_details_are_unavailable(self):
@@ -126,7 +127,10 @@ class CuratorV3EvidenceCallTests(unittest.TestCase):
                 "evidence": {"full_text_triage": True, "pdf_artifact": True},
                 "evidence_assessment": result,
             }, {})["score"]
-            self.assertLessEqual(score, 70)
+            baseline = evaluate_candidate(CuratorV3ScoringTests.candidate | {
+                "evidence": {"full_text_triage": True, "pdf_artifact": True},
+            }, {})["score"]
+            self.assertEqual(score, baseline)
 
     def test_placeholder_evidence_is_unavailable_and_earns_no_credit(self):
         fields = ("experiment_or_evaluation", "real_data_or_deployment", "implementation_detail", "novelty", "rationale")
@@ -146,7 +150,23 @@ class CuratorV3EvidenceCallTests(unittest.TestCase):
                     "evidence_assessment": result,
                 }, {})
                 self.assertEqual(evaluated["score_components"]["evidence_adjustment"], 0)
-                self.assertLessEqual(evaluated["score"], 70)
+                baseline = evaluate_candidate(CuratorV3ScoringTests.candidate | {
+                    "evidence": {"full_text_triage": True, "pdf_artifact": True},
+                }, {})["score"]
+                self.assertEqual(evaluated["score"], baseline)
+
+    def test_qwen3_call_is_bounded_and_disables_thinking(self):
+        with patch(
+            "paper_agents.curator_evidence.call_ollama",
+            return_value={"response": json.dumps(assessment())},
+        ) as call:
+            result = assess_evidence(CuratorV3ScoringTests.candidate)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["model"], "qwen3:4b")
+        kwargs = call.call_args.kwargs
+        self.assertFalse(kwargs["think"])
+        self.assertEqual(kwargs["options"]["num_ctx"], 4096)
+        self.assertEqual(kwargs["options"]["num_predict"], 220)
 
     def test_short_technical_evidence_and_string_prose_remain_valid(self):
         payload = assessment(experiment_or_evaluation="A/B test", real_data_or_deployment="Linux",
@@ -221,6 +241,41 @@ class CuratorV3EvidenceCallTests(unittest.TestCase):
                     config=CuratorConfig(min_quality_score=1, max_scout_attempts=1, evidence_enabled=True),
                 )
             self.assertEqual(writer_errors, [])
+
+    def test_active_qwen3_judge_is_limited_to_top_ten_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bounded.db"
+            db.init_db(path)
+            connection = db.connect_db(path)
+            self.addCleanup(connection.close)
+            cycle = db.create_workflow_cycle(connection, mode="test", max_scout_attempts=1)
+            candidates = []
+            for index in range(12):
+                paper_id, _ = db.upsert_paper(connection, {
+                    "source": "arxiv", "source_id": f"bounded-{index}",
+                    "title": f"AIOps incident response paper {index}",
+                    "abstract": "Measured production evaluation for observability and root cause analysis.",
+                })
+                candidates.append({
+                    "paper_id": paper_id, "title": f"AIOps incident response paper {index}",
+                    "abstract": "Measured production evaluation for observability and root cause analysis.",
+                })
+            with patch("paper_agents.curator_agent.assess_evidence", return_value=assessment()) as judge, \
+                    patch("paper_agents.curator_agent.unload_ollama_model"):
+                result = CuratorAgent().run(
+                    connection, workflow_cycle_id=cycle, candidates=candidates,
+                    profile_version=None, scout_attempt_count=1,
+                    config=CuratorConfig(min_quality_score=0, max_scout_attempts=1,
+                                         evidence_enabled=True, interest_fit_enabled=False),
+                )
+            self.assertEqual(judge.call_count, 10)
+            judged = [item for item in result["evaluations"]
+                      if item["score_components"]["evidence_assessment"].get("status") == "ok"]
+            self.assertEqual(len(judged), 10)
+            metadata = db.decode_json(
+                connection.execute("SELECT metadata_json FROM curator_runs").fetchone()[0], {},
+            )
+            self.assertEqual(metadata["evidence_candidate_limit"], 10)
 
     def test_merged_full_text_triage_is_read_and_provenance_caps_source_abstract(self):
         with tempfile.TemporaryDirectory() as tmp:

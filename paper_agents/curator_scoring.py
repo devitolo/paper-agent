@@ -112,8 +112,7 @@ def evaluate_candidate(candidate: dict[str, Any], profile: dict[str, Any]) -> di
         if research_type in {"empirical", "systems"}:
             evidence_adjustment += 5.0
         elif research_type in {"theoretical", "position", "framework"}:
-            evidence_adjustment -= 10.0
-            if quality != "strong":
+            if quality in {"weak", "none"}:
                 evidence_ceiling = min(evidence_ceiling, 55.0)
         elif research_type == "survey":
             evidence_ceiling = min(evidence_ceiling, 65.0)
@@ -129,9 +128,8 @@ def evaluate_candidate(candidate: dict[str, Any], profile: dict[str, Any]) -> di
             "no evaluation", "no measurements", "no dataset", "not stated",
         )):
             evidence_adjustment -= 8.0
-    else:
-        # A failed local judge cannot promote an abstract into the top tier.
-        evidence_ceiling = min(evidence_ceiling, 70.0)
+    # If the model is unavailable, retain the deterministic Curator result.
+    # Model availability must never remove or demote a paper.
     score = round(max(0.0, min(evidence_ceiling, before_penalties + evidence_adjustment)
                       - negative_penalty - off_domain_penalty), 2)
     components = {

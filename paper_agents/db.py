@@ -1150,6 +1150,7 @@ def db_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
 
 
 def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: str | None = None) -> dict[str, Any]:
+    from paper_agents.job_events import recent
     init_db(db_path)
     days = max(1, days)
     source_filter = None if source in (None, "", "all") else source
@@ -1599,6 +1600,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
         "source_breakdown": source_breakdown,
         "artifact_health": artifact_health,
         "feedback_profile": feedback_profile,
+        "job_events": recent(db_path.resolve().parent / "job-events.jsonl"),
     }
     summary["warnings"] = _health_warnings(summary)
     summary["profile_maintenance"] = _health_profile_maintenance(summary)
@@ -1682,6 +1684,16 @@ def _artifact_health(connection: sqlite3.Connection, latest_cycle_id: int | None
 
 def _health_warnings(summary: dict[str, Any]) -> list[dict[str, Any]]:
     warnings: list[dict[str, Any]] = []
+    latest_by_job: dict[str, dict[str, Any]] = {}
+    for event in summary.get("job_events", []):
+        latest_by_job.setdefault(event["job"], event)
+    skipped = [event for event in latest_by_job.values() if event.get("status") == "skipped_busy"]
+    if skipped:
+        event = max(skipped, key=lambda item: item["recorded_at"])
+        warnings.append({
+            "level": "warning",
+            "message": f"{event['message']} Recorded at {event['recorded_at']}.",
+        })
     integrity = summary["db"]["integrity"]
     if integrity != "ok":
         warnings.append({"level": "critical", "message": f"DB integrity check failed: {integrity}"})

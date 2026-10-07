@@ -14,6 +14,7 @@ from paper_agents.curator_agent import (
     CuratorConfig,
 )
 from paper_agents.local_extract import DEFAULT_MODEL, DEFAULT_OLLAMA_URL
+from paper_agents.curator_evidence import DEFAULT_CURATOR_MODEL
 from paper_agents.reviewer_agent import (
     DEFAULT_REVIEWER_LIMIT_CHUNKS,
     DEFAULT_REVIEWER_MAX_CHARS,
@@ -162,7 +163,7 @@ def run_daily_pipeline(
                     min_quality_score=min_quality_score,
                     max_scout_attempts=max_scout_attempts,
                     evidence_enabled=True,
-                    evidence_model=model,
+                    evidence_model=os.getenv("PAPER_AGENT_CURATOR_MODEL", DEFAULT_CURATOR_MODEL),
                     evidence_ollama_url=ollama_url,
                     interest_fit_enabled=os.getenv("PAPER_AGENT_MINILM_ENABLED", "1") == "1",
                 ),

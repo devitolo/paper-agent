@@ -1229,6 +1229,10 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     {warning_html}
     <div class="health-cards">{card_html}</div>
     {render_profile_maintenance(summary["profile_maintenance"])}
+    <section class="health-section">
+      <h2>Scheduled jobs</h2>
+      {render_health_table("Recent job events", summary["job_events"], ["recorded_at", "job", "status", "message"])}
+    </section>
     {graph_html}
     <section class="health-section">
       <h2>Daily Funnel</h2>

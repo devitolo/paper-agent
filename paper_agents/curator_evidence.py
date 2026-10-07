@@ -6,10 +6,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from paper_agents.local_extract import DEFAULT_MODEL, DEFAULT_OLLAMA_URL, call_ollama
+from paper_agents.local_extract import DEFAULT_OLLAMA_URL, call_ollama
 from paper_agents import telemetry
 
-EVIDENCE_VERSION = "qwen-evidence-v1"
+DEFAULT_CURATOR_MODEL = "qwen3:4b"
+EVIDENCE_VERSION = "qwen3-evidence-v2"
 RESEARCH_TYPES = {"empirical", "systems", "theoretical", "survey", "position", "framework", "unknown"}
 EVIDENCE_QUALITIES = {"strong", "moderate", "weak", "none", "unknown"}
 OVERCLAIM_RISKS = {"low", "medium", "high", "unknown"}
@@ -60,11 +61,18 @@ def _prompt(title: str, text: str, provenance: str) -> str:
         "rationale": "string",
     }
     return (
-        "You are a conservative research-evidence reviewer. Return only one JSON object matching this "
+        "You are a careful research-quality reviewer deciding whether a paper deserves the limited "
+        "attention needed to generate its Problem, Why it matters, and Approach review fields. "
+        "Return only one JSON object matching this "
         "schema: " + json.dumps(schema, separators=(",", ":")) + "\n"
         "Distinguish claims from demonstrated evidence. Do not infer experiments, implementation, datasets, "
         "or deployment that the supplied text does not state. Mark qualitative-only, synthetic-only, absent "
-        "measurements, or unsupported broad claims clearly.\n"
+        "measurements, or unsupported broad claims clearly. Conceptual, architecture, framework, threat-model, "
+        "and position papers may still be useful when they provide a concrete mechanism, taxonomy, design, or "
+        "operational insight; do not describe them as weak merely because they are not empirical. If a paper "
+        "claims an experiment but supplies no data or measured result, say so in experiment_or_evaluation and "
+        "rationale and set evidence_quality to weak or none. Use research_type=unknown only when the supplied "
+        "text truly does not identify the type.\n"
         f"Title: {title}\nEvidence provenance: {provenance}\nSupplied text:\n{text}"
     )
 
@@ -113,7 +121,7 @@ def _validate_response(value: Any) -> dict[str, Any]:
 
 
 @telemetry.traced("curator.evidence", prompt_version=EVIDENCE_VERSION)
-def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_MODEL,
+def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_CURATOR_MODEL,
                     ollama_url: str = DEFAULT_OLLAMA_URL, timeout: int = 45,
                     max_chars: int = 7000) -> dict[str, Any]:
     started = time.monotonic()
@@ -125,7 +133,15 @@ def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_MODEL,
         assessment["model"] = model
         return assessment
     try:
-        raw = call_ollama(ollama_url, model, _prompt(str(candidate.get("title") or ""), text, provenance), timeout)
+        raw = call_ollama(
+            ollama_url,
+            model,
+            _prompt(str(candidate.get("title") or ""), text, provenance),
+            timeout,
+            options={"num_ctx": 4096, "num_predict": 220, "temperature": 0},
+            think=False,
+            keep_alive="5m",
+        )
         if not isinstance(raw, dict):
             raise ValueError("model response envelope is not an object")
         response = raw.get("response")

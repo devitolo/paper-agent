@@ -68,8 +68,11 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("!requirements-minilm.txt", (ROOT / ".dockerignore").read_text(encoding="utf-8"))
         self.assertIn("minilm-model:/models:ro", compose)
         self.assertIn("PAPER_AGENT_MINILM_ENABLED: ${PAPER_AGENT_MINILM_ENABLED:-1}", compose)
+        self.assertIn("PAPER_AGENT_CURATOR_MODEL: ${PAPER_AGENT_CURATOR_MODEL:-qwen3:4b}", compose)
         self.assertIn('> "$RELEASE_DIR/minilm-check.json"', update)
         self.assertIn("MiniLM Curator interest-fit verification failed", update)
+        self.assertIn('> "$RELEASE_DIR/qwen3-curator-check.json"', update)
+        self.assertIn("Qwen3 Curator verification failed", update)
 
     def test_mini_compose_uses_short_stop_grace_after_job_drain(self):
         compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")
