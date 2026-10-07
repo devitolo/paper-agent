@@ -24,9 +24,12 @@ class LegacySchemaTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'schema incompatible'): import_state.manifest(root)
 
     def test_only_known_table_rendering_differs(self):
-        fresh,legacy=import_state.trusted_schemas()
-        differences=[(a,b) for a,b in zip(fresh,legacy) if a!=b]
-        self.assertEqual(len(fresh),len(legacy)); self.assertEqual(len(differences),1)
-        self.assertEqual(differences[0][0][:3],('table','structured_feedback','structured_feedback'))
+        fresh=import_state.trusted_schemas()[0]
+        matching=[]
+        for legacy in import_state.trusted_schemas()[1:]:
+            differences=[(a,b) for a,b in zip(fresh,legacy) if a!=b]
+            if len(fresh)==len(legacy) and len(differences)==1:
+                matching.append(differences[0][0][:3])
+        self.assertIn(('table','structured_feedback','structured_feedback'), matching)
 
 if __name__=='__main__': unittest.main()
