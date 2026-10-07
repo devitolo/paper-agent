@@ -827,7 +827,10 @@ def render_match_rationale(card: dict[str, Any], signal_tags: str) -> str:
     signals_html = f'<div class="tags"><span class="signals-label">Signals</span>{signal_tags}</div>' if signal_tags else ""
     rationale_html = "" if rationale == "Matched your current profile signals." and signal_tags else f"<p>{escape(rationale)}</p>"
     provenance_note = ""
-    if (card.get("summary") or {}).get("abstract_only"):
+    summary = card.get("summary") or {}
+    if summary.get("source_type") == "zenml_summary":
+        provenance_note = '<div class="summary-provenance">ZenML discovery summary. Original article is the evidence link; full text was not ingested.</div>'
+    elif summary.get("abstract_only"):
         provenance_note = '<div class="summary-provenance">Abstract-only triage. Full PDF was not downloaded.</div>'
     return f"""<section class="match-rationale">
         {provenance_note}
@@ -2723,7 +2726,7 @@ def source_label(primary_source: str, sources: list[str]) -> str:
 
 def source_badge_class(source: str) -> str:
     normalized = source.replace("_", "-").lower()
-    if normalized not in {"arxiv", "openalex", "semantic-scholar", "core"}:
+    if normalized not in {"arxiv", "openalex", "semantic-scholar", "core", "zenml"}:
         normalized = "unknown"
     return f"source-badge-{normalized}"
 
@@ -2734,6 +2737,7 @@ def source_display_name(source: str) -> str:
         "semantic_scholar": "Semantic Scholar",
         "openalex": "OpenAlex",
         "core": "CORE",
+        "zenml": "ZenML",
         "unknown": "Unknown",
     }
     return labels.get(source, source.replace("_", " ").title())
@@ -2808,7 +2812,7 @@ def load_summary(artifact: dict[str, Any] | None) -> dict[str, Any]:
     summary = {}
     if (metadata.get("abstract_only") or metadata.get("full_text_available") is False
             or metadata.get("source_type") == "source_abstract"):
-        summary.update(abstract_only=True, source_type="source_abstract")
+        summary.update(abstract_only=True, source_type=str(metadata.get("source_type") or "source_abstract"))
     # Keep database provenance even when the JSON artifact is absent or malformed.
     try:
         data = json.loads(Path(artifact["path"]).read_text(encoding="utf-8"))
@@ -2822,7 +2826,7 @@ def load_summary(artifact: dict[str, Any] | None) -> dict[str, Any]:
     if (data.get("abstract_only") or data.get("full_text_available") is False
             or data.get("source_type") == "source_abstract"):
         summary["abstract_only"] = True
-        summary["source_type"] = "source_abstract"
+        summary["source_type"] = str(data.get("source_type") or summary.get("source_type") or "source_abstract")
     return summary
 
 
