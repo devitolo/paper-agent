@@ -428,14 +428,16 @@ def import_zenml_pilot(
 def write_triage_artifact(connection: Any, db_path: Path, paper_id: int, candidate: dict[str, Any]) -> int:
     output_dir = db_path.parent / "zenml-pilot"
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"{slugify(candidate['title'])}.summary.json"
+    filename = f"{slugify(candidate['title'])}.summary.json"
+    path = output_dir / filename
     summary = build_summary(candidate)
     path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    stored_path = Path("data") / "zenml-pilot" / filename
     return insert_artifact(
         connection,
         paper_id,
         artifact_type="triage_summary",
-        path=path,
+        path=stored_path,
         model=PILOT_MODEL,
         metadata={
             "abstract_only": True,

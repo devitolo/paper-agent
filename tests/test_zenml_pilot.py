@@ -105,7 +105,12 @@ class ZenMLPilotTests(unittest.TestCase):
                 ).fetchall()
                 self.assertEqual(len(rows), 2)
                 artifacts = load_artifacts_for_paper(connection, rows[0][0])
-                summary = load_summary(artifacts.get("triage_summary"))
+                artifact = artifacts.get("triage_summary")
+                self.assertIsNotNone(artifact)
+                self.assertTrue(artifact["path"].startswith("data/zenml-pilot/"))
+                self.assertFalse(Path(artifact["path"]).is_absolute())
+                summary_path = db_path.parent.parent / artifact["path"]
+                summary = load_summary({**artifact, "path": summary_path})
             self.assertEqual(source_display_name("zenml"), "ZenML")
             self.assertEqual(source_badge_class("zenml"), "source-badge-zenml")
             self.assertEqual(summary["source_type"], "zenml_summary")
