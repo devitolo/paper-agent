@@ -1,0 +1,218 @@
+{
+  "mode": "smollm2",
+  "pairs": [
+    {
+      "paper": "p01",
+      "interest": 0,
+      "score": 2,
+      "seconds": 32.451212492305785,
+      "tokens": 146
+    },
+    {
+      "paper": "p01",
+      "interest": 1,
+      "score": 2,
+      "seconds": 7.369544212706387,
+      "tokens": 157
+    },
+    {
+      "paper": "p01",
+      "interest": 2,
+      "score": 2,
+      "seconds": 6.718617119826376,
+      "tokens": 150
+    },
+    {
+      "paper": "p02",
+      "interest": 0,
+      "score": 2,
+      "seconds": 5.399761998094618,
+      "tokens": 151
+    },
+    {
+      "paper": "p02",
+      "interest": 1,
+      "score": 2,
+      "seconds": 5.374677326995879,
+      "tokens": 162
+    },
+    {
+      "paper": "p02",
+      "interest": 2,
+      "score": 2,
+      "seconds": 5.351251942105591,
+      "tokens": 155
+    },
+    {
+      "paper": "p03",
+      "interest": 0,
+      "score": 2,
+      "seconds": 5.270064485725015,
+      "tokens": 148
+    },
+    {
+      "paper": "p03",
+      "interest": 1,
+      "score": 2,
+      "seconds": 5.303202551789582,
+      "tokens": 159
+    },
+    {
+      "paper": "p03",
+      "interest": 2,
+      "score": 2,
+      "seconds": 5.31109378580004,
+      "tokens": 152
+    },
+    {
+      "paper": "p04",
+      "interest": 0,
+      "score": 2,
+      "seconds": 4.922506338916719,
+      "tokens": 143
+    },
+    {
+      "paper": "p04",
+      "interest": 1,
+      "score": 2,
+      "seconds": 4.954885886050761,
+      "tokens": 154
+    },
+    {
+      "paper": "p04",
+      "interest": 2,
+      "score": 2,
+      "seconds": 4.926359661854804,
+      "tokens": 147
+    },
+    {
+      "paper": "p05",
+      "interest": 0,
+      "score": 2,
+      "seconds": 5.390679509844631,
+      "tokens": 150
+    },
+    {
+      "paper": "p05",
+      "interest": 1,
+      "score": 2,
+      "seconds": 5.417723899241537,
+      "tokens": 161
+    },
+    {
+      "paper": "p05",
+      "interest": 2,
+      "score": 2,
+      "seconds": 5.4791143839247525,
+      "tokens": 154
+    },
+    {
+      "paper": "p06",
+      "interest": 0,
+      "score": 2,
+      "seconds": 5.290570535231382,
+      "tokens": 148
+    },
+    {
+      "paper": "p06",
+      "interest": 1,
+      "score": 2,
+      "seconds": 5.300269962754101,
+      "tokens": 159
+    },
+    {
+      "paper": "p06",
+      "interest": 2,
+      "score": 2,
+      "seconds": 5.286879793740809,
+      "tokens": 152
+    },
+    {
+      "paper": "p07",
+      "interest": 0,
+      "score": 2,
+      "seconds": 4.762716196011752,
+      "tokens": 141
+    },
+    {
+      "paper": "p07",
+      "interest": 1,
+      "score": 2,
+      "seconds": 4.859959152061492,
+      "tokens": 152
+    },
+    {
+      "paper": "p07",
+      "interest": 2,
+      "score": 2,
+      "seconds": 4.925114317797124,
+      "tokens": 145
+    },
+    {
+      "paper": "p08",
+      "interest": 0,
+      "score": 2,
+      "seconds": 4.7567479512654245,
+      "tokens": 141
+    },
+    {
+      "paper": "p08",
+      "interest": 1,
+      "score": 2,
+      "seconds": 4.857567178085446,
+      "tokens": 152
+    },
+    {
+      "paper": "p08",
+      "interest": 2,
+      "score": 2,
+      "seconds": 4.795867872424424,
+      "tokens": 145
+    },
+    {
+      "paper": "p09",
+      "interest": 0,
+      "score": 2,
+      "seconds": 4.841751425061375,
+      "tokens": 142
+    },
+    {
+      "paper": "p09",
+      "interest": 1,
+      "score": 2,
+      "seconds": 4.881787335965782,
+      "tokens": 153
+    },
+    {
+      "paper": "p09",
+      "interest": 2,
+      "score": 2,
+      "seconds": 4.87070749187842,
+      "tokens": 146
+    }
+  ],
+  "max_scores": {
+    "p01": 2,
+    "p02": 2,
+    "p03": 2,
+    "p04": 2,
+    "p05": 2,
+    "p06": 2,
+    "p07": 2,
+    "p08": 2,
+    "p09": 2
+  },
+  "ranked_ids": [
+    "p01",
+    "p02",
+    "p03",
+    "p04",
+    "p05",
+    "p06",
+    "p07",
+    "p08",
+    "p09"
+  ],
+  "warm_median_seconds": 5.278472139732912,
+  "container_peak_bytes": 2329415680
+}

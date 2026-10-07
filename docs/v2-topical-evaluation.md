@@ -1,5 +1,11 @@
 # V2 topical relevance: first implementation gate
 
+> **Current evidence (2026-09-19):** MiniLM passed a nine-paper synthetic
+> topical sanity check while SmolLM2 produced an uninformative all-tied result.
+> This is development evidence, not production accuracy or an adoption decision.
+> See [the detailed sanity-check report](v2-topical-sanity-check-2026-09-19.md)
+> and its [exact JSON evidence](evidence/v2-topical-sanity-20260919/README.md).
+
 This standalone package implements the approved synthetic engineering gate in
 `v2-model-evaluation`, starting at stable v1 commit `6de3685`. It does not import
 production scoring, read production databases, access the Mini, call providers,

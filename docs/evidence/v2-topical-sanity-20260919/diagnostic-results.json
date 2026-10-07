@@ -1,0 +1,65 @@
+[
+  {
+    "condition": "json_without_enum",
+    "paper": "p01",
+    "response": "{\"score\": 2}",
+    "done_reason": "stop",
+    "seconds": 33.04264718526974
+  },
+  {
+    "condition": "json_without_enum",
+    "paper": "p04",
+    "response": "{\"score\": 2}",
+    "done_reason": "stop",
+    "seconds": 4.927508389111608
+  },
+  {
+    "condition": "json_without_enum",
+    "paper": "p07",
+    "response": "{\"interest\": \"enterprise AI platform/architecture/governance/organizational tradeoffs\", \"title\": \"Dating ceramic fragments from ancient settlements\", \"",
+    "done_reason": "length",
+    "seconds": 7.213459878228605
+  },
+  {
+    "condition": "unconstrained_same_prompt",
+    "paper": "p01",
+    "response": "{\"score\": 2}",
+    "done_reason": "stop",
+    "seconds": 5.1485562259331346
+  },
+  {
+    "condition": "unconstrained_same_prompt",
+    "paper": "p04",
+    "response": "{\"score\": 2}",
+    "done_reason": "stop",
+    "seconds": 4.8232592972926795
+  },
+  {
+    "condition": "unconstrained_same_prompt",
+    "paper": "p07",
+    "response": "{\"interest\": \"enterprise AI platform/architecture/governance/organizational tradeoffs\", \"title\": \"Dating ceramic fragments from ancient settlements\", \"",
+    "done_reason": "length",
+    "seconds": 7.200648921076208
+  },
+  {
+    "condition": "plain_question",
+    "paper": "p01",
+    "response": "Unrelated",
+    "done_reason": "stop",
+    "seconds": 8.563158131204545
+  },
+  {
+    "condition": "plain_question",
+    "paper": "p04",
+    "response": "Partial",
+    "done_reason": "stop",
+    "seconds": 4.301262476947159
+  },
+  {
+    "condition": "plain_question",
+    "paper": "p07",
+    "response": "Partial",
+    "done_reason": "stop",
+    "seconds": 4.024575551971793
+  }
+]

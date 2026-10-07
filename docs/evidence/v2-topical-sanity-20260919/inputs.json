@@ -1,0 +1,18 @@
+{
+  "interests": [
+    "enterprise AI platform/architecture/governance/organizational tradeoffs",
+    "AIOps/observability/incident response/diagnosis/RCA/logs-metrics-traces/system relationships",
+    "agent reliability/tool-agent coordination/context/failure handling/recovery/human oversight"
+  ],
+  "papers": [
+    {"id":"p01","title":"Ownership and governance of enterprise AI platforms","abstract":"We compare centralized and federated architectures for operating shared AI platforms across business units. The study examines model access controls, governance responsibilities, security reviews, and organizational tradeoffs between platform teams and application owners."},
+    {"id":"p02","title":"Causal diagnosis of cloud service incidents","abstract":"We combine application logs, metrics, and distributed traces with a service dependency graph to identify root causes of production incidents. An AIOps workflow detects anomalies, ranks failing components, and supports incident responders with explanations of cascading failures."},
+    {"id":"p03","title":"Reliable recovery in tool-using agent workflows","abstract":"We investigate failures in cooperating AI agents that call external tools and share task context. The system monitors execution, detects failed calls, restores interrupted tasks, and escalates uncertain recovery decisions to human operators."},
+    {"id":"p04","title":"Centralized versus decentralized ownership of corporate data warehouses","abstract":"We compare organizational ownership of enterprise data warehouses across business units. The study analyzes access policies and coordination costs for shared database infrastructure. Its scope is conventional reporting data and warehouse administration."},
+    {"id":"p05","title":"Compression of application telemetry streams","abstract":"We benchmark lossless compression methods on application log records and server metric time series. The experiments compare storage size, throughput, and reconstruction fidelity for telemetry archives. The contribution concerns encoding efficiency rather than interpreting the recorded events."},
+    {"id":"p06","title":"Long-context language models for document summarization","abstract":"We measure how input context length affects a language model's ability to summarize long legal documents in a single response. Experiments vary document length and attention configuration, evaluating factual coverage and summary compression for standalone generation."},
+    {"id":"p07","title":"Dating ceramic fragments from ancient settlements","abstract":"We analyze mineral composition and firing temperatures of pottery fragments recovered from archaeological sites. Laboratory measurements and excavation strata establish a chronology of ceramic production and regional exchange during the early Bronze Age."},
+    {"id":"p08","title":"Irrigation schedules and wheat growth","abstract":"We compare irrigation intervals across replicated wheat plots during a growing season. Measurements of soil moisture, leaf area, and grain yield identify water application schedules that improve crop productivity under limited rainfall."},
+    {"id":"p09","title":"Orbital dynamics of binary stars","abstract":"We estimate the masses and orbital periods of binary star systems from repeated spectroscopic observations. A gravitational model fits radial velocity curves and quantifies uncertainty in orbital eccentricity and stellar separation."}
+  ]
+}

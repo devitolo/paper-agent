@@ -1,0 +1,6 @@
+{
+  "purpose":"Synthetic development sanity check; expectations fixed before inference, not held-out quality evidence.",
+  "overall":{"p01":"relevant","p02":"relevant","p03":"relevant","p04":"partial","p05":"partial","p06":"partial","p07":"unrelated","p08":"unrelated","p09":"unrelated"},
+  "target_interest":{"p01":0,"p02":1,"p03":2,"p04":0,"p05":1,"p06":2},
+  "checks":["All three relevant papers should outrank all three clearly unrelated papers by maximum interest score.","Related but incomplete examples are diagnostic and may reasonably differ in ordering.","SmolLM2 should not assign the same score to every example."]
+}
