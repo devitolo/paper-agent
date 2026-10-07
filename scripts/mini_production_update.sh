@@ -557,6 +557,7 @@ PY
 if ! "${compose[@]}" exec -T app python -m paper_agents.cli zenml-pilot --db /app/data/paper_agent.db --fetch-limit "${PAPER_ZENML_PILOT_FETCH:-200}" --keep "${PAPER_ZENML_PILOT_KEEP:-5}" \
   > "$RELEASE_DIR/zenml-pilot-import.txt" 2>&1; then
   echo "ZenML pilot import failed; deployment remains healthy. Evidence: $RELEASE_DIR/zenml-pilot-import.txt" >&2
+  cat "$RELEASE_DIR/zenml-pilot-import.txt" >&2 || true
 fi
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
