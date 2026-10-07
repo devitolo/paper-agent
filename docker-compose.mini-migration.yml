@@ -26,6 +26,13 @@ x-environment: &environment
   PAPER_SEMANTIC_SCHOLAR_PROGRESS: ${PAPER_SEMANTIC_SCHOLAR_PROGRESS:-0}
   PAPER_ARXIV_PROGRESS: ${PAPER_ARXIV_PROGRESS:-0}
   PAPER_CORE_SOURCE: ${PAPER_CORE_SOURCE:-0}
+  PAPER_AGENT_MINILM_ENABLED: ${PAPER_AGENT_MINILM_ENABLED:-1}
+  PAPER_AGENT_MINILM_MODEL_DIR: /models/minilm
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  TOKENIZERS_PARALLELISM: "false"
+  OMP_NUM_THREADS: "2"
+  OPENBLAS_NUM_THREADS: "2"
   TZ: America/Los_Angeles
   SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:?Provision source credential privately}
   CORE_API_KEY: ${CORE_API_KEY:-}
@@ -35,6 +42,7 @@ x-volumes: &state-mounts
   - runtime-control:/runtime-control
   - logs:/app/logs
   - backups:/backups
+  - minilm-model:/models:ro
   - type: bind
     source: ${PAPER_IMPORT_MANIFEST_FILE:?Set absolute approved copied-state manifest path}
     target: /import/manifest.json
@@ -141,6 +149,9 @@ volumes:
   ollama-data:
     external: true
     name: ${PAPER_MIGRATION_MODEL_VOLUME:?Set separate copied verified model volume}
+  minilm-model:
+    external: true
+    name: ${PAPER_MINILM_MODEL_VOLUME:-paper-agent-minilm-model-cache}
 
 # Only app and the parked opt-in scheduler receive this dedicated read-only file.
 secrets:

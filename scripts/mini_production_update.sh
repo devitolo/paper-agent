@@ -507,6 +507,25 @@ phase_start "post deploy checks"
 curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.html"
 "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-model \
   > "$RELEASE_DIR/qwen-check.json"
+"${compose[@]}" exec -T app python - <<'PY' > "$RELEASE_DIR/minilm-check.json"
+import json
+from paper_agents.curator_interest import default_interest_scorer, score_interest_fit
+
+result = score_interest_fit(
+    {
+        "title": "Production incident diagnosis with operational telemetry",
+        "abstract": (
+            "This verification abstract describes incident diagnosis using production logs, "
+            "metrics, traces, and service dependencies in a realistic microservice environment."
+        ),
+    },
+    ["AIOps incident diagnosis using logs metrics traces and system relationships"],
+    default_interest_scorer(),
+)
+print(json.dumps(result, sort_keys=True))
+if result.get("status") != "scored":
+    raise SystemExit("MiniLM Curator interest-fit verification failed")
+PY
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
 
@@ -516,6 +535,7 @@ verification_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-prod
 verification_arxiv_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_ARXIV_PROGRESS:-unset}"')
 verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_OPENALEX_CURSOR:-unset}"')
 verification_semantic_scholar_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_SEMANTIC_SCHOLAR_PROGRESS:-unset}"')
+verification_minilm_enabled=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_AGENT_MINILM_ENABLED:-unset}"')
 verification_minilm_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
 expected_minilm_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" | awk '{print $1}')
 verification_minilm_shadow_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_shadow_after_pipeline.sh" | awk '{print $1}')
@@ -534,6 +554,7 @@ removed_image_layer_count=$(sed -n 's/^removed_image_layer_count=//p' "$RELEASE_
   printf 'PAPER_ARXIV_PROGRESS=%s\n' "$verification_arxiv_progress"
   printf 'PAPER_OPENALEX_CURSOR=%s\n' "$verification_openalex_cursor"
   printf 'PAPER_SEMANTIC_SCHOLAR_PROGRESS=%s\n' "$verification_semantic_scholar_progress"
+  printf 'PAPER_AGENT_MINILM_ENABLED=%s\n' "$verification_minilm_enabled"
   printf 'image=%s\n' "$verification_image"
   printf 'image_size_mib=%s\n' "$image_size_mib"
   printf 'image_layer_count=%s\n' "$image_layer_count"
@@ -556,6 +577,10 @@ if [[ -n "$OPENALEX_CURSOR" && "$verification_openalex_cursor" != "$OPENALEX_CUR
 fi
 if [[ -n "$SEMANTIC_SCHOLAR_PROGRESS" && "$verification_semantic_scholar_progress" != "$SEMANTIC_SCHOLAR_PROGRESS" ]]; then
   echo "Post-deploy verification failed: PAPER_SEMANTIC_SCHOLAR_PROGRESS=$verification_semantic_scholar_progress, expected $SEMANTIC_SCHOLAR_PROGRESS" >&2
+  exit 1
+fi
+if [[ "$verification_minilm_enabled" != 1 ]]; then
+  echo "Post-deploy verification failed: PAPER_AGENT_MINILM_ENABLED=$verification_minilm_enabled, expected 1" >&2
   exit 1
 fi
 if [[ "$verification_minilm_runner" != "$expected_minilm_runner" ]]; then
@@ -587,6 +612,7 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_arxiv_progress=%s\n' "$verification_arxiv_progress"
   printf 'verified_openalex_cursor=%s\n' "$verification_openalex_cursor"
   printf 'verified_semantic_scholar_progress=%s\n' "$verification_semantic_scholar_progress"
+  printf 'verified_minilm_curator_enabled=%s\n' "$verification_minilm_enabled"
   printf 'verified_image_size_mib=%s\n' "$image_size_mib"
   printf 'verified_image_layer_count=%s\n' "$image_layer_count"
   printf 'verified_previous_image_layer_count=%s\n' "$previous_image_layer_count"
@@ -595,7 +621,7 @@ printf '%s\n' "$APP_IMAGE" > "$DEPLOYED_MARKER"
   printf 'verified_removed_image_layer_count=%s\n' "$removed_image_layer_count"
   printf 'verified_minilm_runner_sha256=%s\n' "$verification_minilm_runner"
   printf 'verified_minilm_shadow_runner_sha256=%s\n' "$verification_minilm_shadow_runner"
-  printf 'verified_minilm_eval_enabled=1\n'
+  printf 'verified_minilm_eval_enabled=0\n'
   printf 'verified_minilm_shadow_enabled=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 0 || printf invalid)"
   printf 'total_deploy_seconds=%s\n' "$(( $(date +%s) - DEPLOY_STARTED_EPOCH ))"
   printf 'rollback_script=%s\n' "$RELEASE_DIR/rollback.sh"
@@ -619,6 +645,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- PAPER_ARXIV_PROGRESS: \`$verification_arxiv_progress\`"
     echo "- PAPER_OPENALEX_CURSOR: \`$verification_openalex_cursor\`"
     echo "- PAPER_SEMANTIC_SCHOLAR_PROGRESS: \`$verification_semantic_scholar_progress\`"
+    echo "- PAPER_AGENT_MINILM_ENABLED: \`$verification_minilm_enabled\`"
+    echo "- MiniLM Curator check: \`passed\`"
     echo "- PAPER_MINILM_EVAL_ENABLED: \`0\`"
     echo "- PAPER_MINILM_SHADOW_ENABLED: \`0\`"
     echo "- MiniLM runner SHA256: \`$verification_minilm_runner\`"

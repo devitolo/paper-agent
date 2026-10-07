@@ -57,6 +57,20 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertLess(copy_app, source_inventory)
         self.assertNotIn("SOURCE_BUNDLE_SHA256", dockerfile[:mini_target])
 
+    def test_mini_curator_packages_and_verifies_pinned_minilm(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")
+        update = (ROOT / "scripts" / "mini_production_update.sh").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements-minilm.txt").read_text(encoding="utf-8")
+        self.assertIn("onnxruntime==1.23.2", requirements)
+        self.assertIn("transformers==4.57.1", requirements)
+        self.assertIn("pip install -r requirements-minilm.txt", dockerfile)
+        self.assertIn("!requirements-minilm.txt", (ROOT / ".dockerignore").read_text(encoding="utf-8"))
+        self.assertIn("minilm-model:/models:ro", compose)
+        self.assertIn("PAPER_AGENT_MINILM_ENABLED: ${PAPER_AGENT_MINILM_ENABLED:-1}", compose)
+        self.assertIn('> "$RELEASE_DIR/minilm-check.json"', update)
+        self.assertIn("MiniLM Curator interest-fit verification failed", update)
+
     def test_mini_compose_uses_short_stop_grace_after_job_drain(self):
         compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")
         self.assertIn("stop_grace_period: 12s", compose)

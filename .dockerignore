@@ -3,6 +3,7 @@
 !Dockerfile
 !requirements.txt
 !requirements-telemetry.txt
+!requirements-minilm.txt
 !LICENSE
 !NOTICE
 !paper_agents/

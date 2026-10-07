@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable
@@ -16,7 +17,7 @@ MODEL_ID = "cross-encoder/ms-marco-MiniLM-L6-v2"
 MODEL_REVISION = "233902d25c440f23af6f7d6e94d2946bac0bee0a"
 MODEL_SHA256 = "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a"
 QUERY_VERSION = "project-paper-interests-max-v1"
-MODEL_DIR = Path("/models/minilm")
+MODEL_DIR = Path(os.getenv("PAPER_AGENT_MINILM_MODEL_DIR", "/models/minilm"))
 DEFAULT_CANDIDATE_LIMIT = 50
 INTERESTS = (
     "enterprise AI platform architecture governance organizational tradeoffs",
@@ -65,24 +66,19 @@ class MiniLMScorer:
         if not {"input_ids", "attention_mask"}.issubset(self.input_names):
             raise RuntimeError("MiniLM runtime has unexpected inputs")
 
-    def __call__(self, title: str, abstract: str) -> float:
+    def score_pair(self, title: str, abstract: str, interest: str) -> float:
         text = f"{title.strip()}\n{abstract.strip()}"
-        scores = []
-        for interest in INTERESTS:
-            encoded = self.tokenizer(
-                interest,
-                text,
-                truncation=True,
-                max_length=512,
-                padding=False,
-                return_tensors="np",
-            )
-            result = self.session.run(None, {name: encoded[name] for name in self.input_names})
-            score = float(result[0][0][0])
-            if not math.isfinite(score):
-                raise RuntimeError("MiniLM returned a non-finite score")
-            scores.append(score)
-        return max(scores)
+        encoded = self.tokenizer(
+            interest, text, truncation=True, max_length=512, padding=False, return_tensors="np",
+        )
+        result = self.session.run(None, {name: encoded[name] for name in self.input_names})
+        score = float(result[0][0][0])
+        if not math.isfinite(score):
+            raise RuntimeError("MiniLM returned a non-finite score")
+        return score
+
+    def __call__(self, title: str, abstract: str) -> float:
+        return max(self.score_pair(title, abstract, interest) for interest in INTERESTS)
 
 
 def file_sha256(path: Path) -> str:

@@ -64,6 +64,9 @@ USER paper
 # The default `runtime` target below remains the public package runtime.
 FROM migration-gemini AS mini-production
 USER root
+COPY requirements-minilm.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-minilm.txt
 ARG BUILD_DATE=unknown
 ARG PYTHON_BASE_IMAGE
 ARG SOURCE_BUNDLE_SHA256=
