@@ -16,6 +16,7 @@ Optional:
   PAPER_MINI_CANDIDATE_DIR=/home/devitolo/paper-mini-rehearsal/candidate
   PAPER_MINI_DEPLOY_LOCK_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock
   PAPER_MINI_DRAIN_TIMEOUT=1800
+  PAPER_DEPLOY_CHECK=light|full   # default: light; full adds Qwen3 and ZenML validation
   PAPER_MINI_DEPLOY_BRANCH=mini-production
   PAPER_MINI_ARXIV_PROGRESS=0|1   # optional persistent production flag update
   PAPER_MINI_OPENALEX_CURSOR=0|1   # optional persistent production flag update
@@ -39,6 +40,7 @@ DEPLOY_BRANCH=${PAPER_MINI_DEPLOY_BRANCH:-mini-production}
 ARXIV_PROGRESS=${PAPER_MINI_ARXIV_PROGRESS:-}
 OPENALEX_CURSOR=${PAPER_MINI_OPENALEX_CURSOR:-}
 SEMANTIC_SCHOLAR_PROGRESS=${PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS:-}
+DEPLOY_CHECK=${PAPER_DEPLOY_CHECK:-light}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 RELEASE_DIR=$MINI_ROOT/production-releases/$STAMP
 DEPLOYED_MARKER=$MINI_ROOT/production-current/app-image.ref
@@ -74,6 +76,7 @@ phase_end() {
 [[ -z "$ARXIV_PROGRESS" || "$ARXIV_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_ARXIV_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$OPENALEX_CURSOR" || "$OPENALEX_CURSOR" =~ ^[01]$ ]] || { echo "PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$SEMANTIC_SCHOLAR_PROGRESS" || "$SEMANTIC_SCHOLAR_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
+[[ "$DEPLOY_CHECK" == light || "$DEPLOY_CHECK" == full ]] || { echo "PAPER_DEPLOY_CHECK must be light or full" >&2; exit 64; }
 
 # Credentials in the private production env file are authoritative. Docker Compose
 # otherwise gives an ambient shell variable precedence over --env-file.
@@ -546,7 +549,10 @@ print(json.dumps(result, sort_keys=True))
 if result.get("status") != "scored":
     raise SystemExit("MiniLM Curator interest-fit verification failed")
 PY
-"${compose[@]}" exec -T app python - <<'PY' > "$RELEASE_DIR/qwen3-curator-check.json"
+qwen3_deploy_check=skipped
+zenml_deploy_check=light
+if [[ "$DEPLOY_CHECK" == full ]]; then
+  "${compose[@]}" exec -T app python - <<'PY' > "$RELEASE_DIR/qwen3-curator-check.json"
 import json
 import os
 from paper_agents.curator_evidence import assess_evidence
@@ -574,6 +580,13 @@ finally:
     except Exception:
         pass
 PY
+  qwen3_deploy_check=passed
+  "${compose[@]}" exec -T app python -m paper_agents.cli zenml-pilot \
+    --db /app/data/paper_agent.db --fetch-limit "${PAPER_ZENML_PILOT_FETCH:-200}" \
+    --keep "${PAPER_ZENML_PILOT_KEEP:-5}" --dry-run \
+    > "$RELEASE_DIR/zenml-deploy-check.json"
+  zenml_deploy_check=full/passed
+fi
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
 
@@ -618,6 +631,9 @@ removed_image_layer_count=$(sed -n 's/^removed_image_layer_count=//p' "$RELEASE_
   printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 0 || printf invalid)"
   printf 'PAPER_MINILM_SHADOW_ENABLED=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 0 || printf invalid)"
   printf 'zenml_weekly_cron=%s\n' "$([[ "$verification_zenml_cron" == 1 ]] && printf enabled || printf invalid)"
+  printf 'deploy_check=%s\n' "$DEPLOY_CHECK"
+  printf 'qwen3_deploy_check=%s\n' "$qwen3_deploy_check"
+  printf 'zenml_deploy_check=%s\n' "$zenml_deploy_check"
 } | tee "$RELEASE_DIR/post-deploy-verification.txt"
 if [[ -n "$ARXIV_PROGRESS" && "$verification_arxiv_progress" != "$ARXIV_PROGRESS" ]]; then
   echo "Post-deploy verification failed: PAPER_ARXIV_PROGRESS=$verification_arxiv_progress, expected $ARXIV_PROGRESS" >&2
@@ -709,7 +725,9 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- PAPER_AGENT_MINILM_ENABLED: \`$verification_minilm_enabled\`"
     echo "- MiniLM Curator check: \`passed\`"
     echo "- Qwen3 Curator model: \`$verification_curator_model\`"
-    echo "- Qwen3 Curator check: \`passed\`"
+    echo "- Deploy check mode: \`$DEPLOY_CHECK\`"
+    echo "- Qwen3 Curator check: \`$qwen3_deploy_check\`"
+    echo "- ZenML deploy check: \`$zenml_deploy_check\`"
     echo "- PAPER_MINILM_EVAL_ENABLED: \`0\`"
     echo "- PAPER_MINILM_SHADOW_ENABLED: \`0\`"
     echo "- MiniLM runner SHA256: \`$verification_minilm_runner\`"

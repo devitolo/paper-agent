@@ -71,9 +71,13 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("PAPER_AGENT_CURATOR_MODEL: ${PAPER_AGENT_CURATOR_MODEL:-qwen3:4b}", compose)
         self.assertIn('> "$RELEASE_DIR/minilm-check.json"', update)
         self.assertIn("MiniLM Curator interest-fit verification failed", update)
+        self.assertIn('DEPLOY_CHECK=${PAPER_DEPLOY_CHECK:-light}', update)
+        self.assertIn('if [[ "$DEPLOY_CHECK" == full ]]', update)
         self.assertIn('> "$RELEASE_DIR/qwen3-curator-check.json"', update)
         self.assertIn("Qwen3 Curator verification failed", update)
         self.assertIn("timeout=240", update)
+        self.assertIn('--keep "${PAPER_ZENML_PILOT_KEEP:-5}" --dry-run', update)
+        self.assertIn('echo "- ZenML deploy check:', update)
 
     def test_mini_compose_uses_short_stop_grace_after_job_drain(self):
         compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")
