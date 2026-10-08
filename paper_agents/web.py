@@ -18,6 +18,11 @@ from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.pdf_links import looks_like_direct_pdf_url
 from paper_agents.topic_inventory import scout_topic_inventory
+from paper_agents.industry_config import (
+    DEFAULT_INDUSTRY_CONFIG_PATH,
+    load_zenml_config,
+    update_zenml_config,
+)
 from paper_agents.topic_agent import (
     TopicProposal,
     apply_topic_proposal,
@@ -193,6 +198,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         duplicate=params.get("duplicate", [None])[0] == "1",
                         error=params.get("error", [None])[0],
                         edit_id=params.get("edit", [None])[0],
+                        section=params.get("section", ["academic"])[0],
+                        selected_source=params.get("source", ["arxiv"])[0],
+                        topic_mode=params.get("mode", ["inventory"])[0],
                     )
                 )
                 return
@@ -240,14 +248,18 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                             render_topics_page(
                                 proposal=proposal,
                                 conversation=updated_conversation,
+                                selected_source="all",
+                                topic_mode="agent",
                             )
                         )
                         return
-                    if action == "apply_proposal":
+                    if action == "update_industry":
+                        update_zenml_config(form)
+                    elif action == "apply_proposal":
                         apply_topic_proposal_form(form)
                     else:
                         save_topics_form(form)
-                    redirect_to = "/topics?saved=1"
+                    redirect_to = "/topics?section=industry&saved=1" if action == "update_industry" else "/topics?saved=1"
                 except DuplicateTopicError as error:
                     redirect_to = (
                         "/topics?"
@@ -732,6 +744,8 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     discussion_prompt = escape(build_discussion_prompt(card))
     summary = card["summary"]
     source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
+    company = str((card.get("source_metadata") or {}).get("company") or "").strip()
+    company_html = f'<span class="source-company">{escape(company)}</span>' if card.get("source") == "zenml" and company else ""
     title_html = render_title_link(card)
     compact_class = " compact" if view_value == "compact" else ""
     summary_artifact = card.get("artifacts", {}).get("triage_summary")
@@ -776,6 +790,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
           <h2>{title_html}</h2>
           <div class="paper-meta">
             {source_badge}
+            {company_html}
             <span>{escape(card.get("published") or "date unknown")}</span>
             {render_source_reference(card)}
             {render_pdf_control(card)}
@@ -1279,19 +1294,26 @@ def render_topics_page(
     request_text: str = "",
     conversation: list[dict[str, str]] | None = None,
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
+    industry_config_path: Path = DEFAULT_INDUSTRY_CONFIG_PATH,
+    section: str = "academic",
+    selected_source: str = "arxiv",
+    topic_mode: str = "inventory",
 ) -> str:
     inventory = scout_topic_inventory(config_path=config_path)
+    academic_inventory = [item for item in inventory if item["source"] != "zenml"]
+    academic_sources = [item["source"] for item in academic_inventory]
+    section = section if section in {"academic", "industry"} else "academic"
+    topic_mode = topic_mode if topic_mode in {"inventory", "agent"} else "inventory"
+    if proposal or conversation:
+        topic_mode = "agent"
+    if topic_mode == "agent":
+        selected_source = "all"
+    selected_source = selected_source if selected_source in {*academic_sources, "all"} else "arxiv"
     topics = load_topic_config_or_seed(config_path)
-    tabs = "".join(
-        f'<a class="topic-tab source-badge {source_badge_class(item["source"])}" href="#{escape(item["source"])}">{escape(item["label"])}</a>'
-        for item in inventory
-    )
-    sections = "".join(render_topic_source_section(item) for item in inventory)
-    topic_rows = render_topic_rows(topics, proposal)
     edit_topic = next((topic for topic in topics if topic.id == edit_id), None)
     editor_panel = render_topic_editor_panel(edit_topic) if edit_topic else ""
-    all_topics_open = " open" if edit_topic or pending_topic_preview(proposal) else ""
     total_topics = len(topics)
+    industry_config = load_zenml_config(industry_config_path)
     banner = ""
     if saved:
         banner = '<div class="banner">Saved. Changes apply to future scheduled runs.</div>'
@@ -1299,74 +1321,201 @@ def render_topics_page(
         banner = f'<div class="banner">Topic already exists. Editing existing topic: {escape(edit_topic.label)}.</div>'
     if error:
         banner = f'<div class="banner warning">Topic config was not saved: {escape(error)}</div>'
-    controls = ""
+
+    main_tabs = (
+        f'<a class="topics-main-tab topics-main-tab-academic{" current" if section == "academic" else ""}" href="/topics?section=academic">Academic</a>'
+        f'<a class="topics-main-tab topics-main-tab-industry{" current" if section == "industry" else ""}" href="/topics?section=industry">Industry</a>'
+    )
+    if section == "industry":
+        body = f'<div class="topics-industry-view">{render_industry_config_section(industry_config)}</div>'
+    else:
+        cards = "".join(render_academic_source_card(item, selected_source) for item in academic_inventory)
+        source_item = next((item for item in academic_inventory if item["source"] == selected_source), None)
+        if selected_source == "core" and source_item is not None:
+            rows = "".join(render_readonly_topic_row(topic) for topic in source_item["topics"])
+            topic_count = len(source_item["topics"])
+            topic_note = (
+                "CORE queries are configured through environment variables and are read-only here. "
+                + source_item["notes"]
+            )
+        else:
+            visible_topics = topics if selected_source == "all" else [topic for topic in topics if selected_source in topic.sources]
+            rows = render_topic_rows(visible_topics, proposal)
+            topic_count = len(visible_topics)
+            topic_note = "Edit, enable, or disable topics for future academic runs."
+        source_label = "All academic sources" if selected_source == "all" else source_display_name(selected_source)
+        topic_agent_link = (
+            f'<a class="academic-source-card academic-mode-card{" selected" if topic_mode == "agent" else ""}" '
+            'href="/topics?mode=agent&amp;source=all"><strong>Topic Agent</strong><span>Propose topic changes</span></a>'
+        )
+        all_link = (
+            f'<a class="academic-source-card academic-mode-card{" selected" if topic_mode == "inventory" and selected_source == "all" else ""}" '
+            f'href="/topics?source=all"><strong>All topics</strong><span>{total_topics} configured</span></a>'
+        )
+        mode_switch = f'<div class="academic-schedule-actions">{topic_agent_link}{all_link}</div>'
+        schedule_panel = f"""<section class="academic-schedule" aria-labelledby="academic-schedule-title">
+          <div class="academic-section-head">
+            <div><h2 id="academic-schedule-title">Source schedule inventory</h2><p>Choose a source to compare its next searches with its configured topics.</p></div>
+            {mode_switch}
+          </div>
+          <div class="academic-source-grid">{cards}</div>
+        </section>"""
+        agent_panel = f"""<section class="academic-schedule academic-agent-workspace" aria-labelledby="topic-agent-title">
+          <div class="academic-section-head">
+            <div><h2 id="topic-agent-title">Topic Agent</h2><p>Describe what to scout while comparing the complete academic topic list below.</p></div>
+            {mode_switch}
+          </div>
+          <p class="topic-agent-context">Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar. CORE queries remain environment-controlled.</p>
+          {render_topic_agent_panel(request_text, proposal, conversation or [])}
+        </section>"""
+        body = f"""{agent_panel if topic_mode == "agent" else schedule_panel}
+        <div class="academic-workspace">
+          <section class="academic-topics-panel">
+            <div class="academic-section-head">
+              <div><h2>{escape(source_label)} topics</h2><p>{escape(topic_note)}</p></div>
+              <span id="topic-visible-count">{topic_count} shown</span>
+            </div>
+            {editor_panel}
+            <div class="topic-toolbar">
+              <label>Search<input id="topic-search" type="search" placeholder="Filter topics"></label>
+              <span>Topics</span>
+            </div>
+            <div class="academic-topic-scroll">
+              <div class="topic-table">
+                <div class="topic-table-head">
+                  <span>Label</span><span>Query</span><span>Sources</span><span>Cadence</span><span>Priority</span><span>Enabled</span><span>Actions</span>
+                </div>
+                {rows or '<div class="empty academic-topic-empty">No topics configured for this source.</div>'}
+              </div>
+            </div>
+          </section>
+        </div>"""
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Project Paper Scout Topics</title>
+  <title>Project Paper Topics</title>
   <style>{page_css()}</style>
 </head>
 <body>
   <main>
-    {render_app_header("Topics", f"{len(inventory)} sources | {total_topics} configured topics | editable file-backed config", controls, "topics")}
+    {render_app_header("Topics", "Manage discovery sources and academic search topics", "", "topics")}
     {banner}
-    {render_topic_agent_panel(request_text, proposal, conversation or [])}
-    {editor_panel}
-    <details class="topic-inventory-details" open>
-      <summary>Source schedule inventory</summary>
-      <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
-      <div class="topic-sections">{sections}</div>
-    </details>
-    <details class="topic-source topic-list-details"{all_topics_open}>
-      <summary>
-        <span>All Topics</span>
-        <small>{topic_list_summary(total_topics, proposal)}</small>
-      </summary>
-      <div class="topic-toolbar">
-        <label>Search<input id="topic-search" type="search" placeholder="Filter topics"></label>
-        <span>Edit opens a focused panel; toggles affect future runs only.</span>
-      </div>
-      <div class="topic-table">
-        <div class="topic-table-head">
-          <span>Label</span><span>Query</span><span>Sources</span><span>Cadence</span><span>Priority</span><span>Enabled</span><span>Actions</span>
-        </div>
-        {topic_rows}
-      </div>
-    </details>
+    <nav class="topics-main-tabs" aria-label="Topic source type">{main_tabs}</nav>
+    {body}
     <script>
       const topicSearch = document.getElementById("topic-search");
       if (topicSearch) {{
+        const topicRows = Array.from(document.querySelectorAll(".academic-topic-scroll .topic-row"));
+        const visibleCount = document.getElementById("topic-visible-count");
         topicSearch.addEventListener("input", () => {{
           const needle = topicSearch.value.trim().toLowerCase();
-          document.querySelectorAll(".topic-row").forEach((row) => {{
-            row.hidden = needle && !row.dataset.topicText.includes(needle);
+          let shown = 0;
+          topicRows.forEach((row) => {{
+            const matches = !needle || (row.dataset.topicText || "").includes(needle);
+            row.toggleAttribute("hidden", !matches);
+            if (matches) shown += 1;
           }});
+          if (visibleCount) visibleCount.textContent = `${{shown}} shown`;
         }});
       }}
       document.querySelectorAll(".topic-agent-form").forEach((form) => {{
         form.addEventListener("submit", (event) => {{
           const button = event.submitter || form.querySelector("button[type='submit']");
           const status = form.querySelector(".topic-agent-status");
-          if (button) {{
-            button.disabled = true;
-            button.textContent = "Asking...";
-          }}
-          if (status) {{
-            status.textContent = "Asking local Qwen. If it is slow, Project Paper will fall back to a deterministic proposal.";
-          }}
-          setTimeout(() => {{
-            if (status) {{
-              status.textContent = "Still waiting on local Qwen. This request should fall back soon.";
-            }}
-          }}, 12000);
+          if (button) {{ button.disabled = true; button.textContent = "Asking..."; }}
+          if (status) {{ status.textContent = "Asking local Qwen. If it is slow, Project Paper will fall back to a deterministic proposal."; }}
         }});
       }});
     </script>
   </main>
 </body>
 </html>"""
+
+
+def render_academic_source_card(item: dict[str, Any], selected_source: str) -> str:
+    source = item["source"]
+    selected = " selected" if source == selected_source else ""
+    active = item["active_topics"][:2]
+    next_topics = "".join(f"<li>{escape(topic)}</li>" for topic in active) or "<li>No query scheduled.</li>"
+    enabled_count = sum(topic.enabled for topic in item["topics"])
+    schedule = item["schedule"]
+    if item.get("next_run_date"):
+        schedule += f' · next {item["next_run_date"]}'
+    return f"""<a class="academic-source-card{selected}" href="/topics?source={escape(source)}">
+      <div class="academic-source-card-head">
+        <span class="source-badge {source_badge_class(source)}">{escape(item["label"])}</span>
+        <span>{enabled_count} enabled</span>
+      </div>
+      <strong>{escape(schedule)}</strong>
+      <ol>{next_topics}</ol>
+    </a>"""
+
+
+def render_readonly_topic_row(topic: TopicEntry) -> str:
+    sources = ''.join(
+        f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
+        for source in topic.sources
+    )
+    return f"""<div class="topic-row topic-read-row" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
+      <div class="topic-cell topic-label"><strong>{escape(topic.label)}</strong></div>
+      <div class="topic-cell topic-query" title="{escape(topic.query)}">{escape(topic.query)}</div>
+      <div class="topic-cell topic-sources">{sources}</div>
+      <div class="topic-cell"><span class="topic-pill cadence-{escape(topic.cadence)}">{escape(topic.cadence)}</span></div>
+      <div class="topic-cell"><span class="topic-pill priority-{escape(topic.priority)}">{escape(topic.priority)}</span></div>
+      <div class="topic-cell"><span class="topic-status status-enabled">On</span></div>
+      <div class="topic-actions"><span class="topic-preview-note">Environment</span></div>
+    </div>"""
+
+
+def render_industry_config_section(config: Any) -> str:
+    include = "\n".join(config.include_signals)
+    exclude = "\n".join(config.exclude_signals)
+    enabled_text = "On" if config.enabled else "Off"
+    enabled_class = "enabled" if config.enabled else "disabled"
+    max_options = "".join(
+        f'<option value="{value}"{" selected" if value == config.max_items_per_run else ""}>{value}</option>'
+        for value in range(1, 6)
+    )
+    return f"""<section class="topic-source industry-config" id="zenml">
+      <div class="topic-source-head">
+        <div>
+          <h2><span class="source-badge source-badge-zenml">ZenML</span> Industry sources</h2>
+          <p>Practical workplace AI and engineering stories from outside academic paper indexes.</p>
+        </div>
+        <span class="industry-status industry-status-{enabled_class}">{enabled_text}</span>
+      </div>
+      <form method="post" action="/topics" class="industry-config-form">
+        <input type="hidden" name="action" value="update_industry">
+        <div class="industry-primary-controls">
+          <label class="industry-toggle">
+            <span>Weekly discovery</span>
+            <span class="industry-toggle-control"><input type="checkbox" name="enabled" value="1" {'checked' if config.enabled else ''}> Run automatically</span>
+          </label>
+          <label class="industry-limit">Maximum results per week
+            <select name="max_items_per_run">{max_options}</select>
+          </label>
+          <div class="industry-schedule"><span>Schedule</span><strong>{escape(config.schedule)}</strong></div>
+        </div>
+        <details class="industry-filter-details" open>
+          <summary>Filter details <span>Change what Industry discovery looks for</span></summary>
+          <div class="industry-filter-grid">
+            <label>Look for these signals
+              <small>One phrase per line. Matching items are prioritized.</small>
+              <textarea name="include_signals" rows="6">{escape(include)}</textarea>
+            </label>
+            <label>Usually skip these signals
+              <small>One phrase per line. Items are deprioritized unless they also match a preferred signal.</small>
+              <textarea name="exclude_signals" rows="6">{escape(exclude)}</textarea>
+            </label>
+          </div>
+          <p class="industry-note">Industry discovery uses ZenML metadata. It does not run the academic MiniLM relevance model.</p>
+        </details>
+        <div class="industry-actions"><button type="submit" class="primary">Save changes</button></div>
+      </form>
+    </section>"""
 
 
 def render_topic_source_section(item: dict[str, Any]) -> str:
@@ -1426,7 +1575,7 @@ def render_topic_agent_panel(
           <textarea name="request_text" required placeholder="datalake reliability and operations">{escape(request_text)}</textarea>
         </label>
         {render_source_checkboxes(default_sources())}
-        <button type="submit" class="primary">Ask TopicAgent</button>
+        <button type="submit" class="primary topic-agent-submit">Ask Topic Agent</button>
         <p class="topic-agent-status" aria-live="polite"></p>
       </form>
       {proposal_html}
@@ -1610,6 +1759,10 @@ def render_source_checkboxes(selected_sources: list[str]) -> str:
             f'<label class="inline-check"><input type="checkbox" name="sources" value="{escape(source)}" '
             f'{"checked" if source in selected else ""}> {escape(source_display_name(source))}</label>'
         )
+    boxes.append(
+        '<label class="inline-check source-check-readonly" title="CORE queries are configured through environment variables">'
+        '<input type="checkbox" checked disabled> CORE <span>read-only</span></label>'
+    )
     return '<fieldset class="source-checks"><legend>Sources</legend>' + "".join(boxes) + "</fieldset>"
 
 
@@ -2441,6 +2594,7 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                     source_id,
                     url,
                     pdf_url,
+                    metadata_json,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id ASC) AS row_number
                 FROM paper_sources
             ), source_rollup AS (
@@ -2485,7 +2639,8 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                 latest_raw_feedback.content,
                 COALESCE(latest_structured_feedback.created_at, latest_raw_feedback.received_at) AS latest_feedback_received_at,
                 EXISTS (SELECT 1 FROM saved_papers WHERE saved_papers.paper_id = papers.id) AS is_saved,
-                EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id) AS is_excluded
+                EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id) AS is_excluded,
+                primary_source.metadata_json
             FROM papers
             LEFT JOIN latest_recommendation
               ON latest_recommendation.paper_id = papers.id
@@ -2522,13 +2677,20 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                 or row[19] is not None
                 or lightweight_score is not None
             )
+            source_metadata = decode_json(row[24], {})
+            source_name = row[2] or "unknown"
+            source_label_text = source_label(source_name, parse_sources(row[15]))
+            if source_name == "zenml":
+                domain = urllib.parse.urlparse(row[8] or "").netloc.lower().removeprefix("www.")
+                source_label_text = f"ZenML · {domain}" if domain else "ZenML"
             cards.append(
                 {
                     "id": paper_id,
                     "recommendation_id": row[1],
-                    "source": row[2] or "unknown",
+                    "source": source_name,
                     "source_id": row[3] or "unknown",
-                    "source_label": source_label(row[2] or "unknown", parse_sources(row[15])),
+                    "source_label": source_label_text,
+                    "source_metadata": source_metadata,
                     "user_score": user_score,
                     "feedback_decision": row[17],
                     "feedback_received_at": row[19] or row[18],
@@ -3273,6 +3435,8 @@ button.secondary { background: rgba(17, 26, 38, 0.86); color: var(--muted-strong
 .source-badge-semantic-scholar::before { content: "S"; }
 .source-badge-core { color: #86efac; background: rgba(34, 197, 94, 0.13); border-color: rgba(74, 222, 128, 0.58); }
 .source-badge-core::before { content: "C"; }
+.source-badge-zenml { color: #67e8f9; background: rgba(6, 182, 212, 0.13); border-color: rgba(34, 211, 238, 0.58); }
+.source-badge-zenml::before { content: "Z"; }
 .source-badge-unknown { color: var(--muted); background: rgba(148, 163, 184, 0.07); border-color: var(--border); }
 .source-badge-unknown::before { content: "?"; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
@@ -3355,6 +3519,70 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
+
+.topics-main-tabs { display: flex; gap: 4px; margin: 0 0 10px; padding: 3px; width: fit-content; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(12, 20, 32, 0.82); }
+.topics-main-tab { min-width: 118px; padding: 7px 14px; border-radius: var(--radius-sm); color: var(--muted); font-weight: 720; text-align: center; text-decoration: none; }
+.topics-main-tab:hover { color: var(--text); background: rgba(148, 163, 184, 0.06); }
+.topics-main-tab.current { color: var(--text); background: rgba(56, 189, 248, 0.13); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35); }
+.topics-main-tab-industry.current { color: #eaffb2; background: rgba(185, 227, 75, 0.14); box-shadow: inset 0 0 0 1px rgba(185, 227, 75, 0.48); }
+.academic-schedule, .academic-topics-panel { border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.94), rgba(15, 23, 34, 0.96)); }
+.academic-schedule { padding: 12px; margin-bottom: 10px; }
+.academic-section-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+.academic-section-head h2 { margin: 0; }
+.academic-section-head p, .academic-section-head > span { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.academic-source-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.academic-source-card { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: rgba(8, 13, 20, 0.34); text-decoration: none; transition: border-color 120ms ease, background 120ms ease; }
+.academic-source-card:hover { border-color: var(--border-strong); background: rgba(148, 163, 184, 0.06); }
+.academic-source-card.selected { border-color: rgba(56, 189, 248, 0.58); background: rgba(56, 189, 248, 0.08); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.08); }
+.academic-source-card-head { display: flex; justify-content: space-between; gap: 6px; align-items: center; margin-bottom: 7px; }
+.academic-source-card-head > span:last-child, .academic-source-card > span { color: var(--muted); font-size: 10px; }
+.academic-source-card > strong { display: block; min-height: 30px; color: var(--muted-strong); font-size: 11px; line-height: 1.35; }
+.academic-source-card ol { margin: 7px 0 0; padding-left: 18px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.academic-source-card li { margin-top: 2px; }
+.academic-mode-card { min-width: 132px; padding: 7px 10px; }
+.academic-mode-card strong, .academic-mode-card span { display: block; }
+.academic-schedule-actions { display: flex; gap: 8px; align-items: stretch; }
+.academic-workspace { display: block; }
+.academic-topics-panel { min-width: 0; padding: 12px; }
+.academic-topic-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.academic-topic-scroll .topic-table { min-width: 820px; }
+.academic-topic-scroll .topic-row[hidden] { display: none !important; }
+.academic-topic-empty { border: 0; border-radius: 0; box-shadow: none; }
+.academic-agent-workspace > .topic-source { border: 0; padding: 0; background: transparent; }
+.academic-agent-workspace > .topic-source > .topic-source-head { display: none; }
+.academic-agent-workspace .topic-agent-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.academic-agent-workspace .topic-agent-form > label { margin: 0; }
+.academic-agent-workspace .topic-agent-form textarea { min-height: 64px; }
+.academic-agent-workspace .source-checks { grid-column: 1; margin: 0; }
+.academic-agent-workspace .topic-agent-form > button { grid-column: 2; grid-row: 2; min-width: 132px; align-self: end; justify-self: end; }
+.academic-agent-workspace .topic-agent-status, .academic-agent-workspace .topic-conversation, .academic-agent-workspace .topic-proposal-panel { grid-column: 1 / -1; }
+.topic-agent-context { margin: 0 38px 10px 0; padding: 8px 10px; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(56, 189, 248, 0.06); font-size: 12px; }
+.source-check-readonly { color: var(--muted); }
+.source-check-readonly span { margin-left: 2px; font-size: 10px; }
+.topics-industry-view { padding: 10px; border: 1px solid rgba(185, 227, 75, 0.30); border-radius: var(--radius); background: linear-gradient(180deg, rgba(35, 38, 37, 0.96), rgba(22, 24, 25, 0.98)); box-shadow: inset 4px 0 0 rgba(185, 227, 75, 0.72); }
+.topics-industry-view .industry-config { margin-top: 0; border-color: rgba(185, 227, 75, 0.42); background: linear-gradient(180deg, rgba(37, 40, 41, 0.98), rgba(29, 32, 33, 0.99)); box-shadow: inset 0 3px 0 rgba(185, 227, 75, 0.78); }
+.topics-industry-view .industry-primary-controls > label, .topics-industry-view .industry-schedule { border-color: rgba(185, 227, 75, 0.24); background: rgba(27, 30, 30, 0.90); }
+.topics-industry-view textarea, .topics-industry-view select { border-color: rgba(185, 227, 75, 0.30); background: rgba(18, 20, 20, 0.94); }
+.topics-industry-view textarea:focus, .topics-industry-view select:focus { border-color: rgba(185, 227, 75, 0.82); box-shadow: 0 0 0 3px rgba(185, 227, 75, 0.12); }
+.topics-industry-view .industry-config .primary { color: #172009; background: linear-gradient(180deg, #c9ef65, #abd53d); border-color: rgba(185, 227, 75, 0.82); }
+.topics-industry-view .source-badge-zenml { color: #dfff8e; background: rgba(185, 227, 75, 0.12); border-color: rgba(185, 227, 75, 0.62); }
+.topics-industry-view .industry-status-enabled { color: #dfff8e; background: rgba(185, 227, 75, 0.11); border-color: rgba(185, 227, 75, 0.52); }
+.topics-industry-view .industry-toggle-control input { accent-color: #b9e34b; }
+.topics-industry-view .industry-filter-details > summary { color: #d8f687; }
+@media (max-width: 980px) {
+  .academic-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .academic-source-grid { grid-template-columns: 1fr; }
+  .academic-section-head { display: grid; }
+  .academic-schedule-actions { width: 100%; }
+  .academic-schedule-actions > * { flex: 1; }
+  .academic-agent-workspace .topic-agent-form { grid-template-columns: 1fr; }
+  .academic-agent-workspace .topic-agent-form > button, .academic-agent-workspace .source-checks { grid-column: 1; grid-row: auto; }
+  .topics-main-tabs { width: 100%; }
+  .topics-main-tab { flex: 1; min-width: 0; }
+}
+
 .topic-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0; }
 .topic-tab { text-decoration: none; }
 .topic-sections { display: grid; gap: 10px; }
@@ -3369,6 +3597,33 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-source-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 6px; }
 .topic-source-head h2 { margin: 0; }
 .topic-source-head > span, .topic-source > p, .topic-note-text { color: #57606a; font-size: 12px; }
+.industry-config { padding: 16px; }
+.industry-config .topic-source-head { align-items: flex-start; margin-bottom: 14px; }
+.industry-config .topic-source-head h2 { display: flex; align-items: center; gap: 7px; }
+.industry-config .topic-source-head p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.industry-status { flex: 0 0 auto; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 700; }
+.industry-status-enabled { color: #9ff3cf; background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.48); }
+.industry-status-disabled { color: var(--muted); background: rgba(148, 163, 184, 0.06); border: 1px solid var(--border); }
+.industry-config-form { display: grid; gap: 12px; }
+.industry-primary-controls { display: grid; grid-template-columns: minmax(210px, 1fr) minmax(170px, .7fr) minmax(220px, 1fr); gap: 10px; }
+.industry-primary-controls > label, .industry-schedule { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(21, 31, 45, 0.72); padding: 10px 12px; }
+.industry-toggle { display: flex; flex-direction: column; justify-content: space-between; gap: 9px; }
+.industry-toggle-control { display: flex; gap: 7px; align-items: center; color: var(--text); font-weight: 600; }
+.industry-toggle-control input { accent-color: var(--accent); }
+.industry-limit select { margin-top: 7px; }
+.industry-schedule { display: flex; flex-direction: column; gap: 7px; }
+.industry-schedule span { color: var(--muted); font-size: 12px; font-weight: 600; }
+.industry-schedule strong { color: var(--muted-strong); font-size: 13px; }
+.industry-filter-details { border-top: 1px solid var(--border); padding-top: 10px; }
+.industry-filter-details > summary { cursor: pointer; color: var(--muted-strong); font-weight: 650; list-style-position: outside; margin-left: 16px; }
+.industry-filter-details > summary:hover { color: var(--text); }
+.industry-filter-details > summary span { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.industry-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.industry-filter-grid label { min-width: 0; }
+.industry-filter-grid small { display: block; min-height: 30px; margin: 3px 0 6px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+.industry-filter-grid textarea { min-height: 128px; resize: vertical; }
+.industry-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.industry-actions { display: flex; justify-content: flex-end; }
 .topic-columns { display: grid; grid-template-columns: minmax(180px, 0.38fr) minmax(0, 1fr); gap: 12px; margin-top: 8px; }
 .topic-list { margin: 0; padding-left: 22px; columns: 2; column-gap: 28px; }
 .active-topic-list { columns: 1; }
@@ -3392,6 +3647,11 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-form-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .topic-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 10px; margin: 0; padding: 0 10px 8px; color: #57606a; font-size: 12px; }
 .topic-toolbar label { max-width: 240px; width: 100%; }
+@media (max-width: 820px) {
+  .industry-primary-controls, .industry-filter-grid { grid-template-columns: 1fr; }
+  .industry-filter-grid small { min-height: 0; }
+  .industry-filter-details > summary span { display: block; margin: 3px 0 0; }
+}
 .topic-toolbar input { min-height: 28px; }
 .topic-table { display: grid; border-top: 1px solid #d8dee4; background: #ffffff; }
 .topic-table-head, .topic-row { display: grid; grid-template-columns: minmax(150px, 0.9fr) minmax(260px, 1.6fr) minmax(140px, 0.7fr) 70px 70px 62px 42px; gap: 8px; align-items: center; }
@@ -3444,6 +3704,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .source-badge-openalex { color: #7dd3fc; background: rgba(14, 165, 233, 0.14); border-color: rgba(56, 189, 248, 0.58); }
   .source-badge-semantic-scholar { color: #d8b4fe; background: rgba(126, 34, 206, 0.16); border-color: rgba(168, 85, 247, 0.58); }
   .source-badge-core { color: #86efac; background: rgba(34, 197, 94, 0.13); border-color: rgba(74, 222, 128, 0.58); }
+  .source-badge-zenml { color: #67e8f9; background: rgba(6, 182, 212, 0.13); border-color: rgba(34, 211, 238, 0.58); }
   .source-badge-unknown { color: var(--muted); background: rgba(148, 163, 184, 0.07); border-color: var(--border); }
   .chart-axis { stroke: #8b949e; }
   .chart-grid { stroke: #30363d; opacity: 1; }

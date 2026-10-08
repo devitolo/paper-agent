@@ -97,6 +97,17 @@ class CuratorV3EvidenceCallTests(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
         self.assertTrue(result["error"])
 
+    def test_malformed_response_gets_one_bounded_correction(self):
+        with patch(
+            "paper_agents.curator_evidence.call_ollama",
+            side_effect=[{"response": '{"research_type":"empirical"'},
+                         {"response": json.dumps(assessment())}],
+        ) as call:
+            result = assess_evidence({"title": "Test", "abstract": "Some abstract"}, timeout=45)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(call.call_count, 2)
+        self.assertLessEqual(call.call_args_list[1].args[3], 45)
+
     def test_invalid_model_envelopes_and_empty_schemas_are_unavailable(self):
         for response in (None, [], {"response": "{}"}, {"response": "[]"}):
             with self.subTest(response=response), patch(

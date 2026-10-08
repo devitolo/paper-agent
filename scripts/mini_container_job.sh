@@ -2,8 +2,8 @@
 # Host cron retains scheduling; execute the existing wrapper inside the running app.
 set -euo pipefail
 case "${1:-}" in
-  arxiv|openalex|semantic|core|profile|backup) ;;
-  *) echo 'Expected arxiv, openalex, semantic, core, profile, or backup' >&2; exit 64 ;;
+  arxiv|openalex|semantic|core|zenml|profile|backup) ;;
+  *) echo 'Expected arxiv, openalex, semantic, core, zenml, profile, or backup' >&2; exit 64 ;;
 esac
 if [[ $# -ne 1 ]]; then echo 'Exactly one job name required' >&2; exit 64; fi
 : "${PAPER_MIGRATION_ENV_FILE:?Set absolute private migration env-file path}"

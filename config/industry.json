@@ -1,0 +1,23 @@
+{
+  "enabled": true,
+  "include_signals": [
+    "internal assistant",
+    "knowledge access",
+    "shared ai platform",
+    "employee-built",
+    "code review",
+    "testing",
+    "migration",
+    "maintenance",
+    "developer workflow",
+    "agent workflow"
+  ],
+  "exclude_signals": [
+    "promotional announcement",
+    "generic tutorial",
+    "root cause",
+    "log analysis"
+  ],
+  "max_items_per_run": 5,
+  "schedule": "Sunday 11:30 PM America/Los_Angeles"
+}

@@ -109,9 +109,13 @@ def select_topics_for_source(
     if not candidates:
         return []
 
-    high_water = min(PRIORITY_RANK.get(topic.priority, 9) for topic in candidates)
-    priority_pool = [topic for topic in candidates if PRIORITY_RANK.get(topic.priority, 9) == high_water]
-    selected = _select_rotating_batch(priority_pool, current, count=count, slot=slot)
+    selected: list[TopicEntry] = []
+    for rank in sorted({PRIORITY_RANK.get(topic.priority, 9) for topic in candidates}):
+        remaining = max(0, count - len(selected))
+        if not remaining:
+            break
+        priority_pool = [topic for topic in candidates if PRIORITY_RANK.get(topic.priority, 9) == rank]
+        selected.extend(_select_rotating_batch(priority_pool, current, count=remaining, slot=slot))
     return [topic.query for topic in selected]
 
 

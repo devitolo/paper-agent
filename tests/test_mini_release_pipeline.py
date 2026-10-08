@@ -71,10 +71,13 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("PAPER_AGENT_CURATOR_MODEL: ${PAPER_AGENT_CURATOR_MODEL:-qwen3:4b}", compose)
         self.assertIn('> "$RELEASE_DIR/minilm-check.json"', update)
         self.assertIn("MiniLM Curator interest-fit verification failed", update)
-        self.assertIn('Qwen3 Curator check: \\`skipped during deploy\\`', update)
-        self.assertNotIn('> "$RELEASE_DIR/qwen3-curator-check.json"', update)
-        self.assertNotIn("Qwen3 Curator verification failed", update)
-        self.assertNotIn("timeout=240", update)
+        self.assertIn('DEPLOY_CHECK=${PAPER_DEPLOY_CHECK:-light}', update)
+        self.assertIn('if [[ "$DEPLOY_CHECK" == full ]]', update)
+        self.assertIn('> "$RELEASE_DIR/qwen3-curator-check.json"', update)
+        self.assertIn("Qwen3 Curator verification failed", update)
+        self.assertIn("timeout=240", update)
+        self.assertIn('--keep "${PAPER_ZENML_PILOT_KEEP:-5}" --dry-run', update)
+        self.assertIn('echo "- ZenML deploy check:', update)
 
     def test_mini_compose_uses_short_stop_grace_after_job_drain(self):
         compose = (ROOT / "docker-compose.mini-migration.yml").read_text(encoding="utf-8")
@@ -95,12 +98,16 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("scripts/mini_container_job.sh openalex", template)
         self.assertIn("scripts/mini_container_job.sh arxiv", template)
         self.assertIn("scripts/mini_container_job.sh semantic", template)
+        self.assertIn("30 23 * * 0", template)
+        self.assertIn("scripts/mini_container_job.sh zenml", template)
         self.assertIn("scripts/mini_container_job.sh backup", template)
         self.assertNotIn(".venv", template)
         self.assertNotIn("paper_agents.cli pipeline-daily", template)
         self.assertNotIn("scripts/openalex_pipeline.sh", template)
         self.assertNotIn("scripts/nightly_pipeline.sh", template)
         self.assertNotIn("scripts/semantic_scholar_pipeline.sh", template)
+        update = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn("verification_zenml_cron", update)
 
     def test_release_scripts_are_shell_syntax_valid(self):
         for name in (
@@ -154,6 +161,18 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('--volumes-from paper-mini-production-app-1 --user 10001:10001', script)
         self.assertIn('scripts/backup_db.sh /app/data/paper_agent.db /backups', script)
         self.assertNotIn('\u201d', script)
+
+    def test_production_update_preflights_persisted_state_before_app_replacement(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        preflight = script.index('phase_start "preflight persisted state"')
+        stop = script.index('phase_start "stop app"')
+        recreate = script.index('phase_start "recreate app"')
+        self.assertLess(preflight, stop)
+        self.assertLess(preflight, recreate)
+        self.assertIn('--volumes-from paper-mini-production-app-1', script)
+        self.assertIn('-m paper_agents.package_runtime check-state', script)
+        self.assertIn('persisted-state-preflight.json', script)
+        self.assertIn('persisted-state-preflight.log', script)
 
     def test_production_update_can_persist_openalex_cursor_flag(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
@@ -213,9 +232,10 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('Image size: \\`', script)
         self.assertIn('Image layers: \\`', script)
         self.assertIn('Layer diff: \\`', script)
-        self.assertNotIn('qwen3-curator-check.json', script)
-        self.assertNotIn('assess_evidence(candidate', script)
-        self.assertNotIn('timeout=240', script)
+        self.assertIn('if [[ "$DEPLOY_CHECK" == full ]]', script)
+        self.assertIn('qwen3-curator-check.json', script)
+        self.assertIn('assess_evidence(candidate', script)
+        self.assertIn('timeout=240', script)
 
     def test_runbook_documents_no_git_pull_production_deployment(self):
         runbook = (ROOT / "docs/mini-release-runbook.md").read_text(encoding="utf-8")

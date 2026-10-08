@@ -98,6 +98,19 @@ class DegradedArxivSource(RecordingSource):
         return result
 
 
+class ExhaustedArxivSource(RecordingSource):
+    name = "arxiv"
+
+    def __init__(self):
+        super().__init__([])
+        self.last_diagnostics = {}
+
+    def fetch(self, topics, max_results, freshness_months):
+        result = super().fetch(topics, max_results, freshness_months)
+        self.last_diagnostics = {"stop_reason": "traversals_exhausted_until_refresh"}
+        return result
+
+
 class FakeHttpResponse:
     def __init__(self, payload):
         self.payload = payload
@@ -256,6 +269,25 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(len(pm_topics), 2)
         self.assertFalse(set(am_topics) & set(pm_topics))
         self.assertEqual(set(am_topics) | set(pm_topics), {"query 0", "query 1", "query 2", "query 3"})
+
+    def test_source_topic_selection_fills_after_scarce_high_priority_topic(self):
+        config_path = Path(self.tmp.name) / "topics.yaml"
+        save_topic_config(
+            [
+                TopicEntry("high", "High", "high query", ["arxiv"], "daily", "high", True),
+                TopicEntry("normal-a", "Normal A", "normal query a", ["arxiv"], "daily", "normal", True),
+                TopicEntry("normal-b", "Normal B", "normal query b", ["arxiv"], "daily", "normal", True),
+            ],
+            config_path,
+        )
+
+        selected = select_topics_for_source(
+            "arxiv", today=date(2026, 1, 2), path=config_path, count=2, slot=0,
+        )
+
+        self.assertEqual(selected[0], "high query")
+        self.assertEqual(len(selected), 2)
+        self.assertIn(selected[1], {"normal query a", "normal query b"})
 
     def test_source_topic_selection_does_not_repeat_scarce_am_topics_in_pm(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -1233,6 +1265,28 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(len(result["scout_results"]), 1)
         self.assertFalse(result["curator"]["requested_rescout"])
         self.assertIn("reduced-coverage", result["curator"]["rescout_reason"])
+
+    def test_pipeline_stops_after_one_attempt_when_arxiv_traversals_are_exhausted(self):
+        db_path = Path(self.tmp.name) / "pipeline_exhausted.db"
+        db.init_db(db_path)
+        source = ExhaustedArxivSource()
+
+        with (
+            patch("paper_agents.pipeline.create_scout_source", return_value=source),
+            patch("paper_agents.pipeline.load_profile", return_value={
+                "interests": ["AIOps"], "positive_signals": [], "negative_signals": []
+            }),
+        ):
+            result = run_daily_pipeline(
+                topics=["AIOps"], fetch_limit=2, keep_limit=3,
+                max_scout_attempts=3, min_quality_score=100,
+                db_path=db_path, mode="test", source_name="arxiv",
+            )
+
+        self.assertEqual(source.max_results_calls, [2])
+        self.assertEqual(len(result["scout_results"]), 1)
+        self.assertFalse(result["curator"]["requested_rescout"])
+        self.assertIn("exhausted until refresh", result["curator"]["rescout_reason"])
 
     def test_pipeline_does_not_hold_write_lock_during_source_fetch(self):
         db_path = Path(self.tmp.name) / "pipeline_concurrency.db"
@@ -2514,7 +2568,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(web.source_badge_class("openalex"), "source-badge-openalex")
         self.assertEqual(web.source_badge_class("semantic_scholar"), "source-badge-semantic-scholar")
         self.assertEqual(web.source_badge_class("core"), "source-badge-core")
+        self.assertEqual(web.source_badge_class("zenml"), "source-badge-zenml")
         self.assertEqual(web.source_display_name("core"), "CORE")
+        self.assertEqual(web.source_display_name("zenml"), "ZenML")
         self.assertEqual(web.source_badge_class("custom_source"), "source-badge-unknown")
 
     def test_review_queue_filters_by_source_and_shows_multi_source_label(self):
@@ -2878,21 +2934,31 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page(config_path=config_path)
 
         self.assertIn("Topic Agent", html)
-        self.assertIn('name="request_text"', html)
-        self.assertIn("Ask TopicAgent", html)
+        self.assertIn('href="/topics?mode=agent&amp;source=all"', html)
+        self.assertNotIn('name="request_text"', html)
         self.assertNotIn("<summary>Advanced</summary>", html)
         self.assertIn('href="/topics?edit=datalake-operations"', html)
         self.assertIn('class="topic-row topic-read-row"', html)
-        self.assertIn('class="topic-source topic-list-details"', html)
-        self.assertIn("1 configured | expand to search, toggle, or edit", html)
+        self.assertIn('class="academic-workspace"', html)
+        self.assertIn("1 shown", html)
+        self.assertIn('id="topic-visible-count"', html)
+        self.assertIn('row.toggleAttribute("hidden", !matches)', html)
+        self.assertIn('visibleCount.textContent = `${shown} shown`', html)
         self.assertIn('title="datalake operations reliability observability production engineering"', html)
         self.assertNotIn('class="topic-source topic-editor-panel"', html)
         self.assertNotIn("Topic changes apply to future scheduled runs.", html)
         self.assertNotIn('class="topic-note"', html)
         self.assertIn("Datalake operations", html)
-        self.assertLess(html.index("Source schedule inventory"), html.index("All Topics"))
-        self.assertIn('class="topic-inventory-details" open', html)
+        self.assertLess(html.index("Source schedule inventory"), html.index("Datalake operations"))
+        self.assertIn('class="academic-source-grid"', html)
         self.assertIn('<a class="brand-home" href="/">', html)
+
+        agent_html = web.render_topics_page(config_path=config_path, topic_mode="agent")
+        self.assertIn('name="request_text"', agent_html)
+        self.assertIn("Ask Topic Agent", agent_html)
+        self.assertIn("Propose topic changes", agent_html)
+        self.assertIn("All topics", agent_html)
+        self.assertIn("All academic sources topics", agent_html)
 
         saved_html = web.render_topics_page(config_path=config_path, saved=True)
         self.assertIn("Saved. Changes apply to future scheduled runs.", saved_html)
@@ -2910,10 +2976,10 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page(config_path=config_path, edit_id="datalake-operations")
 
         self.assertIn('class="topic-source topic-editor-panel"', html)
-        self.assertIn('class="topic-source topic-list-details" open', html)
+        self.assertIn('class="academic-topics-panel"', html)
         self.assertIn('<input type="hidden" name="topic_id" value="datalake-operations">', html)
         self.assertIn('href="/topics">Cancel</a>', html)
-        self.assertIn('href="/topics?edit=incident-response"', html)
+        self.assertNotIn('href="/topics?edit=incident-response"', html)
 
     def test_topics_post_adds_fast_path_topic(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -3246,24 +3312,25 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("What do you want Project Paper to scout?", html)
         self.assertIn("TopicAgent Proposal", html)
+        self.assertIn('class="academic-schedule academic-agent-workspace"', html)
         self.assertIn("Datalake reliability", html)
         self.assertIn('name="proposal_json"', html)
         self.assertIn("Apply and save", html)
         self.assertNotIn('name="topic_text"', html)
         self.assertLess(html.index("What do you want Project Paper to scout?"), html.index("TopicAgent Proposal"))
-        self.assertLess(html.index("TopicAgent Proposal"), html.index("Source schedule inventory"))
+        self.assertLess(html.index("Topic Agent"), html.index("TopicAgent Proposal"))
         self.assertNotIn('class="topic-source topic-proposal-panel"', html)
         self.assertIn('name="conversation_json"', html)
         self.assertIn("New pending", html)
-        self.assertIn("showing pending TopicAgent preview", html)
         self.assertIn('class="topic-row topic-read-row topic-preview-row"', html)
 
     def test_topic_agent_form_allows_explicit_source_selection(self):
-        html = web.render_topics_page()
+        html = web.render_topics_page(topic_mode="agent")
 
         self.assertIn('name="sources" value="arxiv" checked', html)
         self.assertIn('name="sources" value="semantic_scholar" checked', html)
         self.assertIn('name="sources" value="openalex" checked', html)
+        self.assertIn('<input type="checkbox" checked disabled> CORE <span>read-only</span>', html)
 
     def test_topic_agent_form_overrides_proposal_sources(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -3312,7 +3379,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Update pending", html)
         self.assertIn("Apply to save", html)
         self.assertIn('<span class="topic-status status-disabled">Off</span>', html)
-        self.assertIn('class="topic-source topic-list-details" open', html)
+        self.assertIn('class="academic-topics-panel"', html)
 
     def test_topics_page_previews_remove_proposal_in_topic_list(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -4040,9 +4107,10 @@ class BackendV2Tests(unittest.TestCase):
     def test_topics_page_renders_source_topic_inventory(self):
         html = web.render_topics_page()
 
-        self.assertIn("Project Paper Scout Topics", html)
-        self.assertIn("Next scheduled topics (", html)
-        self.assertIn("Configured topics (", html)
+        self.assertIn("Project Paper Topics", html)
+        self.assertIn('class="topics-main-tab topics-main-tab-academic current" href="/topics?section=academic"', html)
+        self.assertIn('class="academic-source-grid"', html)
+        self.assertIn('class="academic-workspace"', html)
         self.assertNotIn("Topic changes apply to future scheduled runs.", html)
         self.assertIn("Source schedule inventory", html)
         self.assertIn("Topic Agent", html)
@@ -4052,16 +4120,28 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Rotating source job", html)
         self.assertIn("Source cron/manual job", html)
         self.assertIn("AIOps", html)
-        self.assertIn("AIOps observability incident response", html)
-        self.assertIn("AIOps root cause analysis", html)
+        openalex_html = web.render_topics_page(selected_source="openalex")
+        semantic_html = web.render_topics_page(selected_source="semantic_scholar")
+        self.assertIn("AIOps observability incident response", openalex_html)
+        self.assertIn("AIOps root cause analysis", semantic_html)
+        core_html = web.render_topics_page(selected_source="core")
+        self.assertIn("CORE operations and reliability", core_html)
+        self.assertIn("PAPER_AGENT_CORE_TOPIC_1", core_html)
+        self.assertIn("CORE queries are configured through environment variables", core_html)
+        self.assertIn("Environment", core_html)
+        agent_html = web.render_topics_page(topic_mode="agent")
+        self.assertIn("Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar", agent_html)
 
-    def test_topic_inventory_exposes_three_sources(self):
+    def test_topic_inventory_exposes_four_sources(self):
         inventory = scout_topic_inventory()
 
-        self.assertEqual([item["source"] for item in inventory], ["arxiv", "openalex", "semantic_scholar"])
+        self.assertEqual([item["source"] for item in inventory], ["arxiv", "openalex", "semantic_scholar", "core"])
         openalex = next(item for item in inventory if item["source"] == "openalex")
         self.assertEqual([topic.query for topic in openalex["topics"]], OPENALEX_ROTATING_TOPICS)
         self.assertIn(openalex["active_topics"][0], OPENALEX_ROTATING_TOPICS)
+        core = next(item for item in inventory if item["source"] == "core")
+        self.assertEqual(len(core["topics"]), 3)
+        self.assertEqual(core["active_topics"], [topic.query for topic in core["topics"]])
 
     def _seed_review_recommendation(self, *, source_id: str = "2607.reviewv1") -> tuple[int, int]:
         paper_id, _ = db.upsert_paper(

@@ -22,6 +22,7 @@ class OperatorRuntimeHardeningTests(unittest.TestCase):
             "nightly_pipeline.sh": "project-paper-arxiv.lock",
             "openalex_pipeline.sh": "project-paper-openalex.lock",
             "semantic_scholar_pipeline.sh": "project-paper-semantic-scholar.lock",
+            "zenml_pipeline.sh": "project-paper-zenml.lock",
             "backup_db.sh": "project-paper-backup.lock",
             "biweekly_profile_rebuild_compare.sh": "project-paper-profile-rebuild.lock",
         }

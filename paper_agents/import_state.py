@@ -214,6 +214,40 @@ def logical_rows(connection):
     return result
 
 
+def validate_artifact_paths(root, connection, *, files=None):
+    """Validate persisted artifact references against the packaged data layout."""
+    root = Path(root).absolute()
+    data_root = root / 'data'
+    require(data_root.is_dir() and not data_root.is_symlink(), 'Required real state directory missing')
+    count = 0
+    for (stored,) in connection.execute('SELECT path FROM artifacts'):
+        require(isinstance(stored, str) and stored, 'Artifact path requires a separately reviewed mapping')
+        path = Path(stored)
+        require(not path.is_absolute() and '..' not in path.parts and path.parts and path.parts[0] == 'data',
+                'Artifact path requires a separately reviewed mapping')
+        if files is None:
+            target = root / path
+            current = root
+            for part in path.parts:
+                current /= part
+                require(not current.is_symlink(), 'Imported state must not contain symlinks')
+            require(target.is_file(), 'Referenced artifact missing from imported state')
+        else:
+            require(path.as_posix() in files, 'Referenced artifact missing from imported state')
+        count += 1
+    return count
+
+
+def validate_live_artifact_paths(root):
+    """Read-only preflight for mutable packaged state before container replacement."""
+    root = Path(root).absolute()
+    connection = sqlite3.connect(f"file:{(root/'data/paper_agent.db').resolve()}?mode=ro", uri=True, timeout=5)
+    try:
+        return validate_artifact_paths(root, connection)
+    finally:
+        connection.close()
+
+
 def inspect(root, *, staging=None):
     root = Path(root).absolute()
     for directory in ('data', 'config'):
@@ -246,11 +280,7 @@ def inspect(root, *, staging=None):
         require(not connection.execute('PRAGMA foreign_key_check').fetchall(), 'Imported foreign keys invalid')
         actual_schema = schema(connection)
         require(actual_schema in expected_schemas, 'Imported schema incompatible; no schema deltas approved')
-        for (stored,) in connection.execute('SELECT path FROM artifacts'):
-            path = Path(stored)
-            require(not path.is_absolute() and '..' not in path.parts and path.parts and path.parts[0] == 'data',
-                    'Artifact path requires a separately reviewed mapping')
-            require(path.as_posix() in files, 'Referenced artifact missing from imported state')
+        validate_artifact_paths(root, connection, files=files)
         tables = logical_rows(connection)
     finally:
         connection.close()

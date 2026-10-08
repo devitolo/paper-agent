@@ -13,6 +13,7 @@ from . import job_events
 SCRIPTS = {'arxiv':'nightly_pipeline.sh', 'openalex':'openalex_pipeline.sh',
            'semantic':'semantic_scholar_pipeline.sh',
            'core':'core_pipeline.sh',
+           'zenml':'zenml_pipeline.sh',
            'profile':'biweekly_profile_rebuild_compare.sh', 'backup':'backup_db.sh'}
 
 
