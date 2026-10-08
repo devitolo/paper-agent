@@ -1373,7 +1373,7 @@ def render_topics_page(
           <section class="academic-topics-panel">
             <div class="academic-section-head">
               <div><h2>{escape(source_label)} topics</h2><p>{escape(topic_note)}</p></div>
-              <span>{topic_count} shown</span>
+              <span id="topic-visible-count">{topic_count} shown</span>
             </div>
             {editor_panel}
             <div class="topic-toolbar">
@@ -1408,11 +1408,17 @@ def render_topics_page(
     <script>
       const topicSearch = document.getElementById("topic-search");
       if (topicSearch) {{
+        const topicRows = Array.from(document.querySelectorAll(".academic-topic-scroll .topic-row"));
+        const visibleCount = document.getElementById("topic-visible-count");
         topicSearch.addEventListener("input", () => {{
           const needle = topicSearch.value.trim().toLowerCase();
-          document.querySelectorAll(".topic-row").forEach((row) => {{
-            row.hidden = needle && !row.dataset.topicText.includes(needle);
+          let shown = 0;
+          topicRows.forEach((row) => {{
+            const matches = !needle || (row.dataset.topicText || "").includes(needle);
+            row.toggleAttribute("hidden", !matches);
+            if (matches) shown += 1;
           }});
+          if (visibleCount) visibleCount.textContent = `${{shown}} shown`;
         }});
       }}
       document.querySelectorAll(".topic-agent-form").forEach((form) => {{
@@ -3540,6 +3546,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .academic-topics-panel { min-width: 0; padding: 12px; }
 .academic-topic-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .academic-topic-scroll .topic-table { min-width: 820px; }
+.academic-topic-scroll .topic-row[hidden] { display: none !important; }
 .academic-topic-empty { border: 0; border-radius: 0; box-shadow: none; }
 .academic-agent-workspace > .topic-source { border: 0; padding: 0; background: transparent; }
 .academic-agent-workspace > .topic-source > .topic-source-head { display: none; }
