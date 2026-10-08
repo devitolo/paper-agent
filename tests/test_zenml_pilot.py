@@ -164,8 +164,9 @@ class ZenMLPilotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             industry = Path(temp) / "industry.json"
             save_zenml_config(ZenMLConfig(max_items_per_run=4), industry)
-            html = render_topics_page(industry_config_path=industry)
+            html = render_topics_page(section="industry", industry_config_path=industry)
             self.assertIn("Industry", html)
+            self.assertIn('class="topics-main-tab current" href="/topics?section=industry"', html)
             self.assertIn("does not run the academic MiniLM", html)
             self.assertIn('name="max_items_per_run"', html)
             self.assertIn('value="4"', html)

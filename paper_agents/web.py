@@ -198,6 +198,8 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         duplicate=params.get("duplicate", [None])[0] == "1",
                         error=params.get("error", [None])[0],
                         edit_id=params.get("edit", [None])[0],
+                        section=params.get("section", ["academic"])[0],
+                        selected_source=params.get("source", ["arxiv"])[0],
                     )
                 )
                 return
@@ -254,7 +256,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         apply_topic_proposal_form(form)
                     else:
                         save_topics_form(form)
-                    redirect_to = "/topics?saved=1"
+                    redirect_to = "/topics?section=industry&saved=1" if action == "update_industry" else "/topics?saved=1"
                 except DuplicateTopicError as error:
                     redirect_to = (
                         "/topics?"
@@ -1290,18 +1292,17 @@ def render_topics_page(
     conversation: list[dict[str, str]] | None = None,
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
     industry_config_path: Path = DEFAULT_INDUSTRY_CONFIG_PATH,
+    section: str = "academic",
+    selected_source: str = "arxiv",
 ) -> str:
     inventory = scout_topic_inventory(config_path=config_path)
+    academic_inventory = [item for item in inventory if item["source"] != "zenml"]
+    academic_sources = [item["source"] for item in academic_inventory]
+    section = section if section in {"academic", "industry"} else "academic"
+    selected_source = selected_source if selected_source in {*academic_sources, "all"} else "arxiv"
     topics = load_topic_config_or_seed(config_path)
-    tabs = "".join(
-        f'<a class="topic-tab source-badge {source_badge_class(item["source"])}" href="#{escape(item["source"])}">{escape(item["label"])}</a>'
-        for item in inventory
-    )
-    sections = "".join(render_topic_source_section(item) for item in inventory)
-    topic_rows = render_topic_rows(topics, proposal)
     edit_topic = next((topic for topic in topics if topic.id == edit_id), None)
     editor_panel = render_topic_editor_panel(edit_topic) if edit_topic else ""
-    all_topics_open = " open" if edit_topic or pending_topic_preview(proposal) else ""
     total_topics = len(topics)
     industry_config = load_zenml_config(industry_config_path)
     banner = ""
@@ -1311,43 +1312,74 @@ def render_topics_page(
         banner = f'<div class="banner">Topic already exists. Editing existing topic: {escape(edit_topic.label)}.</div>'
     if error:
         banner = f'<div class="banner warning">Topic config was not saved: {escape(error)}</div>'
-    controls = ""
+
+    main_tabs = (
+        f'<a class="topics-main-tab{" current" if section == "academic" else ""}" href="/topics?section=academic">Academic</a>'
+        f'<a class="topics-main-tab{" current" if section == "industry" else ""}" href="/topics?section=industry">Industry</a>'
+    )
+    if section == "industry":
+        body = f'<div class="topics-industry-view">{render_industry_config_section(industry_config)}</div>'
+    else:
+        cards = "".join(render_academic_source_card(item, selected_source) for item in academic_inventory)
+        source_item = next((item for item in academic_inventory if item["source"] == selected_source), None)
+        if selected_source == "core" and source_item is not None:
+            rows = "".join(render_readonly_topic_row(topic) for topic in source_item["topics"])
+            topic_count = len(source_item["topics"])
+            topic_note = (
+                "CORE queries are configured through environment variables and are read-only here. "
+                + source_item["notes"]
+            )
+        else:
+            visible_topics = topics if selected_source == "all" else [topic for topic in topics if selected_source in topic.sources]
+            rows = render_topic_rows(visible_topics, proposal)
+            topic_count = len(visible_topics)
+            topic_note = "Edit, enable, or disable topics for future academic runs."
+        source_label = "All academic sources" if selected_source == "all" else source_display_name(selected_source)
+        all_link = f'<a class="academic-source-card academic-source-all{" selected" if selected_source == "all" else ""}" href="/topics?source=all"><strong>All topics</strong><span>{total_topics} configured</span></a>'
+        body = f"""<section class="academic-schedule" aria-labelledby="academic-schedule-title">
+          <div class="academic-section-head">
+            <div><h2 id="academic-schedule-title">Source schedule inventory</h2><p>Choose a source to compare its next searches with its configured topics.</p></div>
+            {all_link}
+          </div>
+          <div class="academic-source-grid">{cards}</div>
+        </section>
+        <div class="academic-workspace">
+          <section class="academic-topics-panel">
+            <div class="academic-section-head">
+              <div><h2>{escape(source_label)} topics</h2><p>{escape(topic_note)}</p></div>
+              <span>{topic_count} shown</span>
+            </div>
+            {editor_panel}
+            <div class="topic-toolbar">
+              <label>Search<input id="topic-search" type="search" placeholder="Filter topics"></label>
+              <span>Topics</span>
+            </div>
+            <div class="academic-topic-scroll">
+              <div class="topic-table">
+                <div class="topic-table-head">
+                  <span>Label</span><span>Query</span><span>Sources</span><span>Cadence</span><span>Priority</span><span>Enabled</span><span>Actions</span>
+                </div>
+                {rows or '<div class="empty academic-topic-empty">No topics configured for this source.</div>'}
+              </div>
+            </div>
+          </section>
+          <aside class="academic-agent-panel">{render_topic_agent_panel(request_text, proposal, conversation or [])}</aside>
+        </div>"""
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Project Paper Scout Topics</title>
+  <title>Project Paper Topics</title>
   <style>{page_css()}</style>
 </head>
 <body>
   <main>
-    {render_app_header("Topics", f"{len(inventory)} sources | {total_topics} configured topics | editable file-backed config", controls, "topics")}
+    {render_app_header("Topics", "Manage discovery sources and academic search topics", "", "topics")}
     {banner}
-    {render_topic_agent_panel(request_text, proposal, conversation or [])}
-    {editor_panel}
-    {render_industry_config_section(industry_config)}
-    <details class="topic-inventory-details" open>
-      <summary>Source schedule inventory</summary>
-      <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
-      <div class="topic-sections">{sections}</div>
-    </details>
-    <details class="topic-source topic-list-details"{all_topics_open}>
-      <summary>
-        <span>All Topics</span>
-        <small>{topic_list_summary(total_topics, proposal)}</small>
-      </summary>
-      <div class="topic-toolbar">
-        <label>Search<input id="topic-search" type="search" placeholder="Filter topics"></label>
-        <span>Edit opens a focused panel; toggles affect future runs only.</span>
-      </div>
-      <div class="topic-table">
-        <div class="topic-table-head">
-          <span>Label</span><span>Query</span><span>Sources</span><span>Cadence</span><span>Priority</span><span>Enabled</span><span>Actions</span>
-        </div>
-        {topic_rows}
-      </div>
-    </details>
+    <nav class="topics-main-tabs" aria-label="Topic source type">{main_tabs}</nav>
+    {body}
     <script>
       const topicSearch = document.getElementById("topic-search");
       if (topicSearch) {{
@@ -1362,24 +1394,49 @@ def render_topics_page(
         form.addEventListener("submit", (event) => {{
           const button = event.submitter || form.querySelector("button[type='submit']");
           const status = form.querySelector(".topic-agent-status");
-          if (button) {{
-            button.disabled = true;
-            button.textContent = "Asking...";
-          }}
-          if (status) {{
-            status.textContent = "Asking local Qwen. If it is slow, Project Paper will fall back to a deterministic proposal.";
-          }}
-          setTimeout(() => {{
-            if (status) {{
-              status.textContent = "Still waiting on local Qwen. This request should fall back soon.";
-            }}
-          }}, 12000);
+          if (button) {{ button.disabled = true; button.textContent = "Asking..."; }}
+          if (status) {{ status.textContent = "Asking local Qwen. If it is slow, Project Paper will fall back to a deterministic proposal."; }}
         }});
       }});
     </script>
   </main>
 </body>
 </html>"""
+
+
+def render_academic_source_card(item: dict[str, Any], selected_source: str) -> str:
+    source = item["source"]
+    selected = " selected" if source == selected_source else ""
+    active = item["active_topics"][:2]
+    next_topics = "".join(f"<li>{escape(topic)}</li>" for topic in active) or "<li>No query scheduled.</li>"
+    enabled_count = sum(topic.enabled for topic in item["topics"])
+    schedule = item["schedule"]
+    if item.get("next_run_date"):
+        schedule += f' · next {item["next_run_date"]}'
+    return f"""<a class="academic-source-card{selected}" href="/topics?source={escape(source)}">
+      <div class="academic-source-card-head">
+        <span class="source-badge {source_badge_class(source)}">{escape(item["label"])}</span>
+        <span>{enabled_count} enabled</span>
+      </div>
+      <strong>{escape(schedule)}</strong>
+      <ol>{next_topics}</ol>
+    </a>"""
+
+
+def render_readonly_topic_row(topic: TopicEntry) -> str:
+    sources = ''.join(
+        f'<span class="source-badge {source_badge_class(source)}">{escape(source_display_name(source))}</span>'
+        for source in topic.sources
+    )
+    return f"""<div class="topic-row topic-read-row" data-topic-text="{escape((topic.label + ' ' + topic.query).lower())}">
+      <div class="topic-cell topic-label"><strong>{escape(topic.label)}</strong></div>
+      <div class="topic-cell topic-query" title="{escape(topic.query)}">{escape(topic.query)}</div>
+      <div class="topic-cell topic-sources">{sources}</div>
+      <div class="topic-cell"><span class="topic-pill cadence-{escape(topic.cadence)}">{escape(topic.cadence)}</span></div>
+      <div class="topic-cell"><span class="topic-pill priority-{escape(topic.priority)}">{escape(topic.priority)}</span></div>
+      <div class="topic-cell"><span class="topic-status status-enabled">On</span></div>
+      <div class="topic-actions"><span class="topic-preview-note">Environment</span></div>
+    </div>"""
 
 
 def render_industry_config_section(config: Any) -> str:
@@ -3427,6 +3484,46 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
+
+.topics-main-tabs { display: flex; gap: 4px; margin: 0 0 10px; padding: 3px; width: fit-content; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(12, 20, 32, 0.82); }
+.topics-main-tab { min-width: 118px; padding: 7px 14px; border-radius: var(--radius-sm); color: var(--muted); font-weight: 720; text-align: center; text-decoration: none; }
+.topics-main-tab:hover { color: var(--text); background: rgba(148, 163, 184, 0.06); }
+.topics-main-tab.current { color: var(--text); background: rgba(56, 189, 248, 0.13); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35); }
+.academic-schedule, .academic-topics-panel, .academic-agent-panel { border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.94), rgba(15, 23, 34, 0.96)); }
+.academic-schedule { padding: 12px; margin-bottom: 10px; }
+.academic-section-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+.academic-section-head h2 { margin: 0; }
+.academic-section-head p, .academic-section-head > span { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.academic-source-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.academic-source-card { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: rgba(8, 13, 20, 0.34); text-decoration: none; transition: border-color 120ms ease, background 120ms ease; }
+.academic-source-card:hover { border-color: var(--border-strong); background: rgba(148, 163, 184, 0.06); }
+.academic-source-card.selected { border-color: rgba(56, 189, 248, 0.58); background: rgba(56, 189, 248, 0.08); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.08); }
+.academic-source-card-head { display: flex; justify-content: space-between; gap: 6px; align-items: center; margin-bottom: 7px; }
+.academic-source-card-head > span:last-child, .academic-source-card > span { color: var(--muted); font-size: 10px; }
+.academic-source-card > strong { display: block; min-height: 30px; color: var(--muted-strong); font-size: 11px; line-height: 1.35; }
+.academic-source-card ol { margin: 7px 0 0; padding-left: 18px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.academic-source-card li { margin-top: 2px; }
+.academic-source-all { min-width: 108px; padding: 6px 9px; }
+.academic-source-all strong, .academic-source-all span { display: block; }
+.academic-workspace { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, .8fr); gap: 10px; align-items: start; }
+.academic-topics-panel { min-width: 0; padding: 12px; }
+.academic-agent-panel { min-width: 0; position: sticky; top: 10px; overflow: hidden; }
+.academic-agent-panel > .topic-source { border: 0; border-radius: 0; background: transparent; }
+.academic-topic-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.academic-topic-scroll .topic-table { min-width: 820px; }
+.academic-topic-empty { border: 0; border-radius: 0; box-shadow: none; }
+.topics-industry-view .industry-config { margin-top: 0; }
+@media (max-width: 980px) {
+  .academic-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .academic-workspace { grid-template-columns: 1fr; }
+  .academic-agent-panel { position: static; }
+}
+@media (max-width: 600px) {
+  .academic-source-grid { grid-template-columns: 1fr; }
+  .topics-main-tabs { width: 100%; }
+  .topics-main-tab { flex: 1; min-width: 0; }
+}
+
 .topic-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0; }
 .topic-tab { text-decoration: none; }
 .topic-sections { display: grid; gap: 10px; }
@@ -3444,27 +3541,29 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .industry-config { padding: 16px; }
 .industry-config .topic-source-head { align-items: flex-start; margin-bottom: 14px; }
 .industry-config .topic-source-head h2 { display: flex; align-items: center; gap: 7px; }
-.industry-config .topic-source-head p { margin: 5px 0 0; color: #57606a; font-size: 13px; }
+.industry-config .topic-source-head p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
 .industry-status { flex: 0 0 auto; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 700; }
-.industry-status-enabled { color: #116329; background: #dafbe1; border: 1px solid #82e596; }
-.industry-status-disabled { color: #57606a; background: #f6f8fa; border: 1px solid #d8dee4; }
+.industry-status-enabled { color: #9ff3cf; background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.48); }
+.industry-status-disabled { color: var(--muted); background: rgba(148, 163, 184, 0.06); border: 1px solid var(--border); }
 .industry-config-form { display: grid; gap: 12px; }
 .industry-primary-controls { display: grid; grid-template-columns: minmax(210px, 1fr) minmax(170px, .7fr) minmax(220px, 1fr); gap: 10px; }
-.industry-primary-controls > label, .industry-schedule { min-width: 0; border: 1px solid #d8dee4; border-radius: 7px; background: #f6f8fa; padding: 10px 12px; }
+.industry-primary-controls > label, .industry-schedule { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(21, 31, 45, 0.72); padding: 10px 12px; }
 .industry-toggle { display: flex; flex-direction: column; justify-content: space-between; gap: 9px; }
-.industry-toggle-control { display: flex; gap: 7px; align-items: center; color: #24292f; font-weight: 600; }
+.industry-toggle-control { display: flex; gap: 7px; align-items: center; color: var(--text); font-weight: 600; }
+.industry-toggle-control input { accent-color: var(--accent); }
 .industry-limit select { margin-top: 7px; }
 .industry-schedule { display: flex; flex-direction: column; gap: 7px; }
-.industry-schedule span { color: #57606a; font-size: 12px; font-weight: 600; }
-.industry-schedule strong { font-size: 13px; }
-.industry-filter-details { border-top: 1px solid #d8dee4; padding-top: 10px; }
-.industry-filter-details > summary { cursor: pointer; color: #24292f; font-weight: 650; list-style-position: outside; margin-left: 16px; }
-.industry-filter-details > summary span { color: #57606a; font-size: 12px; font-weight: 400; margin-left: 6px; }
+.industry-schedule span { color: var(--muted); font-size: 12px; font-weight: 600; }
+.industry-schedule strong { color: var(--muted-strong); font-size: 13px; }
+.industry-filter-details { border-top: 1px solid var(--border); padding-top: 10px; }
+.industry-filter-details > summary { cursor: pointer; color: var(--muted-strong); font-weight: 650; list-style-position: outside; margin-left: 16px; }
+.industry-filter-details > summary:hover { color: var(--text); }
+.industry-filter-details > summary span { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
 .industry-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .industry-filter-grid label { min-width: 0; }
-.industry-filter-grid small { display: block; min-height: 30px; margin: 3px 0 6px; color: #57606a; font-weight: 400; line-height: 1.35; }
+.industry-filter-grid small { display: block; min-height: 30px; margin: 3px 0 6px; color: var(--muted); font-weight: 400; line-height: 1.35; }
 .industry-filter-grid textarea { min-height: 128px; resize: vertical; }
-.industry-note { margin: 8px 0 0; color: #57606a; font-size: 12px; }
+.industry-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
 .industry-actions { display: flex; justify-content: flex-end; }
 .topic-columns { display: grid; grid-template-columns: minmax(180px, 0.38fr) minmax(0, 1fr); gap: 12px; margin-top: 8px; }
 .topic-list { margin: 0; padding-left: 22px; columns: 2; column-gap: 28px; }

@@ -2939,15 +2939,15 @@ class BackendV2Tests(unittest.TestCase):
         self.assertNotIn("<summary>Advanced</summary>", html)
         self.assertIn('href="/topics?edit=datalake-operations"', html)
         self.assertIn('class="topic-row topic-read-row"', html)
-        self.assertIn('class="topic-source topic-list-details"', html)
-        self.assertIn("1 configured | expand to search, toggle, or edit", html)
+        self.assertIn('class="academic-workspace"', html)
+        self.assertIn("1 shown", html)
         self.assertIn('title="datalake operations reliability observability production engineering"', html)
         self.assertNotIn('class="topic-source topic-editor-panel"', html)
         self.assertNotIn("Topic changes apply to future scheduled runs.", html)
         self.assertNotIn('class="topic-note"', html)
         self.assertIn("Datalake operations", html)
-        self.assertLess(html.index("Source schedule inventory"), html.index("All Topics"))
-        self.assertIn('class="topic-inventory-details" open', html)
+        self.assertLess(html.index("Source schedule inventory"), html.index("Datalake operations"))
+        self.assertIn('class="academic-source-grid"', html)
         self.assertIn('<a class="brand-home" href="/">', html)
 
         saved_html = web.render_topics_page(config_path=config_path, saved=True)
@@ -2966,10 +2966,10 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page(config_path=config_path, edit_id="datalake-operations")
 
         self.assertIn('class="topic-source topic-editor-panel"', html)
-        self.assertIn('class="topic-source topic-list-details" open', html)
+        self.assertIn('class="academic-topics-panel"', html)
         self.assertIn('<input type="hidden" name="topic_id" value="datalake-operations">', html)
         self.assertIn('href="/topics">Cancel</a>', html)
-        self.assertIn('href="/topics?edit=incident-response"', html)
+        self.assertNotIn('href="/topics?edit=incident-response"', html)
 
     def test_topics_post_adds_fast_path_topic(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -3307,11 +3307,10 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Apply and save", html)
         self.assertNotIn('name="topic_text"', html)
         self.assertLess(html.index("What do you want Project Paper to scout?"), html.index("TopicAgent Proposal"))
-        self.assertLess(html.index("TopicAgent Proposal"), html.index("Source schedule inventory"))
+        self.assertLess(html.index("Source schedule inventory"), html.index("TopicAgent Proposal"))
         self.assertNotIn('class="topic-source topic-proposal-panel"', html)
         self.assertIn('name="conversation_json"', html)
         self.assertIn("New pending", html)
-        self.assertIn("showing pending TopicAgent preview", html)
         self.assertIn('class="topic-row topic-read-row topic-preview-row"', html)
 
     def test_topic_agent_form_allows_explicit_source_selection(self):
@@ -3368,7 +3367,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Update pending", html)
         self.assertIn("Apply to save", html)
         self.assertIn('<span class="topic-status status-disabled">Off</span>', html)
-        self.assertIn('class="topic-source topic-list-details" open', html)
+        self.assertIn('class="academic-topics-panel"', html)
 
     def test_topics_page_previews_remove_proposal_in_topic_list(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
@@ -4096,9 +4095,10 @@ class BackendV2Tests(unittest.TestCase):
     def test_topics_page_renders_source_topic_inventory(self):
         html = web.render_topics_page()
 
-        self.assertIn("Project Paper Scout Topics", html)
-        self.assertIn("Next scheduled topics (", html)
-        self.assertIn("Configured topics (", html)
+        self.assertIn("Project Paper Topics", html)
+        self.assertIn('class="topics-main-tab current" href="/topics?section=academic"', html)
+        self.assertIn('class="academic-source-grid"', html)
+        self.assertIn('class="academic-workspace"', html)
         self.assertNotIn("Topic changes apply to future scheduled runs.", html)
         self.assertIn("Source schedule inventory", html)
         self.assertIn("Topic Agent", html)
@@ -4108,10 +4108,15 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("Rotating source job", html)
         self.assertIn("Source cron/manual job", html)
         self.assertIn("AIOps", html)
-        self.assertIn("AIOps observability incident response", html)
-        self.assertIn("AIOps root cause analysis", html)
-        self.assertIn("CORE operations and reliability", html)
-        self.assertIn("PAPER_AGENT_CORE_TOPIC_1", html)
+        openalex_html = web.render_topics_page(selected_source="openalex")
+        semantic_html = web.render_topics_page(selected_source="semantic_scholar")
+        self.assertIn("AIOps observability incident response", openalex_html)
+        self.assertIn("AIOps root cause analysis", semantic_html)
+        core_html = web.render_topics_page(selected_source="core")
+        self.assertIn("CORE operations and reliability", core_html)
+        self.assertIn("PAPER_AGENT_CORE_TOPIC_1", core_html)
+        self.assertIn("CORE queries are configured through environment variables", core_html)
+        self.assertIn("Environment", core_html)
 
     def test_topic_inventory_exposes_four_sources(self):
         inventory = scout_topic_inventory()
