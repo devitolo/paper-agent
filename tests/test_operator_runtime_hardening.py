@@ -33,7 +33,7 @@ class OperatorRuntimeHardeningTests(unittest.TestCase):
                 self.assertIn('LOCK_DIR="${PAPER_AGENT_LOCK_DIR:-/tmp}"', script)
                 self.assertIn(lock_name, script)
                 self.assertIn("flock -n", script)
-                self.assertIn("exit 0", script)
+                self.assertRegex(script, r'exit "\$\{PAPER_AGENT_BUSY_EXIT_CODE:-0\}"|exit 0')
                 self.assertIn("another run holds", script)
                 self.assertNotIn(lock_name, seen)
                 seen.add(lock_name)
@@ -41,7 +41,8 @@ class OperatorRuntimeHardeningTests(unittest.TestCase):
     def test_cron_template_uses_home_paths_and_failure_chaining(self) -> None:
         template = (ROOT / "deploy" / "project-paper.crontab").read_text(encoding="utf-8")
         self.assertNotIn("/home/devitolo/workspace/paper-agent", template)
-        self.assertIn('$HOME/workspace/paper-agent', template)
+        self.assertIn('$HOME/paper-mini-rehearsal/candidate', template)
+        self.assertIn("scripts/mini_container_job.sh", template)
         for line in template.splitlines():
             if not line or line.startswith("#") or "=" in line and not line[0].isdigit():
                 continue
