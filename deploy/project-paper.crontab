@@ -25,6 +25,9 @@ PAPER_MINILM_SHADOW_ENABLED=0
 
 0 6 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh semantic >> logs/pipeline-semantic-scholar.log 2>&1
 
+# Weekly Industry / ZenML discovery. Uses separate config and no academic MiniLM ranking.
+30 23 * * 0 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh zenml >> logs/pipeline-zenml.log 2>&1
+
 # Paused afternoon: 0 18 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh semantic >> logs/pipeline-semantic-scholar.log 2>&1
 
 0 2 * * 1 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh profile >> logs/profile-rebuild-compare.log 2>&1

@@ -378,7 +378,10 @@ out: list[str] = []
 found = False
 found_minilm_eval = False
 found_minilm_shadow = False
+found_zenml = False
 for line in source.read_text(encoding="utf-8").splitlines():
+    if "scripts/mini_container_job.sh zenml" in line and not line.lstrip().startswith("#"):
+        found_zenml = True
     if line.startswith("PAPER_MIGRATION_EXTRA_COMPOSE_FILES="):
         out.append(f"PAPER_MIGRATION_EXTRA_COMPOSE_FILES={overlay}")
         found = True
@@ -408,6 +411,13 @@ if not found_minilm_shadow:
     if insert_at is None:
         raise SystemExit("cannot place PAPER_MINILM_SHADOW_ENABLED in managed cron")
     out.insert(insert_at, "PAPER_MINILM_SHADOW_ENABLED=0")
+if not found_zenml:
+    insert_at = next((index for index, line in enumerate(out) if line.strip() == "# END PROJECT PAPER MANAGED JOBS"), len(out))
+    out[insert_at:insert_at] = [
+        "",
+        "# Weekly Industry / ZenML discovery. Uses separate config and no academic MiniLM ranking.",
+        '30 23 * * 0 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh zenml >> logs/pipeline-zenml.log 2>&1',
+    ]
 destination.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
   crontab "$RELEASE_DIR/crontab.next"
@@ -564,11 +574,6 @@ finally:
     except Exception:
         pass
 PY
-if ! "${compose[@]}" exec -T app python -m paper_agents.cli zenml-pilot --db /app/data/paper_agent.db --fetch-limit "${PAPER_ZENML_PILOT_FETCH:-200}" --keep "${PAPER_ZENML_PILOT_KEEP:-3}" \
-  > "$RELEASE_DIR/zenml-pilot-import.txt" 2>&1; then
-  echo "ZenML pilot import failed; deployment remains healthy. Evidence: $RELEASE_DIR/zenml-pilot-import.txt" >&2
-  cat "$RELEASE_DIR/zenml-pilot-import.txt" >&2 || true
-fi
 "${compose[@]}" ps > "$RELEASE_DIR/after-ps.txt"
 docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.json" 2>/dev/null || true
 
@@ -586,6 +591,7 @@ verification_minilm_shadow_runner=$(sha256sum "$CANDIDATE_DIR/scripts/minilm_sha
 expected_minilm_shadow_runner=$(sha256sum "$SOURCE_DIR/scripts/minilm_shadow_after_pipeline.sh" | awk '{print $1}')
 verification_minilm_cron=$(grep -c '^PAPER_MINILM_EVAL_ENABLED=0$' "$RELEASE_DIR/crontab.next")
 verification_minilm_shadow_cron=$(grep -c '^PAPER_MINILM_SHADOW_ENABLED=0$' "$RELEASE_DIR/crontab.next")
+verification_zenml_cron=$(grep -c '^[^#].*scripts/mini_container_job.sh zenml' "$RELEASE_DIR/crontab.next")
 image_size_mib=$(sed -n 's/^image_size_mib=//p' "$RELEASE_DIR/image-metadata.env")
 image_layer_count=$(sed -n 's/^image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
 previous_image_layer_count=$(sed -n 's/^previous_image_layer_count=//p' "$RELEASE_DIR/image-metadata.env")
@@ -611,6 +617,7 @@ removed_image_layer_count=$(sed -n 's/^removed_image_layer_count=//p' "$RELEASE_
   printf 'minilm_shadow_runner_sha256=%s\n' "$verification_minilm_shadow_runner"
   printf 'PAPER_MINILM_EVAL_ENABLED=%s\n' "$([[ "$verification_minilm_cron" == 1 ]] && printf 0 || printf invalid)"
   printf 'PAPER_MINILM_SHADOW_ENABLED=%s\n' "$([[ "$verification_minilm_shadow_cron" == 1 ]] && printf 0 || printf invalid)"
+  printf 'zenml_weekly_cron=%s\n' "$([[ "$verification_zenml_cron" == 1 ]] && printf enabled || printf invalid)"
 } | tee "$RELEASE_DIR/post-deploy-verification.txt"
 if [[ -n "$ARXIV_PROGRESS" && "$verification_arxiv_progress" != "$ARXIV_PROGRESS" ]]; then
   echo "Post-deploy verification failed: PAPER_ARXIV_PROGRESS=$verification_arxiv_progress, expected $ARXIV_PROGRESS" >&2
@@ -646,6 +653,10 @@ if [[ "$verification_minilm_shadow_cron" != 1 ]]; then
 fi
 if [[ "$verification_minilm_cron" != 1 ]]; then
   echo "Post-deploy verification failed: PAPER_MINILM_EVAL_ENABLED=0 is missing or duplicated" >&2
+  exit 1
+fi
+if [[ "$verification_zenml_cron" != 1 ]]; then
+  echo "Post-deploy verification failed: weekly ZenML cron is missing or duplicated" >&2
   exit 1
 fi
 phase_end

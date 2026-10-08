@@ -94,12 +94,16 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("scripts/mini_container_job.sh openalex", template)
         self.assertIn("scripts/mini_container_job.sh arxiv", template)
         self.assertIn("scripts/mini_container_job.sh semantic", template)
+        self.assertIn("30 23 * * 0", template)
+        self.assertIn("scripts/mini_container_job.sh zenml", template)
         self.assertIn("scripts/mini_container_job.sh backup", template)
         self.assertNotIn(".venv", template)
         self.assertNotIn("paper_agents.cli pipeline-daily", template)
         self.assertNotIn("scripts/openalex_pipeline.sh", template)
         self.assertNotIn("scripts/nightly_pipeline.sh", template)
         self.assertNotIn("scripts/semantic_scholar_pipeline.sh", template)
+        update = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn("verification_zenml_cron", update)
 
     def test_release_scripts_are_shell_syntax_valid(self):
         for name in (

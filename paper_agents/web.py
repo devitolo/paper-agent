@@ -18,6 +18,11 @@ from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.pdf_links import looks_like_direct_pdf_url
 from paper_agents.topic_inventory import scout_topic_inventory
+from paper_agents.industry_config import (
+    DEFAULT_INDUSTRY_CONFIG_PATH,
+    load_zenml_config,
+    update_zenml_config,
+)
 from paper_agents.topic_agent import (
     TopicProposal,
     apply_topic_proposal,
@@ -243,7 +248,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                             )
                         )
                         return
-                    if action == "apply_proposal":
+                    if action == "update_industry":
+                        update_zenml_config(form)
+                    elif action == "apply_proposal":
                         apply_topic_proposal_form(form)
                     else:
                         save_topics_form(form)
@@ -732,6 +739,8 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
     discussion_prompt = escape(build_discussion_prompt(card))
     summary = card["summary"]
     source_badge = f'<span class="source-badge {source_badge_class(card["source"])}">{escape(card["source_label"])}</span>'
+    company = str((card.get("source_metadata") or {}).get("company") or "").strip()
+    company_html = f'<span class="source-company">{escape(company)}</span>' if card.get("source") == "zenml" and company else ""
     title_html = render_title_link(card)
     compact_class = " compact" if view_value == "compact" else ""
     summary_artifact = card.get("artifacts", {}).get("triage_summary")
@@ -776,6 +785,7 @@ def render_card(card: dict[str, Any], *, view_value: str, return_to: str) -> str
           <h2>{title_html}</h2>
           <div class="paper-meta">
             {source_badge}
+            {company_html}
             <span>{escape(card.get("published") or "date unknown")}</span>
             {render_source_reference(card)}
             {render_pdf_control(card)}
@@ -1279,6 +1289,7 @@ def render_topics_page(
     request_text: str = "",
     conversation: list[dict[str, str]] | None = None,
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
+    industry_config_path: Path = DEFAULT_INDUSTRY_CONFIG_PATH,
 ) -> str:
     inventory = scout_topic_inventory(config_path=config_path)
     topics = load_topic_config_or_seed(config_path)
@@ -1292,6 +1303,7 @@ def render_topics_page(
     editor_panel = render_topic_editor_panel(edit_topic) if edit_topic else ""
     all_topics_open = " open" if edit_topic or pending_topic_preview(proposal) else ""
     total_topics = len(topics)
+    industry_config = load_zenml_config(industry_config_path)
     banner = ""
     if saved:
         banner = '<div class="banner">Saved. Changes apply to future scheduled runs.</div>'
@@ -1314,6 +1326,7 @@ def render_topics_page(
     {banner}
     {render_topic_agent_panel(request_text, proposal, conversation or [])}
     {editor_panel}
+    {render_industry_config_section(industry_config)}
     <details class="topic-inventory-details" open>
       <summary>Source schedule inventory</summary>
       <nav class="topic-tabs" aria-label="Scout topic sources">{tabs}</nav>
@@ -1367,6 +1380,26 @@ def render_topics_page(
   </main>
 </body>
 </html>"""
+
+
+def render_industry_config_section(config: Any) -> str:
+    include = "\n".join(config.include_signals)
+    exclude = "\n".join(config.exclude_signals)
+    return f"""<section class="topic-source industry-config" id="zenml">
+      <div class="topic-source-head">
+        <h2><span class="source-badge source-badge-zenml">ZenML</span> Industry</h2>
+        <span>{escape(config.schedule)}</span>
+      </div>
+      <p>Practical workplace AI and engineering case studies. This source uses ZenML metadata filters and does not use academic MiniLM or relevance scoring.</p>
+      <form method="post" action="/topics" class="topic-edit-form industry-config-form">
+        <input type="hidden" name="action" value="update_industry">
+        <label>Include / prioritize signals<textarea name="include_signals" rows="6">{escape(include)}</textarea></label>
+        <label>Exclude / deprioritize signals<textarea name="exclude_signals" rows="5">{escape(exclude)}</textarea></label>
+        <label>Maximum items per run<input type="number" name="max_items_per_run" min="1" max="5" value="{config.max_items_per_run}"></label>
+        <label class="inline-check"><input type="checkbox" name="enabled" value="1" {'checked' if config.enabled else ''}> Weekly ZenML discovery enabled</label>
+        <div class="topic-form-actions"><button type="submit" class="primary">Save Industry settings</button></div>
+      </form>
+    </section>"""
 
 
 def render_topic_source_section(item: dict[str, Any]) -> str:
@@ -2441,6 +2474,7 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                     source_id,
                     url,
                     pdf_url,
+                    metadata_json,
                     ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY id ASC) AS row_number
                 FROM paper_sources
             ), source_rollup AS (
@@ -2485,7 +2519,8 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                 latest_raw_feedback.content,
                 COALESCE(latest_structured_feedback.created_at, latest_raw_feedback.received_at) AS latest_feedback_received_at,
                 EXISTS (SELECT 1 FROM saved_papers WHERE saved_papers.paper_id = papers.id) AS is_saved,
-                EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id) AS is_excluded
+                EXISTS (SELECT 1 FROM excluded_papers WHERE excluded_papers.paper_id = papers.id) AS is_excluded,
+                primary_source.metadata_json
             FROM papers
             LEFT JOIN latest_recommendation
               ON latest_recommendation.paper_id = papers.id
@@ -2522,13 +2557,20 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
                 or row[19] is not None
                 or lightweight_score is not None
             )
+            source_metadata = decode_json(row[24], {})
+            source_name = row[2] or "unknown"
+            source_label_text = source_label(source_name, parse_sources(row[15]))
+            if source_name == "zenml":
+                domain = urllib.parse.urlparse(row[8] or "").netloc.lower().removeprefix("www.")
+                source_label_text = f"ZenML · {domain}" if domain else "ZenML"
             cards.append(
                 {
                     "id": paper_id,
                     "recommendation_id": row[1],
-                    "source": row[2] or "unknown",
+                    "source": source_name,
                     "source_id": row[3] or "unknown",
-                    "source_label": source_label(row[2] or "unknown", parse_sources(row[15])),
+                    "source_label": source_label_text,
+                    "source_metadata": source_metadata,
                     "user_score": user_score,
                     "feedback_decision": row[17],
                     "feedback_received_at": row[19] or row[18],

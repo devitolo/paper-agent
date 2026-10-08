@@ -53,7 +53,8 @@ def initialize(root: Path = Path("."), templates: Path = TEMPLATES) -> None:
         version = json.loads(marker.read_text())
         if version.get("schema_version") != PACKAGE_SCHEMA_VERSION:
             raise RuntimeError("Unsupported package schema version; use the documented matching release/upgrade procedure")
-    for relative, template in (("data/profile.json", "profile.json"), ("config/topics.yaml", "topics.yaml")):
+    for relative, template in (("data/profile.json", "profile.json"), ("config/topics.yaml", "topics.yaml"),
+                               ("config/industry.json", "industry.json")):
         destination = root / relative
         if not destination.exists():
             with destination.open("x", encoding="utf-8") as output:

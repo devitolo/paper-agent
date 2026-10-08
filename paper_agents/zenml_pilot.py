@@ -7,6 +7,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from paper_agents.industry_config import DEFAULT_INDUSTRY_CONFIG_PATH, ZenMLConfig, load_zenml_config
+
 from paper_agents.db import (
     DEFAULT_DB_PATH,
     complete_scout_run,
@@ -32,13 +34,6 @@ ZENML_DATASET_PARAMS = {
     "split": "train",
 }
 PILOT_MODEL = "zenml-pilot-summary-v1"
-PILOT_TOPICS = [
-    "internal AI assistants and knowledge access",
-    "shared AI platforms and enablement",
-    "employee-built AI tools",
-    "AI-assisted engineering workflows",
-]
-
 # Already reviewed examples from the user's current queue. The pilot should show fresh items.
 SEED_EXCLUDED_URLS = {
     "https://slack.engineering/empowering-engineers-with-ai/",
@@ -191,16 +186,20 @@ def fetch_zenml_rows(*, fetch_limit: int = 200, timeout: int = 30) -> list[dict[
     return normalized
 
 
-def select_zenml_candidates(rows: list[dict[str, Any]], *, keep: int = 5, excluded_urls: set[str] | None = None) -> list[dict[str, Any]]:
+def select_zenml_candidates(rows: list[dict[str, Any]], *, keep: int = 5, excluded_urls: set[str] | None = None,
+                            config: ZenMLConfig | None = None) -> list[dict[str, Any]]:
+    config = config or ZenMLConfig()
     excluded_urls = excluded_urls or set()
+    selected_urls: set[str] = set()
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in rows:
         candidate = row_to_candidate(row)
         if not candidate:
             continue
-        if candidate["source_id"] in excluded_urls or is_non_article_url(candidate["source_id"]):
+        if candidate["source_id"] in excluded_urls or candidate["source_id"] in selected_urls or is_non_article_url(candidate["source_id"]):
             continue
-        score, signals = score_candidate(candidate)
+        selected_urls.add(candidate["source_id"])
+        score, signals = score_candidate(candidate, config=config)
         if score <= 0:
             continue
         candidate["metadata"]["pilot_score"] = score
@@ -263,7 +262,8 @@ def tag_list(row: dict[str, Any]) -> list[str]:
     return sorted(dict.fromkeys(tags))
 
 
-def score_candidate(candidate: dict[str, Any]) -> tuple[float, list[str]]:
+def score_candidate(candidate: dict[str, Any], *, config: ZenMLConfig | None = None) -> tuple[float, list[str]]:
+    config = config or ZenMLConfig()
     metadata = candidate.get("metadata") or {}
     text = " ".join(
         str(part or "")
@@ -278,6 +278,10 @@ def score_candidate(candidate: dict[str, Any]) -> tuple[float, list[str]]:
     ).lower()
     score = 0.0
     signals: list[str] = []
+    for term in config.include_signals:
+        if term in text:
+            score += 14
+            signals.append(term)
     for term, weight in HIGH_VALUE_TERMS.items():
         if term in text:
             score += weight
@@ -296,6 +300,9 @@ def score_candidate(candidate: dict[str, Any]) -> tuple[float, list[str]]:
         for term, weight in DEEMPHASIS_TERMS.items():
             if term in text:
                 score -= weight
+    for term in config.exclude_signals:
+        if term in text and not any(include in text for include in config.include_signals):
+            score -= 18
     return max(score, 0.0), sorted(dict.fromkeys(signals))
 
 
@@ -306,17 +313,14 @@ def import_zenml_pilot(
     keep: int = 3,
     rows: list[dict[str, Any]] | None = None,
     dry_run: bool = False,
+    config_path: Path = DEFAULT_INDUSTRY_CONFIG_PATH,
 ) -> dict[str, Any]:
     init_db(db_path)
+    config = load_zenml_config(config_path)
+    keep = min(max(1, keep), config.max_items_per_run)
+    if not config.enabled:
+        return {"status": "disabled", "source": ZENML_SOURCE, "imported_count": 0, "items": []}
     existing = seen_source_ids(db_path, source=ZENML_SOURCE)
-    if len(existing - SEED_EXCLUDED_URLS) >= keep and rows is None and not dry_run:
-        return {
-            "status": "already_imported",
-            "source": ZENML_SOURCE,
-            "existing_count": len(existing - SEED_EXCLUDED_URLS),
-            "imported_count": 0,
-            "items": [],
-        }
 
     fetch_error = None
     if rows is not None:
@@ -331,6 +335,7 @@ def import_zenml_pilot(
         fetched_rows,
         keep=keep,
         excluded_urls=set(existing) | SEED_EXCLUDED_URLS,
+        config=config,
     )
     if dry_run:
         return {
@@ -358,9 +363,10 @@ def import_zenml_pilot(
             target_candidates=keep,
             max_candidates=fetch_limit,
             freshness_months=0,
-            topics=PILOT_TOPICS,
+            topics=config.include_signals,
             guidance_id=None,
-            diagnostics={"dataset": "zenml/llmops-database", "fetched_count": len(fetched_rows)},
+            diagnostics={"dataset": "zenml/llmops-database", "fetched_count": len(fetched_rows),
+                         "config_path": str(config_path), "academic_relevance_model": False},
         )
         imported: list[dict[str, Any]] = []
         scout_candidate_ids: dict[int, int] = {}
@@ -393,8 +399,9 @@ def import_zenml_pilot(
         )
         for order, item in enumerate(imported, start=1):
             paper_id = int(item["paper_id"])
-            rationale = "ZenML pilot: selected as a practical AI engineering case study. Original article URL is the evidence link."
             signals = item.get("signals") or []
+            signal_text = ", ".join(signals[:3]) or "practical workplace AI"
+            rationale = f"ZenML industry item: matched {signal_text}. Summary comes from ZenML metadata; original article text was not ingested."
             insert_curator_evaluation(
                 connection,
                 curator_run_id=curator_run_id,
