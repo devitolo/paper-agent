@@ -2934,6 +2934,9 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page(config_path=config_path)
 
         self.assertIn("Topic Agent", html)
+        self.assertIn('class="topic-agent-open" data-topic-agent-open', html)
+        self.assertIn('id="topic-agent-dialog" class="topic-agent-dialog"', html)
+        self.assertNotIn('class="topic-agent-dialog" open', html)
         self.assertIn('name="request_text"', html)
         self.assertIn("Ask TopicAgent", html)
         self.assertNotIn("<summary>Advanced</summary>", html)
@@ -3302,6 +3305,7 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("What do you want Project Paper to scout?", html)
         self.assertIn("TopicAgent Proposal", html)
+        self.assertIn('class="topic-agent-dialog" open', html)
         self.assertIn("Datalake reliability", html)
         self.assertIn('name="proposal_json"', html)
         self.assertIn("Apply and save", html)
@@ -4116,6 +4120,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("CORE operations and reliability", core_html)
         self.assertIn("PAPER_AGENT_CORE_TOPIC_1", core_html)
         self.assertIn("CORE queries are configured through environment variables", core_html)
+        self.assertIn("Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar", core_html)
         self.assertIn("Environment", core_html)
 
     def test_topic_inventory_exposes_four_sources(self):

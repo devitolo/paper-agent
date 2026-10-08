@@ -1336,10 +1336,19 @@ def render_topics_page(
             topic_note = "Edit, enable, or disable topics for future academic runs."
         source_label = "All academic sources" if selected_source == "all" else source_display_name(selected_source)
         all_link = f'<a class="academic-source-card academic-source-all{" selected" if selected_source == "all" else ""}" href="/topics?source=all"><strong>All topics</strong><span>{total_topics} configured</span></a>'
+        topic_agent_open = " open" if proposal or conversation else ""
+        topic_agent_context = (
+            '<p class="topic-agent-context">CORE queries are managed through environment variables and cannot be changed here. Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar.</p>'
+            if selected_source == "core"
+            else ""
+        )
         body = f"""<section class="academic-schedule" aria-labelledby="academic-schedule-title">
           <div class="academic-section-head">
             <div><h2 id="academic-schedule-title">Source schedule inventory</h2><p>Choose a source to compare its next searches with its configured topics.</p></div>
-            {all_link}
+            <div class="academic-schedule-actions">
+              <button type="button" class="topic-agent-open" data-topic-agent-open>Topic Agent</button>
+              {all_link}
+            </div>
           </div>
           <div class="academic-source-grid">{cards}</div>
         </section>
@@ -1363,8 +1372,12 @@ def render_topics_page(
               </div>
             </div>
           </section>
-          <aside class="academic-agent-panel">{render_topic_agent_panel(request_text, proposal, conversation or [])}</aside>
-        </div>"""
+        </div>
+        <dialog id="topic-agent-dialog" class="topic-agent-dialog"{topic_agent_open}>
+          <form method="dialog" class="topic-agent-dialog-close"><button type="submit" aria-label="Close Topic Agent">×</button></form>
+          {topic_agent_context}
+          {render_topic_agent_panel(request_text, proposal, conversation or [])}
+        </dialog>"""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1390,6 +1403,13 @@ def render_topics_page(
           }});
         }});
       }}
+      const topicAgentDialog = document.getElementById("topic-agent-dialog");
+      document.querySelectorAll("[data-topic-agent-open]").forEach((button) => {{
+        button.addEventListener("click", () => topicAgentDialog?.showModal());
+      }});
+      topicAgentDialog?.addEventListener("click", (event) => {{
+        if (event.target === topicAgentDialog) topicAgentDialog.close();
+      }});
       document.querySelectorAll(".topic-agent-form").forEach((form) => {{
         form.addEventListener("submit", (event) => {{
           const button = event.submitter || form.querySelector("button[type='submit']");
@@ -3490,7 +3510,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topics-main-tab:hover { color: var(--text); background: rgba(148, 163, 184, 0.06); }
 .topics-main-tab.current { color: var(--text); background: rgba(56, 189, 248, 0.13); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35); }
 .topics-main-tab-industry.current { color: #ccfbf1; background: rgba(45, 212, 191, 0.13); box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.42); }
-.academic-schedule, .academic-topics-panel, .academic-agent-panel { border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.94), rgba(15, 23, 34, 0.96)); }
+.academic-schedule, .academic-topics-panel { border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.94), rgba(15, 23, 34, 0.96)); }
 .academic-schedule { padding: 12px; margin-bottom: 10px; }
 .academic-section-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
 .academic-section-head h2 { margin: 0; }
@@ -3506,22 +3526,31 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .academic-source-card li { margin-top: 2px; }
 .academic-source-all { min-width: 108px; padding: 6px 9px; }
 .academic-source-all strong, .academic-source-all span { display: block; }
-.academic-workspace { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, .8fr); gap: 10px; align-items: start; }
+.academic-schedule-actions { display: flex; gap: 8px; align-items: stretch; }
+.topic-agent-open { min-width: 108px; color: #cbeafe; border-color: rgba(56, 189, 248, 0.36); background: rgba(56, 189, 248, 0.08); font-weight: 720; }
+.topic-agent-open:hover { color: var(--text); border-color: rgba(56, 189, 248, 0.62); background: rgba(56, 189, 248, 0.13); }
+.academic-workspace { display: block; }
 .academic-topics-panel { min-width: 0; padding: 12px; }
-.academic-agent-panel { min-width: 0; position: sticky; top: 10px; overflow: hidden; }
-.academic-agent-panel > .topic-source { border: 0; border-radius: 0; background: transparent; }
 .academic-topic-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .academic-topic-scroll .topic-table { min-width: 820px; }
 .academic-topic-empty { border: 0; border-radius: 0; box-shadow: none; }
+.topic-agent-dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-sizing: border-box; padding: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); background: linear-gradient(180deg, rgba(21, 31, 45, 0.99), rgba(12, 20, 32, 0.99)); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.62); overflow: auto; }
+.topic-agent-dialog::backdrop { background: rgba(3, 8, 14, 0.72); backdrop-filter: blur(2px); }
+.topic-agent-dialog-close { display: flex; justify-content: flex-end; margin-bottom: -30px; position: relative; z-index: 2; }
+.topic-agent-dialog-close button { width: 30px; min-height: 30px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 22px; }
+.topic-agent-dialog-close button:hover { color: var(--text); }
+.topic-agent-dialog > .topic-source { border: 0; padding: 0; background: transparent; }
+.topic-agent-context { margin: 0 38px 10px 0; padding: 8px 10px; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(56, 189, 248, 0.06); font-size: 12px; }
 .topics-industry-view .industry-config { margin-top: 0; border-color: rgba(45, 212, 191, 0.32); background: linear-gradient(180deg, rgba(17, 35, 43, 0.92), rgba(13, 28, 35, 0.96)); box-shadow: inset 0 1px 0 rgba(153, 246, 228, 0.035); }
 .topics-industry-view .industry-config .primary { background: linear-gradient(180deg, #5eead4, #2dd4bf); border-color: rgba(45, 212, 191, 0.72); }
 @media (max-width: 980px) {
   .academic-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .academic-workspace { grid-template-columns: 1fr; }
-  .academic-agent-panel { position: static; }
 }
 @media (max-width: 600px) {
   .academic-source-grid { grid-template-columns: 1fr; }
+  .academic-section-head { display: grid; }
+  .academic-schedule-actions { width: 100%; }
+  .academic-schedule-actions > * { flex: 1; }
   .topics-main-tabs { width: 100%; }
   .topics-main-tab { flex: 1; min-width: 0; }
 }
