@@ -1344,21 +1344,26 @@ def render_topics_page(
             topic_count = len(visible_topics)
             topic_note = "Edit, enable, or disable topics for future academic runs."
         source_label = "All academic sources" if selected_source == "all" else source_display_name(selected_source)
-        all_link = f'<a class="academic-source-card academic-source-all{" selected" if selected_source == "all" else ""}" href="/topics?source=all"><strong>All topics</strong><span>{total_topics} configured</span></a>'
+        topic_agent_link = (
+            f'<a class="academic-source-card academic-mode-card{" selected" if topic_mode == "agent" else ""}" '
+            'href="/topics?mode=agent&amp;source=all"><strong>Topic Agent</strong><span>Propose topic changes</span></a>'
+        )
+        all_link = (
+            f'<a class="academic-source-card academic-mode-card{" selected" if topic_mode == "inventory" and selected_source == "all" else ""}" '
+            f'href="/topics?source=all"><strong>All topics</strong><span>{total_topics} configured</span></a>'
+        )
+        mode_switch = f'<div class="academic-schedule-actions">{topic_agent_link}{all_link}</div>'
         schedule_panel = f"""<section class="academic-schedule" aria-labelledby="academic-schedule-title">
           <div class="academic-section-head">
             <div><h2 id="academic-schedule-title">Source schedule inventory</h2><p>Choose a source to compare its next searches with its configured topics.</p></div>
-            <div class="academic-schedule-actions">
-              <a class="topic-agent-open" href="/topics?mode=agent&amp;source=all">Topic Agent</a>
-              {all_link}
-            </div>
+            {mode_switch}
           </div>
           <div class="academic-source-grid">{cards}</div>
         </section>"""
         agent_panel = f"""<section class="academic-schedule academic-agent-workspace" aria-labelledby="topic-agent-title">
           <div class="academic-section-head">
             <div><h2 id="topic-agent-title">Topic Agent</h2><p>Describe what to scout while comparing the complete academic topic list below.</p></div>
-            <a class="secondary-link" href="/topics">Back to source schedules</a>
+            {mode_switch}
           </div>
           <p class="topic-agent-context">Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar. CORE queries remain environment-controlled.</p>
           {render_topic_agent_panel(request_text, proposal, conversation or [])}
@@ -1564,7 +1569,7 @@ def render_topic_agent_panel(
           <textarea name="request_text" required placeholder="datalake reliability and operations">{escape(request_text)}</textarea>
         </label>
         {render_source_checkboxes(default_sources())}
-        <button type="submit" class="primary">Ask TopicAgent</button>
+        <button type="submit" class="primary topic-agent-submit">Ask Topic Agent</button>
         <p class="topic-agent-status" aria-live="polite"></p>
       </form>
       {proposal_html}
@@ -1748,6 +1753,10 @@ def render_source_checkboxes(selected_sources: list[str]) -> str:
             f'<label class="inline-check"><input type="checkbox" name="sources" value="{escape(source)}" '
             f'{"checked" if source in selected else ""}> {escape(source_display_name(source))}</label>'
         )
+    boxes.append(
+        '<label class="inline-check source-check-readonly" title="CORE queries are configured through environment variables">'
+        '<input type="checkbox" checked disabled> CORE <span>read-only</span></label>'
+    )
     return '<fieldset class="source-checks"><legend>Sources</legend>' + "".join(boxes) + "</fieldset>"
 
 
@@ -3524,11 +3533,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .academic-source-card > strong { display: block; min-height: 30px; color: var(--muted-strong); font-size: 11px; line-height: 1.35; }
 .academic-source-card ol { margin: 7px 0 0; padding-left: 18px; color: var(--muted); font-size: 11px; line-height: 1.35; }
 .academic-source-card li { margin-top: 2px; }
-.academic-source-all { min-width: 108px; padding: 6px 9px; }
-.academic-source-all strong, .academic-source-all span { display: block; }
+.academic-mode-card { min-width: 132px; padding: 7px 10px; }
+.academic-mode-card strong, .academic-mode-card span { display: block; }
 .academic-schedule-actions { display: flex; gap: 8px; align-items: stretch; }
-.topic-agent-open { display: inline-flex; align-items: center; justify-content: center; min-width: 108px; padding: 0 10px; border: 1px solid rgba(56, 189, 248, 0.36); border-radius: var(--radius-sm); color: #cbeafe; background: rgba(56, 189, 248, 0.08); font-weight: 720; text-decoration: none; }
-.topic-agent-open:hover { color: var(--text); border-color: rgba(56, 189, 248, 0.62); background: rgba(56, 189, 248, 0.13); }
 .academic-workspace { display: block; }
 .academic-topics-panel { min-width: 0; padding: 12px; }
 .academic-topic-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
@@ -3540,10 +3547,16 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .academic-agent-workspace .topic-agent-form > label { margin: 0; }
 .academic-agent-workspace .topic-agent-form textarea { min-height: 64px; }
 .academic-agent-workspace .source-checks { grid-column: 1; margin: 0; }
-.academic-agent-workspace .topic-agent-form > button { grid-column: 2; grid-row: 1 / span 2; min-width: 150px; align-self: stretch; }
+.academic-agent-workspace .topic-agent-form > button { grid-column: 2; grid-row: 2; min-width: 132px; align-self: end; justify-self: end; }
 .academic-agent-workspace .topic-agent-status, .academic-agent-workspace .topic-conversation, .academic-agent-workspace .topic-proposal-panel { grid-column: 1 / -1; }
 .topic-agent-context { margin: 0 38px 10px 0; padding: 8px 10px; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(56, 189, 248, 0.06); font-size: 12px; }
-.topics-industry-view .industry-config { margin-top: 0; border-color: rgba(45, 212, 191, 0.32); background: linear-gradient(180deg, rgba(17, 35, 43, 0.92), rgba(13, 28, 35, 0.96)); box-shadow: inset 0 1px 0 rgba(153, 246, 228, 0.035); }
+.source-check-readonly { color: var(--muted); }
+.source-check-readonly span { margin-left: 2px; font-size: 10px; }
+.topics-industry-view { padding: 10px; border: 1px solid rgba(45, 212, 191, 0.28); border-radius: var(--radius); background: linear-gradient(180deg, rgba(15, 52, 55, 0.38), rgba(10, 35, 40, 0.30)); box-shadow: inset 3px 0 0 rgba(45, 212, 191, 0.42); }
+.topics-industry-view .industry-config { margin-top: 0; border-color: rgba(45, 212, 191, 0.48); background: linear-gradient(180deg, rgba(18, 46, 52, 0.96), rgba(12, 31, 38, 0.98)); box-shadow: inset 0 1px 0 rgba(153, 246, 228, 0.08); }
+.topics-industry-view .industry-primary-controls > label, .topics-industry-view .industry-schedule { border-color: rgba(45, 212, 191, 0.24); background: rgba(10, 38, 43, 0.72); }
+.topics-industry-view textarea, .topics-industry-view select { border-color: rgba(45, 212, 191, 0.28); background: rgba(7, 25, 31, 0.78); }
+.topics-industry-view textarea:focus, .topics-industry-view select:focus { border-color: rgba(45, 212, 191, 0.72); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.11); }
 .topics-industry-view .industry-config .primary { background: linear-gradient(180deg, #5eead4, #2dd4bf); border-color: rgba(45, 212, 191, 0.72); }
 @media (max-width: 980px) {
   .academic-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

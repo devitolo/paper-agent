@@ -2934,7 +2934,7 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page(config_path=config_path)
 
         self.assertIn("Topic Agent", html)
-        self.assertIn('class="topic-agent-open" href="/topics?mode=agent&amp;source=all"', html)
+        self.assertIn('href="/topics?mode=agent&amp;source=all"', html)
         self.assertNotIn('name="request_text"', html)
         self.assertNotIn("<summary>Advanced</summary>", html)
         self.assertIn('href="/topics?edit=datalake-operations"', html)
@@ -2952,8 +2952,9 @@ class BackendV2Tests(unittest.TestCase):
 
         agent_html = web.render_topics_page(config_path=config_path, topic_mode="agent")
         self.assertIn('name="request_text"', agent_html)
-        self.assertIn("Ask TopicAgent", agent_html)
-        self.assertIn("Back to source schedules", agent_html)
+        self.assertIn("Ask Topic Agent", agent_html)
+        self.assertIn("Propose topic changes", agent_html)
+        self.assertIn("All topics", agent_html)
         self.assertIn("All academic sources topics", agent_html)
 
         saved_html = web.render_topics_page(config_path=config_path, saved=True)
@@ -3326,6 +3327,7 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn('name="sources" value="arxiv" checked', html)
         self.assertIn('name="sources" value="semantic_scholar" checked', html)
         self.assertIn('name="sources" value="openalex" checked', html)
+        self.assertIn('<input type="checkbox" checked disabled> CORE <span>read-only</span>', html)
 
     def test_topic_agent_form_overrides_proposal_sources(self):
         config_path = Path(self.tmp.name) / "topics.yaml"
