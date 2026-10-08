@@ -3518,7 +3518,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topics-main-tab { min-width: 118px; padding: 7px 14px; border-radius: var(--radius-sm); color: var(--muted); font-weight: 720; text-align: center; text-decoration: none; }
 .topics-main-tab:hover { color: var(--text); background: rgba(148, 163, 184, 0.06); }
 .topics-main-tab.current { color: var(--text); background: rgba(56, 189, 248, 0.13); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35); }
-.topics-main-tab-industry.current { color: #ccfbf1; background: rgba(45, 212, 191, 0.13); box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.42); }
+.topics-main-tab-industry.current { color: #eaffb2; background: rgba(185, 227, 75, 0.14); box-shadow: inset 0 0 0 1px rgba(185, 227, 75, 0.48); }
 .academic-schedule, .academic-topics-panel { border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.94), rgba(15, 23, 34, 0.96)); }
 .academic-schedule { padding: 12px; margin-bottom: 10px; }
 .academic-section-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
@@ -3552,12 +3552,16 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-agent-context { margin: 0 38px 10px 0; padding: 8px 10px; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(56, 189, 248, 0.06); font-size: 12px; }
 .source-check-readonly { color: var(--muted); }
 .source-check-readonly span { margin-left: 2px; font-size: 10px; }
-.topics-industry-view { padding: 10px; border: 1px solid rgba(45, 212, 191, 0.28); border-radius: var(--radius); background: linear-gradient(180deg, rgba(15, 52, 55, 0.38), rgba(10, 35, 40, 0.30)); box-shadow: inset 3px 0 0 rgba(45, 212, 191, 0.42); }
-.topics-industry-view .industry-config { margin-top: 0; border-color: rgba(45, 212, 191, 0.48); background: linear-gradient(180deg, rgba(18, 46, 52, 0.96), rgba(12, 31, 38, 0.98)); box-shadow: inset 0 1px 0 rgba(153, 246, 228, 0.08); }
-.topics-industry-view .industry-primary-controls > label, .topics-industry-view .industry-schedule { border-color: rgba(45, 212, 191, 0.24); background: rgba(10, 38, 43, 0.72); }
-.topics-industry-view textarea, .topics-industry-view select { border-color: rgba(45, 212, 191, 0.28); background: rgba(7, 25, 31, 0.78); }
-.topics-industry-view textarea:focus, .topics-industry-view select:focus { border-color: rgba(45, 212, 191, 0.72); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.11); }
-.topics-industry-view .industry-config .primary { background: linear-gradient(180deg, #5eead4, #2dd4bf); border-color: rgba(45, 212, 191, 0.72); }
+.topics-industry-view { padding: 10px; border: 1px solid rgba(185, 227, 75, 0.30); border-radius: var(--radius); background: linear-gradient(180deg, rgba(35, 38, 37, 0.96), rgba(22, 24, 25, 0.98)); box-shadow: inset 4px 0 0 rgba(185, 227, 75, 0.72); }
+.topics-industry-view .industry-config { margin-top: 0; border-color: rgba(185, 227, 75, 0.42); background: linear-gradient(180deg, rgba(37, 40, 41, 0.98), rgba(29, 32, 33, 0.99)); box-shadow: inset 0 3px 0 rgba(185, 227, 75, 0.78); }
+.topics-industry-view .industry-primary-controls > label, .topics-industry-view .industry-schedule { border-color: rgba(185, 227, 75, 0.24); background: rgba(27, 30, 30, 0.90); }
+.topics-industry-view textarea, .topics-industry-view select { border-color: rgba(185, 227, 75, 0.30); background: rgba(18, 20, 20, 0.94); }
+.topics-industry-view textarea:focus, .topics-industry-view select:focus { border-color: rgba(185, 227, 75, 0.82); box-shadow: 0 0 0 3px rgba(185, 227, 75, 0.12); }
+.topics-industry-view .industry-config .primary { color: #172009; background: linear-gradient(180deg, #c9ef65, #abd53d); border-color: rgba(185, 227, 75, 0.82); }
+.topics-industry-view .source-badge-zenml { color: #dfff8e; background: rgba(185, 227, 75, 0.12); border-color: rgba(185, 227, 75, 0.62); }
+.topics-industry-view .industry-status-enabled { color: #dfff8e; background: rgba(185, 227, 75, 0.11); border-color: rgba(185, 227, 75, 0.52); }
+.topics-industry-view .industry-toggle-control input { accent-color: #b9e34b; }
+.topics-industry-view .industry-filter-details > summary { color: #d8f687; }
 @media (max-width: 980px) {
   .academic-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
