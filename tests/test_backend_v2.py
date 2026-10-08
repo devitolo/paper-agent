@@ -2934,11 +2934,8 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page(config_path=config_path)
 
         self.assertIn("Topic Agent", html)
-        self.assertIn('class="topic-agent-open" data-topic-agent-open', html)
-        self.assertIn('id="topic-agent-dialog" class="topic-agent-dialog"', html)
-        self.assertNotIn('class="topic-agent-dialog" open', html)
-        self.assertIn('name="request_text"', html)
-        self.assertIn("Ask TopicAgent", html)
+        self.assertIn('class="topic-agent-open" href="/topics?mode=agent&amp;source=all"', html)
+        self.assertNotIn('name="request_text"', html)
         self.assertNotIn("<summary>Advanced</summary>", html)
         self.assertIn('href="/topics?edit=datalake-operations"', html)
         self.assertIn('class="topic-row topic-read-row"', html)
@@ -2952,6 +2949,12 @@ class BackendV2Tests(unittest.TestCase):
         self.assertLess(html.index("Source schedule inventory"), html.index("Datalake operations"))
         self.assertIn('class="academic-source-grid"', html)
         self.assertIn('<a class="brand-home" href="/">', html)
+
+        agent_html = web.render_topics_page(config_path=config_path, topic_mode="agent")
+        self.assertIn('name="request_text"', agent_html)
+        self.assertIn("Ask TopicAgent", agent_html)
+        self.assertIn("Back to source schedules", agent_html)
+        self.assertIn("All academic sources topics", agent_html)
 
         saved_html = web.render_topics_page(config_path=config_path, saved=True)
         self.assertIn("Saved. Changes apply to future scheduled runs.", saved_html)
@@ -3305,20 +3308,20 @@ class BackendV2Tests(unittest.TestCase):
 
         self.assertIn("What do you want Project Paper to scout?", html)
         self.assertIn("TopicAgent Proposal", html)
-        self.assertIn('class="topic-agent-dialog" open', html)
+        self.assertIn('class="academic-schedule academic-agent-workspace"', html)
         self.assertIn("Datalake reliability", html)
         self.assertIn('name="proposal_json"', html)
         self.assertIn("Apply and save", html)
         self.assertNotIn('name="topic_text"', html)
         self.assertLess(html.index("What do you want Project Paper to scout?"), html.index("TopicAgent Proposal"))
-        self.assertLess(html.index("Source schedule inventory"), html.index("TopicAgent Proposal"))
+        self.assertLess(html.index("Topic Agent"), html.index("TopicAgent Proposal"))
         self.assertNotIn('class="topic-source topic-proposal-panel"', html)
         self.assertIn('name="conversation_json"', html)
         self.assertIn("New pending", html)
         self.assertIn('class="topic-row topic-read-row topic-preview-row"', html)
 
     def test_topic_agent_form_allows_explicit_source_selection(self):
-        html = web.render_topics_page()
+        html = web.render_topics_page(topic_mode="agent")
 
         self.assertIn('name="sources" value="arxiv" checked', html)
         self.assertIn('name="sources" value="semantic_scholar" checked', html)
@@ -4120,8 +4123,9 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("CORE operations and reliability", core_html)
         self.assertIn("PAPER_AGENT_CORE_TOPIC_1", core_html)
         self.assertIn("CORE queries are configured through environment variables", core_html)
-        self.assertIn("Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar", core_html)
         self.assertIn("Environment", core_html)
+        agent_html = web.render_topics_page(topic_mode="agent")
+        self.assertIn("Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar", agent_html)
 
     def test_topic_inventory_exposes_four_sources(self):
         inventory = scout_topic_inventory()

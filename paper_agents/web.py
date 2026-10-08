@@ -200,6 +200,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         edit_id=params.get("edit", [None])[0],
                         section=params.get("section", ["academic"])[0],
                         selected_source=params.get("source", ["arxiv"])[0],
+                        topic_mode=params.get("mode", ["inventory"])[0],
                     )
                 )
                 return
@@ -247,6 +248,8 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                             render_topics_page(
                                 proposal=proposal,
                                 conversation=updated_conversation,
+                                selected_source="all",
+                                topic_mode="agent",
                             )
                         )
                         return
@@ -1294,11 +1297,17 @@ def render_topics_page(
     industry_config_path: Path = DEFAULT_INDUSTRY_CONFIG_PATH,
     section: str = "academic",
     selected_source: str = "arxiv",
+    topic_mode: str = "inventory",
 ) -> str:
     inventory = scout_topic_inventory(config_path=config_path)
     academic_inventory = [item for item in inventory if item["source"] != "zenml"]
     academic_sources = [item["source"] for item in academic_inventory]
     section = section if section in {"academic", "industry"} else "academic"
+    topic_mode = topic_mode if topic_mode in {"inventory", "agent"} else "inventory"
+    if proposal or conversation:
+        topic_mode = "agent"
+    if topic_mode == "agent":
+        selected_source = "all"
     selected_source = selected_source if selected_source in {*academic_sources, "all"} else "arxiv"
     topics = load_topic_config_or_seed(config_path)
     edit_topic = next((topic for topic in topics if topic.id == edit_id), None)
@@ -1336,22 +1345,25 @@ def render_topics_page(
             topic_note = "Edit, enable, or disable topics for future academic runs."
         source_label = "All academic sources" if selected_source == "all" else source_display_name(selected_source)
         all_link = f'<a class="academic-source-card academic-source-all{" selected" if selected_source == "all" else ""}" href="/topics?source=all"><strong>All topics</strong><span>{total_topics} configured</span></a>'
-        topic_agent_open = " open" if proposal or conversation else ""
-        topic_agent_context = (
-            '<p class="topic-agent-context">CORE queries are managed through environment variables and cannot be changed here. Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar.</p>'
-            if selected_source == "core"
-            else ""
-        )
-        body = f"""<section class="academic-schedule" aria-labelledby="academic-schedule-title">
+        schedule_panel = f"""<section class="academic-schedule" aria-labelledby="academic-schedule-title">
           <div class="academic-section-head">
             <div><h2 id="academic-schedule-title">Source schedule inventory</h2><p>Choose a source to compare its next searches with its configured topics.</p></div>
             <div class="academic-schedule-actions">
-              <button type="button" class="topic-agent-open" data-topic-agent-open>Topic Agent</button>
+              <a class="topic-agent-open" href="/topics?mode=agent&amp;source=all">Topic Agent</a>
               {all_link}
             </div>
           </div>
           <div class="academic-source-grid">{cards}</div>
-        </section>
+        </section>"""
+        agent_panel = f"""<section class="academic-schedule academic-agent-workspace" aria-labelledby="topic-agent-title">
+          <div class="academic-section-head">
+            <div><h2 id="topic-agent-title">Topic Agent</h2><p>Describe what to scout while comparing the complete academic topic list below.</p></div>
+            <a class="secondary-link" href="/topics">Back to source schedules</a>
+          </div>
+          <p class="topic-agent-context">Topic Agent manages the editable topics used by arXiv, OpenAlex, and Semantic Scholar. CORE queries remain environment-controlled.</p>
+          {render_topic_agent_panel(request_text, proposal, conversation or [])}
+        </section>"""
+        body = f"""{agent_panel if topic_mode == "agent" else schedule_panel}
         <div class="academic-workspace">
           <section class="academic-topics-panel">
             <div class="academic-section-head">
@@ -1372,12 +1384,7 @@ def render_topics_page(
               </div>
             </div>
           </section>
-        </div>
-        <dialog id="topic-agent-dialog" class="topic-agent-dialog"{topic_agent_open}>
-          <form method="dialog" class="topic-agent-dialog-close"><button type="submit" aria-label="Close Topic Agent">×</button></form>
-          {topic_agent_context}
-          {render_topic_agent_panel(request_text, proposal, conversation or [])}
-        </dialog>"""
+        </div>"""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1403,13 +1410,6 @@ def render_topics_page(
           }});
         }});
       }}
-      const topicAgentDialog = document.getElementById("topic-agent-dialog");
-      document.querySelectorAll("[data-topic-agent-open]").forEach((button) => {{
-        button.addEventListener("click", () => topicAgentDialog?.showModal());
-      }});
-      topicAgentDialog?.addEventListener("click", (event) => {{
-        if (event.target === topicAgentDialog) topicAgentDialog.close();
-      }});
       document.querySelectorAll(".topic-agent-form").forEach((form) => {{
         form.addEventListener("submit", (event) => {{
           const button = event.submitter || form.querySelector("button[type='submit']");
@@ -3527,19 +3527,21 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .academic-source-all { min-width: 108px; padding: 6px 9px; }
 .academic-source-all strong, .academic-source-all span { display: block; }
 .academic-schedule-actions { display: flex; gap: 8px; align-items: stretch; }
-.topic-agent-open { min-width: 108px; color: #cbeafe; border-color: rgba(56, 189, 248, 0.36); background: rgba(56, 189, 248, 0.08); font-weight: 720; }
+.topic-agent-open { display: inline-flex; align-items: center; justify-content: center; min-width: 108px; padding: 0 10px; border: 1px solid rgba(56, 189, 248, 0.36); border-radius: var(--radius-sm); color: #cbeafe; background: rgba(56, 189, 248, 0.08); font-weight: 720; text-decoration: none; }
 .topic-agent-open:hover { color: var(--text); border-color: rgba(56, 189, 248, 0.62); background: rgba(56, 189, 248, 0.13); }
 .academic-workspace { display: block; }
 .academic-topics-panel { min-width: 0; padding: 12px; }
 .academic-topic-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .academic-topic-scroll .topic-table { min-width: 820px; }
 .academic-topic-empty { border: 0; border-radius: 0; box-shadow: none; }
-.topic-agent-dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-sizing: border-box; padding: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); background: linear-gradient(180deg, rgba(21, 31, 45, 0.99), rgba(12, 20, 32, 0.99)); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.62); overflow: auto; }
-.topic-agent-dialog::backdrop { background: rgba(3, 8, 14, 0.72); backdrop-filter: blur(2px); }
-.topic-agent-dialog-close { display: flex; justify-content: flex-end; margin-bottom: -30px; position: relative; z-index: 2; }
-.topic-agent-dialog-close button { width: 30px; min-height: 30px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 22px; }
-.topic-agent-dialog-close button:hover { color: var(--text); }
-.topic-agent-dialog > .topic-source { border: 0; padding: 0; background: transparent; }
+.academic-agent-workspace > .topic-source { border: 0; padding: 0; background: transparent; }
+.academic-agent-workspace > .topic-source > .topic-source-head { display: none; }
+.academic-agent-workspace .topic-agent-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.academic-agent-workspace .topic-agent-form > label { margin: 0; }
+.academic-agent-workspace .topic-agent-form textarea { min-height: 64px; }
+.academic-agent-workspace .source-checks { grid-column: 1; margin: 0; }
+.academic-agent-workspace .topic-agent-form > button { grid-column: 2; grid-row: 1 / span 2; min-width: 150px; align-self: stretch; }
+.academic-agent-workspace .topic-agent-status, .academic-agent-workspace .topic-conversation, .academic-agent-workspace .topic-proposal-panel { grid-column: 1 / -1; }
 .topic-agent-context { margin: 0 38px 10px 0; padding: 8px 10px; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); color: var(--muted-strong); background: rgba(56, 189, 248, 0.06); font-size: 12px; }
 .topics-industry-view .industry-config { margin-top: 0; border-color: rgba(45, 212, 191, 0.32); background: linear-gradient(180deg, rgba(17, 35, 43, 0.92), rgba(13, 28, 35, 0.96)); box-shadow: inset 0 1px 0 rgba(153, 246, 228, 0.035); }
 .topics-industry-view .industry-config .primary { background: linear-gradient(180deg, #5eead4, #2dd4bf); border-color: rgba(45, 212, 191, 0.72); }
@@ -3551,6 +3553,8 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .academic-section-head { display: grid; }
   .academic-schedule-actions { width: 100%; }
   .academic-schedule-actions > * { flex: 1; }
+  .academic-agent-workspace .topic-agent-form { grid-template-columns: 1fr; }
+  .academic-agent-workspace .topic-agent-form > button, .academic-agent-workspace .source-checks { grid-column: 1; grid-row: auto; }
   .topics-main-tabs { width: 100%; }
   .topics-main-tab { flex: 1; min-width: 0; }
 }
