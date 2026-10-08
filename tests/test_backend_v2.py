@@ -4110,14 +4110,19 @@ class BackendV2Tests(unittest.TestCase):
         self.assertIn("AIOps", html)
         self.assertIn("AIOps observability incident response", html)
         self.assertIn("AIOps root cause analysis", html)
+        self.assertIn("CORE operations and reliability", html)
+        self.assertIn("PAPER_AGENT_CORE_TOPIC_1", html)
 
-    def test_topic_inventory_exposes_three_sources(self):
+    def test_topic_inventory_exposes_four_sources(self):
         inventory = scout_topic_inventory()
 
-        self.assertEqual([item["source"] for item in inventory], ["arxiv", "openalex", "semantic_scholar"])
+        self.assertEqual([item["source"] for item in inventory], ["arxiv", "openalex", "semantic_scholar", "core"])
         openalex = next(item for item in inventory if item["source"] == "openalex")
         self.assertEqual([topic.query for topic in openalex["topics"]], OPENALEX_ROTATING_TOPICS)
         self.assertIn(openalex["active_topics"][0], OPENALEX_ROTATING_TOPICS)
+        core = next(item for item in inventory if item["source"] == "core")
+        self.assertEqual(len(core["topics"]), 3)
+        self.assertEqual(core["active_topics"], [topic.query for topic in core["topics"]])
 
     def _seed_review_recommendation(self, *, source_id: str = "2607.reviewv1") -> tuple[int, int]:
         paper_id, _ = db.upsert_paper(

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from paper_agents.scout import DEFAULT_SCOUT_TOPICS
-from paper_agents.topics import DEFAULT_TOPIC_CONFIG_PATH, topic_inventory_from_config, select_topics_for_source
+from paper_agents.topics import DEFAULT_TOPIC_CONFIG_PATH, TopicEntry, topic_inventory_from_config, select_topics_for_source
 
 
 OPENALEX_ROTATING_TOPICS = [
@@ -19,6 +19,37 @@ OPENALEX_ROTATING_TOPICS = [
 SEMANTIC_SCHOLAR_CRON_TOPICS = [
     "AIOps root cause analysis",
 ]
+
+CORE_CRON_TOPICS = [
+    ("CORE operations and reliability", "(AIOps OR observability OR telemetry) AND (operations OR reliability OR production)"),
+    ("CORE incident diagnosis", '("root cause analysis" OR "incident management" OR remediation) AND (software OR cloud OR microservice)'),
+    ("CORE agentic engineering", '("multi-agent" OR agentic OR autonomous) AND ("software engineering" OR operations OR debugging)'),
+]
+
+
+def core_topic_inventory() -> dict[str, Any]:
+    topics = [
+        TopicEntry(
+            id=f"core-query-{index}",
+            label=label,
+            query=query,
+            sources=["core"],
+            cadence="daily",
+            priority="normal",
+            enabled=True,
+            note=f"Override with PAPER_AGENT_CORE_TOPIC_{index}.",
+        )
+        for index, (label, query) in enumerate(CORE_CRON_TOPICS, start=1)
+    ]
+    return {
+        "source": "core",
+        "label": "CORE",
+        "schedule": "Source cron/manual job",
+        "description": "Used by scripts/core_pipeline.sh for CORE discovery runs.",
+        "topics": topics,
+        "active_topics": [topic.query for topic in topics],
+        "notes": "PAPER_AGENT_CORE_TOPIC_1, _2, and _3 override these queries for a run.",
+    }
 
 
 def openalex_rotating_topic(today: date | None = None, *, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> str:
@@ -38,7 +69,7 @@ def scout_topic_inventory(
     config_path: Path = DEFAULT_TOPIC_CONFIG_PATH,
 ) -> list[dict[str, Any]]:
     try:
-        return topic_inventory_from_config(config_path, today=today, now=now)
+        return [*topic_inventory_from_config(config_path, today=today, now=now), core_topic_inventory()]
     except ValueError:
         active_openalex_topic = OPENALEX_ROTATING_TOPICS[int((today or date.today()).strftime("%j")) % len(OPENALEX_ROTATING_TOPICS)]
         return [
@@ -69,4 +100,5 @@ def scout_topic_inventory(
                 "active_topics": list(SEMANTIC_SCHOLAR_CRON_TOPICS),
                 "notes": "Fallback view from built-in defaults because config/topics.yaml could not be loaded.",
             },
+            core_topic_inventory(),
         ]
