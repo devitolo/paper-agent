@@ -1385,19 +1385,47 @@ def render_topics_page(
 def render_industry_config_section(config: Any) -> str:
     include = "\n".join(config.include_signals)
     exclude = "\n".join(config.exclude_signals)
+    enabled_text = "On" if config.enabled else "Off"
+    enabled_class = "enabled" if config.enabled else "disabled"
+    max_options = "".join(
+        f'<option value="{value}"{" selected" if value == config.max_items_per_run else ""}>{value}</option>'
+        for value in range(1, 6)
+    )
     return f"""<section class="topic-source industry-config" id="zenml">
       <div class="topic-source-head">
-        <h2><span class="source-badge source-badge-zenml">ZenML</span> Industry</h2>
-        <span>{escape(config.schedule)}</span>
+        <div>
+          <h2><span class="source-badge source-badge-zenml">ZenML</span> Industry sources</h2>
+          <p>Practical workplace AI and engineering stories from outside academic paper indexes.</p>
+        </div>
+        <span class="industry-status industry-status-{enabled_class}">{enabled_text}</span>
       </div>
-      <p>Practical workplace AI and engineering case studies. This source uses ZenML metadata filters and does not use academic MiniLM or relevance scoring.</p>
-      <form method="post" action="/topics" class="topic-edit-form industry-config-form">
+      <form method="post" action="/topics" class="industry-config-form">
         <input type="hidden" name="action" value="update_industry">
-        <label>Include / prioritize signals<textarea name="include_signals" rows="6">{escape(include)}</textarea></label>
-        <label>Exclude / deprioritize signals<textarea name="exclude_signals" rows="5">{escape(exclude)}</textarea></label>
-        <label>Maximum items per run<input type="number" name="max_items_per_run" min="1" max="5" value="{config.max_items_per_run}"></label>
-        <label class="inline-check"><input type="checkbox" name="enabled" value="1" {'checked' if config.enabled else ''}> Weekly ZenML discovery enabled</label>
-        <div class="topic-form-actions"><button type="submit" class="primary">Save Industry settings</button></div>
+        <div class="industry-primary-controls">
+          <label class="industry-toggle">
+            <span>Weekly discovery</span>
+            <span class="industry-toggle-control"><input type="checkbox" name="enabled" value="1" {'checked' if config.enabled else ''}> Run automatically</span>
+          </label>
+          <label class="industry-limit">Results to keep each week
+            <select name="max_items_per_run">{max_options}</select>
+          </label>
+          <div class="industry-schedule"><span>Schedule</span><strong>{escape(config.schedule)}</strong></div>
+        </div>
+        <details class="industry-filter-details">
+          <summary>Filter details <span>Change what Industry discovery looks for</span></summary>
+          <div class="industry-filter-grid">
+            <label>Look for these signals
+              <small>One phrase per line. Matching items are prioritized.</small>
+              <textarea name="include_signals" rows="6">{escape(include)}</textarea>
+            </label>
+            <label>Usually skip these signals
+              <small>One phrase per line. Items are deprioritized unless they also match a preferred signal.</small>
+              <textarea name="exclude_signals" rows="6">{escape(exclude)}</textarea>
+            </label>
+          </div>
+          <p class="industry-note">Industry discovery uses ZenML metadata. It does not run the academic MiniLM relevance model.</p>
+        </details>
+        <div class="industry-actions"><button type="submit" class="primary">Save changes</button></div>
       </form>
     </section>"""
 
@@ -3413,6 +3441,31 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-source-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 6px; }
 .topic-source-head h2 { margin: 0; }
 .topic-source-head > span, .topic-source > p, .topic-note-text { color: #57606a; font-size: 12px; }
+.industry-config { padding: 16px; }
+.industry-config .topic-source-head { align-items: flex-start; margin-bottom: 14px; }
+.industry-config .topic-source-head h2 { display: flex; align-items: center; gap: 7px; }
+.industry-config .topic-source-head p { margin: 5px 0 0; color: #57606a; font-size: 13px; }
+.industry-status { flex: 0 0 auto; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 700; }
+.industry-status-enabled { color: #116329; background: #dafbe1; border: 1px solid #82e596; }
+.industry-status-disabled { color: #57606a; background: #f6f8fa; border: 1px solid #d8dee4; }
+.industry-config-form { display: grid; gap: 12px; }
+.industry-primary-controls { display: grid; grid-template-columns: minmax(210px, 1fr) minmax(170px, .7fr) minmax(220px, 1fr); gap: 10px; }
+.industry-primary-controls > label, .industry-schedule { min-width: 0; border: 1px solid #d8dee4; border-radius: 7px; background: #f6f8fa; padding: 10px 12px; }
+.industry-toggle { display: flex; flex-direction: column; justify-content: space-between; gap: 9px; }
+.industry-toggle-control { display: flex; gap: 7px; align-items: center; color: #24292f; font-weight: 600; }
+.industry-limit select { margin-top: 7px; }
+.industry-schedule { display: flex; flex-direction: column; gap: 7px; }
+.industry-schedule span { color: #57606a; font-size: 12px; font-weight: 600; }
+.industry-schedule strong { font-size: 13px; }
+.industry-filter-details { border-top: 1px solid #d8dee4; padding-top: 10px; }
+.industry-filter-details > summary { cursor: pointer; color: #24292f; font-weight: 650; list-style-position: outside; margin-left: 16px; }
+.industry-filter-details > summary span { color: #57606a; font-size: 12px; font-weight: 400; margin-left: 6px; }
+.industry-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.industry-filter-grid label { min-width: 0; }
+.industry-filter-grid small { display: block; min-height: 30px; margin: 3px 0 6px; color: #57606a; font-weight: 400; line-height: 1.35; }
+.industry-filter-grid textarea { min-height: 128px; resize: vertical; }
+.industry-note { margin: 8px 0 0; color: #57606a; font-size: 12px; }
+.industry-actions { display: flex; justify-content: flex-end; }
 .topic-columns { display: grid; grid-template-columns: minmax(180px, 0.38fr) minmax(0, 1fr); gap: 12px; margin-top: 8px; }
 .topic-list { margin: 0; padding-left: 22px; columns: 2; column-gap: 28px; }
 .active-topic-list { columns: 1; }
@@ -3436,6 +3489,11 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topic-form-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .topic-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 10px; margin: 0; padding: 0 10px 8px; color: #57606a; font-size: 12px; }
 .topic-toolbar label { max-width: 240px; width: 100%; }
+@media (max-width: 820px) {
+  .industry-primary-controls, .industry-filter-grid { grid-template-columns: 1fr; }
+  .industry-filter-grid small { min-height: 0; }
+  .industry-filter-details > summary span { display: block; margin: 3px 0 0; }
+}
 .topic-toolbar input { min-height: 28px; }
 .topic-table { display: grid; border-top: 1px solid #d8dee4; background: #ffffff; }
 .topic-table-head, .topic-row { display: grid; grid-template-columns: minmax(150px, 0.9fr) minmax(260px, 1.6fr) minmax(140px, 0.7fr) 70px 70px 62px 42px; gap: 8px; align-items: center; }
