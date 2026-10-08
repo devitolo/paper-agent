@@ -163,9 +163,62 @@ CORE reads `CORE_API_KEY` from the local or production environment and uses CORE
 
 CORE unauthenticated users receive 100 tokens per day and at most 10 requests per minute. Registered Personal users receive 1,000 tokens per day and at most 25 requests per minute. A simple query usually costs 1 token; complex queries can cost 3-5. Respect `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Retry-After`. Project Paper should stay conservative: bounded request budgets, roughly 3-second request spacing, and cooldown on HTTP 429. The first CORE pass stores metadata and links only. Do not bulk-download PDFs from CORE; if selected-paper enrichment later uses full text, prefer the supplied `downloadUrl` and do not bypass CORE API/fileserver or systematically harvest PDFs.
 
+Industry discovery is a separate lane from academic Scout. The ZenML pilot
+imports practical LLMOps and AI engineering case studies from the ZenML LLMOps
+Database with source `zenml`:
+
+```bash
+python3 -m paper_agents.cli zenml-pilot --dry-run
+python3 -m paper_agents.cli zenml-pilot
+```
+
+ZenML records include metadata such as company, industry, tags, source URL, and
+ZenML summary text. Project Paper does not ingest the original article full
+text; generated triage artifacts are marked abstract-only/metadata-derived and
+stored under `data/zenml-pilot`. Candidate selection uses configurable
+preferred and skip signals from `config/industry.json`, seed exclusions for
+already-reviewed examples, source URL deduplication, and a maximum-items cap.
+It does not use the academic MiniLM relevance model. Imported records appear in
+Review Queue with ZenML/source-domain labeling, company metadata when present,
+source filtering, discovery summaries, rationale, and links back to the
+original source. Treat the original link as the evidence path for deep reading.
+
 During bounded rescouts inside one workflow cycle, papers rediscovered earlier in the same cycle remain eligible instead of being marked `previously_discovered`; older-cycle discoveries are still excluded. Papers already recommended before the current Scout run are excluded as `already_recommended` so they do not consume new daily recommendation slots, including during later rescout attempts in the same workflow cycle. Each rescout attempt asks the source for a deeper candidate window, so a shallow stale result set does not repeat unchanged across attempts.
 
-Scout topics are file-backed in `config/topics.yaml` and intentionally cover AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, software maintenance, SRE, cloud operations, and production engineering. Curator penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, grid, and transportation incidents. The web server includes `/topics`, the editable Topic Management V1 page. Source schedule inventory appears above All Topics, and All Topics is collapsed by default. The primary flow is TopicAgent: describe the scouting intent, local Ollama/Qwen (`qwen2.5:1.5b-instruct` by default) semantically infers one of `create_new`, `update_existing`, `remove_existing`, or `ask_clarifying_question`, then proposes label, query, sources, cadence, priority, and enabled state for approval before config is saved. Operators can tune this with `PAPER_AGENT_TOPIC_MODEL`, `PAPER_AGENT_TOPIC_OLLAMA_URL` or `PAPER_AGENT_OLLAMA_URL`, and `PAPER_AGENT_TOPIC_TIMEOUT_SECONDS` defaulting to 30 seconds. The proposal, previous conversation, and clarifying question loop stay in the same TopicAgent panel, and pending changes preview in the topic list before Apply. Invalid model JSON falls back to deterministic proposal logic for safe creates/duplicates/explicit actions; ambiguous change or remove intent falls back to a clarifying question instead of guessing. In product terms, `remove`, `delete`, and `drop` mean remove the topic from config; `disable`, `turn off`, and `pause` mean preserve the topic with `enabled: false`. Use row Enable/Disable actions for quick toggles, or Edit as the manual escape hatch for precise query, sources, cadence, priority, and enabled changes. Changes affect future scheduled runs only; `/topics` does not run Scout immediately.
+Scout topics are file-backed in `config/topics.yaml` and intentionally cover AIOps, LLM/agentic operations, incident response, root-cause/failure diagnosis, observability/log/trace analysis, debugging, software maintenance, SRE, cloud operations, and production engineering. Curator penalizes obvious physical-world incident domains such as railway, traffic/vehicular, medical/healthcare, grid, and transportation incidents.
+
+The web server includes `/topics`, split into Academic and Industry workspaces.
+Academic shows source schedule cards for arXiv, OpenAlex, Semantic Scholar, and
+CORE; CORE topics are read-only because production CORE queries are controlled
+by environment variables. Topic Agent and All topics are persistent upper-right
+controls. Topic Agent replaces the schedule panel in place, compares against
+the complete academic topic table by default, and manages only editable
+academic topics for arXiv/OpenAlex/Semantic Scholar.
+
+The primary academic flow is TopicAgent: describe the scouting intent, local
+Ollama/Qwen (`qwen2.5:1.5b-instruct` by default) semantically infers one of
+`create_new`, `update_existing`, `remove_existing`, or
+`ask_clarifying_question`, then proposes label, query, sources, cadence,
+priority, and enabled state for approval before config is saved. Operators can
+tune this with `PAPER_AGENT_TOPIC_MODEL`, `PAPER_AGENT_TOPIC_OLLAMA_URL` or
+`PAPER_AGENT_OLLAMA_URL`, and `PAPER_AGENT_TOPIC_TIMEOUT_SECONDS` defaulting to
+30 seconds. The proposal, previous conversation, and clarifying question loop
+stay in the same TopicAgent panel, and pending changes preview in the topic
+list before Apply. Invalid model JSON falls back to deterministic proposal
+logic for safe creates/duplicates/explicit actions; ambiguous change or remove
+intent falls back to a clarifying question instead of guessing. In product
+terms, `remove`, `delete`, and `drop` mean remove the topic from config;
+`disable`, `turn off`, and `pause` mean preserve the topic with
+`enabled: false`. Use row Enable/Disable actions for quick toggles, or Edit as
+the manual escape hatch for precise query, sources, cadence, priority, and
+enabled changes. Changes affect future scheduled runs only; `/topics` does not
+run Scout immediately.
+
+The Industry workspace configures the ZenML weekly lane. It exposes
+enable/disable, maximum results per run, the Sunday 11:30 PM
+America/Los_Angeles schedule, preferred signals, and skip signals. These
+settings save to `config/industry.json` and affect future ZenML runs; they do
+not start a run from the UI.
 
 ## Review Queue UI
 

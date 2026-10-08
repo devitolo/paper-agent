@@ -4,6 +4,42 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ## 2026-10-05
 
+### Industry source and Topics workspace
+
+Status: Implemented in production commits `f782a48`, `4968e2a`, `c432ada`,
+`cf7b3cc`, `b9d598c`, `b1ab942`, `c4d12c2`, `fd1fa2a`, and `32ea2a8`;
+production deployment run `37742316672` completed healthy.
+
+Decision: Add a separate Industry discovery lane for practical AI engineering
+case studies without mixing it into academic Scout relevance or full-paper
+reading claims.
+
+Completed behavior:
+
+- Import from the ZenML LLMOps Database as source `zenml`, with metadata,
+  company, industry, tags, original source URL, and ZenML summary provenance.
+- Treat ZenML as metadata-only: Project Paper stores ZenML summaries and links,
+  but does not ingest the original article full text.
+- Score Industry candidates with configurable preferred and skip signals in
+  `config/industry.json`; do not run academic MiniLM relevance for ZenML.
+- Keep the import idempotent through source URL deduplication, seed exclusions
+  for already-reviewed examples, resilient fallback rows when the remote dataset
+  is unavailable, and a Review Queue capacity cap.
+- Store generated ZenML triage summaries under package-safe
+  `data/zenml-pilot` artifact paths.
+- Expose `python -m paper_agents.cli zenml-pilot` and
+  `scripts/zenml_pipeline.sh`; production cron runs
+  `scripts/mini_container_job.sh zenml` weekly on Sunday at 11:30 PM
+  America/Los_Angeles.
+- Add `/topics` Academic and Industry workspaces. Academic shows source
+  schedule cards for arXiv, OpenAlex, Semantic Scholar, and read-only
+  environment-controlled CORE topics. Topic Agent and All topics are persistent
+  upper-right controls; Topic Agent replaces the schedule panel in place and
+  compares against all academic topics.
+- Add Industry settings for enabling/disabling weekly discovery, max results
+  per run, schedule visibility, preferred signals, and skip signals.
+- Apply the approved Graphite + Citron visual treatment to the Industry view.
+
 ### Review Queue saved and excluded organization states
 
 Status: Implemented in production commit `75e14b6`.

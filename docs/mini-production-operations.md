@@ -56,6 +56,7 @@ calls one of these launcher jobs:
 | arXiv pipeline | `arxiv` | daily 05:00 |
 | Semantic Scholar pipeline | `semantic` | daily 06:00 |
 | CORE pipeline | `core` | daily trial source run; see live crontab |
+| ZenML industry discovery | `zenml` | Sunday 23:30 America/Los_Angeles |
 | Gemini profile comparison | `profile` | biweekly cadence checked by the Monday 02:00 wrapper; dry-run only |
 | SQLite backup | `backup` | Sunday 01:00 |
 
@@ -93,6 +94,38 @@ or systematically harvest PDFs. The current production launcher is
 `scripts/mini_container_job.sh core`, logs to `logs/pipeline-core.log`, runs
 Qwen Curator, and feeds MiniLM parallel evaluation when
 `PAPER_MINILM_EVAL_ENABLED=1`.
+
+ZenML industry discovery is the weekly non-academic lane. The committed cron
+template runs:
+
+```sh
+30 23 * * 0 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh zenml >> logs/pipeline-zenml.log 2>&1
+```
+
+`scripts/mini_container_job.sh zenml` enters the app container and runs
+`python -m paper_agents.migration_job zenml`, which delegates to
+`scripts/zenml_pipeline.sh`. The pipeline has its own nonblocking
+`project-paper-zenml.lock`; an overlap prints a skip message and exits
+successfully. The ZenML import itself reads `config/industry.json`, honors the
+enable flag and `max_items_per_run`, stores artifacts under `data/zenml-pilot`,
+and does not run academic MiniLM relevance.
+
+Operators can preview or run the import inside the app context with:
+
+```sh
+python -m paper_agents.cli zenml-pilot --dry-run
+python -m paper_agents.cli zenml-pilot
+```
+
+Use `/topics?section=industry` to enable/disable the weekly lane or adjust
+preferred/skip signals. Production deployment preserves mounted config; do not
+replace `config/industry.json` with defaults during rollout.
+
+Deployment verification checks that exactly one active ZenML cron entry exists.
+Light deploy validation records `zenml_deploy_check=light`; full validation
+adds a bounded `zenml-pilot --dry-run` smoke check. If post-deploy verification
+reports `zenml_weekly_cron=invalid`, inspect `crontab -l` for missing or
+duplicate `scripts/mini_container_job.sh zenml` entries before changing code.
 
 ## Releases
 
