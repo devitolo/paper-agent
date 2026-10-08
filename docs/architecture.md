@@ -91,6 +91,16 @@ Scheduled production jobs share one nonblocking job lease. If a source, profile,
 
 Scout source adapters translate a normalized scouting request into source-specific calls and return normalized paper records. arXiv is the default and nightly source; Semantic Scholar and OpenAlex are opt-in adapters for exploratory runs. Scout persists candidate pools and diagnostics only; preference scoring and recommendations belong to Curator.
 
+Industry discovery is intentionally adjacent to, not merged into, academic
+Scout. The ZenML pilot imports rows from the ZenML LLMOps Database as source
+`zenml`, using metadata, tags, company, industry, source URLs, and ZenML
+summary text. It records provenance and generated summary artifacts but does
+not ingest the original article full text. Selection is deterministic and
+configurable through preferred/skip signals in `config/industry.json`; it does
+not use academic MiniLM relevance. This lets Project Paper surface practical
+industry case studies in the Review Queue while keeping academic paper ranking
+and source adapters inspectable.
+
 Curator reads the candidate pool, active profile version, history, guidance, and stored artifact provenance. Normal pipeline scoring first computes deterministic relevance/profile fit, then runs bounded local Qwen evidence assessment per candidate outside SQLite write transactions. It stores evaluations for every candidate considered, persists evidence assessment/provenance/model/timing/score components in run metadata, and writes at most three ordered recommendations.
 
 The paper registry stores canonical paper identifiers, alternate sources, workflow state, Scout telemetry, Curator evaluations, recommendation records, artifacts, immutable feedback inputs, parse attempts, structured feedback, profile apply attempts, profile versions, and active scouting guidance. SQLite is the initial store because the system is single-host and benefits from easy inspection, online backup, and restore drills.
