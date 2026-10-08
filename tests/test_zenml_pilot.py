@@ -166,12 +166,13 @@ class ZenMLPilotTests(unittest.TestCase):
             save_zenml_config(ZenMLConfig(max_items_per_run=4), industry)
             html = render_topics_page(section="industry", industry_config_path=industry)
             self.assertIn("Industry", html)
-            self.assertIn('class="topics-main-tab current" href="/topics?section=industry"', html)
+            self.assertIn('class="topics-main-tab topics-main-tab-industry current" href="/topics?section=industry"', html)
             self.assertIn("does not run the academic MiniLM", html)
             self.assertIn('name="max_items_per_run"', html)
             self.assertIn('value="4"', html)
             self.assertIn("Filter details", html)
-            self.assertIn("Results to keep each week", html)
+            self.assertIn("Maximum results per week", html)
+            self.assertIn('<details class="industry-filter-details" open>', html)
 
 
 if __name__ == "__main__":

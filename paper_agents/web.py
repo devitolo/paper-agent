@@ -1314,8 +1314,8 @@ def render_topics_page(
         banner = f'<div class="banner warning">Topic config was not saved: {escape(error)}</div>'
 
     main_tabs = (
-        f'<a class="topics-main-tab{" current" if section == "academic" else ""}" href="/topics?section=academic">Academic</a>'
-        f'<a class="topics-main-tab{" current" if section == "industry" else ""}" href="/topics?section=industry">Industry</a>'
+        f'<a class="topics-main-tab topics-main-tab-academic{" current" if section == "academic" else ""}" href="/topics?section=academic">Academic</a>'
+        f'<a class="topics-main-tab topics-main-tab-industry{" current" if section == "industry" else ""}" href="/topics?section=industry">Industry</a>'
     )
     if section == "industry":
         body = f'<div class="topics-industry-view">{render_industry_config_section(industry_config)}</div>'
@@ -1463,12 +1463,12 @@ def render_industry_config_section(config: Any) -> str:
             <span>Weekly discovery</span>
             <span class="industry-toggle-control"><input type="checkbox" name="enabled" value="1" {'checked' if config.enabled else ''}> Run automatically</span>
           </label>
-          <label class="industry-limit">Results to keep each week
+          <label class="industry-limit">Maximum results per week
             <select name="max_items_per_run">{max_options}</select>
           </label>
           <div class="industry-schedule"><span>Schedule</span><strong>{escape(config.schedule)}</strong></div>
         </div>
-        <details class="industry-filter-details">
+        <details class="industry-filter-details" open>
           <summary>Filter details <span>Change what Industry discovery looks for</span></summary>
           <div class="industry-filter-grid">
             <label>Look for these signals
@@ -3489,6 +3489,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .topics-main-tab { min-width: 118px; padding: 7px 14px; border-radius: var(--radius-sm); color: var(--muted); font-weight: 720; text-align: center; text-decoration: none; }
 .topics-main-tab:hover { color: var(--text); background: rgba(148, 163, 184, 0.06); }
 .topics-main-tab.current { color: var(--text); background: rgba(56, 189, 248, 0.13); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35); }
+.topics-main-tab-industry.current { color: #ccfbf1; background: rgba(45, 212, 191, 0.13); box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.42); }
 .academic-schedule, .academic-topics-panel, .academic-agent-panel { border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(180deg, rgba(21, 31, 45, 0.94), rgba(15, 23, 34, 0.96)); }
 .academic-schedule { padding: 12px; margin-bottom: 10px; }
 .academic-section-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
@@ -3512,7 +3513,8 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .academic-topic-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .academic-topic-scroll .topic-table { min-width: 820px; }
 .academic-topic-empty { border: 0; border-radius: 0; box-shadow: none; }
-.topics-industry-view .industry-config { margin-top: 0; }
+.topics-industry-view .industry-config { margin-top: 0; border-color: rgba(45, 212, 191, 0.32); background: linear-gradient(180deg, rgba(17, 35, 43, 0.92), rgba(13, 28, 35, 0.96)); box-shadow: inset 0 1px 0 rgba(153, 246, 228, 0.035); }
+.topics-industry-view .industry-config .primary { background: linear-gradient(180deg, #5eead4, #2dd4bf); border-color: rgba(45, 212, 191, 0.72); }
 @media (max-width: 980px) {
   .academic-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .academic-workspace { grid-template-columns: 1fr; }

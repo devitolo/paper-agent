@@ -4096,7 +4096,7 @@ class BackendV2Tests(unittest.TestCase):
         html = web.render_topics_page()
 
         self.assertIn("Project Paper Topics", html)
-        self.assertIn('class="topics-main-tab current" href="/topics?section=academic"', html)
+        self.assertIn('class="topics-main-tab topics-main-tab-academic current" href="/topics?section=academic"', html)
         self.assertIn('class="academic-source-grid"', html)
         self.assertIn('class="academic-workspace"', html)
         self.assertNotIn("Topic changes apply to future scheduled runs.", html)
