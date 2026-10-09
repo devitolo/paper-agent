@@ -1642,7 +1642,10 @@ def count_phrase(text: str, phrase: str) -> int:
 
 
 def _clean(value: str) -> str:
-    return " ".join(html.unescape(value).split())
+    # CORE sometimes returns JATS/HTML markup in title and abstract fields.
+    decoded = html.unescape(value)
+    without_tags = re.sub(r"<[^>]*>", " ", decoded)
+    return " ".join(without_tags.split())
 
 
 def _paper_url(entry: ET.Element) -> str:

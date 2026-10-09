@@ -142,6 +142,15 @@ class CoreProgressTests(unittest.TestCase):
         self.assertIsNone(candidate.pdf_url)
         self.assertEqual(candidate.metadata["download_url"], "https://files.example/paper.pdf")
 
+    def test_candidate_strips_html_and_jats_markup_from_text(self):
+        candidate = core_work_to_candidate({
+            "id": "core-html",
+            "title": "<p>Agentic &amp; Multi-Agent Systems</p>",
+            "abstract": "<jats:p>Systems use tools.</jats:p><p>They need governance.</p>",
+        })
+        self.assertEqual(candidate.title, "Agentic & Multi-Agent Systems")
+        self.assertEqual(candidate.abstract, "Systems use tools. They need governance.")
+
     def test_identifier_list_supports_doi_and_arxiv_dedupe(self):
         candidate = core_work_to_candidate({
             "id": "core-2", "title": "Paper", "identifiers": [

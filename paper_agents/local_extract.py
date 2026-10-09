@@ -144,6 +144,10 @@ def build_chunk_prompt(chunk: str) -> str:
         f"object matching this schema: {schema_text()}. "
         "Values must be strings or null. Use only the excerpt. Do not include "
         "markdown, extra keys, arrays, findings, or line breaks inside values.\n\n"
+        "For each field, paraphrase information supported by the excerpt even "
+        "when it is implicit in the abstract. Use null only when the excerpt "
+        "does not provide enough information. Never copy the title as the "
+        "research_problem; explain the actual problem or gap.\n\n"
         f"Excerpt:\n{chunk}"
     )
 
@@ -156,6 +160,10 @@ def build_synthesis_prompt(chunk_extractions: list[dict[str, str | None]]) -> st
         "paper-level facts over example-specific details. For paper_date, use the "
         "most specific explicitly stated date. Do not include markdown, extra keys, "
         "arrays, findings, or line breaks inside values.\n\n"
+        "Preserve supported information from the chunk extractions. Use null "
+        "only when the chunks provide no support for a field. Do not replace "
+        "a supported field with null merely because the source does not use "
+        "the field name explicitly.\n\n"
         "Chunk extractions:\n"
         f"{json.dumps(chunk_extractions, indent=2, ensure_ascii=False)}"
     )
