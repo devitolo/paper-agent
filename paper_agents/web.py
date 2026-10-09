@@ -2529,8 +2529,19 @@ def load_review_page(db_path: Path, *, filter_value: str, source_value: str, sor
         params.append(source_value)
     title_query = normalize_title_query(title_query)
     if title_query:
-        where_clauses.append("papers.title COLLATE NOCASE LIKE ? ESCAPE '\\'")
-        params.append(f"%{escape_like_pattern(title_query)}%")
+        where_clauses.append("""(
+            papers.title COLLATE NOCASE LIKE ? ESCAPE '\\'
+            OR EXISTS (
+                SELECT 1 FROM paper_sources title_source
+                WHERE title_source.paper_id = papers.id
+                  AND json_extract(
+                      CASE WHEN json_valid(title_source.metadata_json)
+                           THEN title_source.metadata_json ELSE '{}' END,
+                      '$.original_title'
+                  ) COLLATE NOCASE LIKE ? ESCAPE '\\'
+            )
+        )""")
+        params.extend([f"%{escape_like_pattern(title_query)}%"] * 2)
     where_clause = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
     if sort_value == "score":

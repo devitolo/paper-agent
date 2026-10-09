@@ -379,6 +379,20 @@ def upsert_paper(connection: sqlite3.Connection, candidate: dict[str, Any]) -> t
 def upsert_paper_source(connection: sqlite3.Connection, paper_id: int, candidate: dict[str, Any]) -> None:
     source = str(candidate.get("source") or "unknown")
     source_id = str(candidate.get("source_id") or candidate.get("url") or candidate.get("title") or "unknown")
+    metadata = dict(candidate.get("metadata") or {})
+    # A provider refresh may omit an original title added after discovery.
+    if not metadata.get("original_title"):
+        existing = connection.execute(
+            "SELECT metadata_json FROM paper_sources WHERE source = ? AND source_id = ?",
+            (source, source_id),
+        ).fetchone()
+        if existing:
+            try:
+                previous = json.loads(existing[0] or "{}")
+            except (TypeError, ValueError):
+                previous = {}
+            if isinstance(previous, dict) and previous.get("original_title"):
+                metadata["original_title"] = previous["original_title"]
     connection.execute(
         """
         INSERT INTO paper_sources (paper_id, source, source_id, url, pdf_url, metadata_json)
@@ -395,7 +409,7 @@ def upsert_paper_source(connection: sqlite3.Connection, paper_id: int, candidate
             source_id,
             candidate.get("url"),
             candidate.get("pdf_url"),
-            json_dumps(candidate.get("metadata") or {}),
+            json_dumps(metadata),
         ),
     )
 

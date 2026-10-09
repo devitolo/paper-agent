@@ -171,6 +171,46 @@ class UIQueueRegressionTests(unittest.TestCase):
         self.assertIn("No papers found for this title search.", html)
         self.assertNotIn("No selected papers are waiting in the registry yet.", html)
 
+    def test_original_title_search_preserves_filters_and_literal_matching(self):
+        from scripts.set_original_title import set_original_title
+
+        paper = self.seed(1)
+        self.seed(2)
+        self.connection.execute("UPDATE papers SET title='MCP Playbooks' WHERE id=?", (paper,))
+        self.connection.execute(
+            "UPDATE paper_sources SET metadata_json=? WHERE paper_id=?",
+            (json.dumps({"company": "LinkedIn"}), paper),
+        )
+        self.connection.commit()
+        original = "Context Engineering at LinkedIn: 100% useful_playbooks"
+        set_original_title(self.path, source="arxiv", source_id="ui-1", title=original)
+        # A subsequent discovery must retain the verified original title.
+        db.upsert_paper_source(self.connection, paper, {
+            "source": "arxiv", "source_id": "ui-1", "metadata": {"company": "LinkedIn"},
+        })
+        self.connection.commit()
+        for query in ("MCP Playbooks", original.lower(), "LinkedIn", "100%", "useful_"):
+            result = web.load_review_page(self.path, filter_value="all", source_value="all",
+                                          sort_value="latest", title_query=query)
+            self.assertEqual([card["id"] for card in result["cards"]], [paper])
+            self.assertEqual(result["total"], 1)
+        result = web.load_review_page(self.path, filter_value="all", source_value="zenml",
+                                      sort_value="latest", title_query="LinkedIn")
+        self.assertEqual(result["total"], 0)
+        web.toggle_excluded_paper(self.path, paper_id=paper)
+        for filter_value, expected in (("all", 0), ("excluded", 1)):
+            result = web.load_review_page(self.path, filter_value=filter_value, source_value="all",
+                                          sort_value="latest", title_query="LinkedIn")
+            self.assertEqual(result["total"], expected)
+
+    def test_original_title_search_tolerates_invalid_metadata(self):
+        paper = self.seed(1)
+        self.connection.execute("UPDATE paper_sources SET metadata_json='broken json' WHERE paper_id=?", (paper,))
+        self.connection.commit()
+        result = web.load_review_page(self.path, filter_value="all", source_value="all",
+                                      sort_value="latest", title_query="missing")
+        self.assertEqual(result["total"], 0)
+
     def test_saved_papers_are_persistent_and_filterable_without_changing_review_state(self):
         saved_paper = self.seed(1)
         other_paper = self.seed(2)

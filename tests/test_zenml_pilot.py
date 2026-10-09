@@ -12,6 +12,12 @@ from paper_agents.zenml_pilot import SEED_EXCLUDED_URLS, import_zenml_pilot, sel
 
 
 class ZenMLPilotTests(unittest.TestCase):
+    def test_preserves_explicit_original_title_for_search(self):
+        row = {**self.sample_rows()[0], "original_title": "How HEMA built its employee assistant"}
+        selected = select_zenml_candidates([row], keep=1)
+        self.assertEqual(selected[0]["metadata"]["original_title"], row["original_title"])
+        self.assertEqual(selected[0]["title"], row["title"])
+
     def test_industry_config_round_trip_and_defaults(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "industry.json"

@@ -238,6 +238,7 @@ def row_to_candidate(row: dict[str, Any]) -> dict[str, Any] | None:
         "pdf_url": None,
         "metadata": {
             "discovery_source": "ZenML LLMOps Database",
+            "original_title": row.get("original_title"),
             "source_url": source_url,
             "webflow_url": row.get("webflow_url"),
             "company": row.get("company"),
