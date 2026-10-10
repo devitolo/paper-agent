@@ -103,6 +103,15 @@ class ArxivProgressTests(unittest.TestCase):
         _, fetch = self.run_scout([page([entry(3)], offset=10, next_offset=20)])
         self.assertEqual(fetch.call_args.kwargs["offset"], 10)
 
+    def test_exhausted_query_refreshes_on_next_nightly_cycle(self):
+        self.run_scout([page([entry(1)], next_offset=None)])
+        future = datetime.now(timezone.utc) + timedelta(days=2)
+        progress = self.progress(now=future)
+        with patch.object(self.source, "fetch_page", return_value=page([entry(2)], next_offset=10)) as fetch:
+            result = progress.fetch(["incident"], freshness_months=24, max_candidates=1, errors=[])
+        self.assertEqual(fetch.call_args.kwargs["offset"], 0)
+        self.assertEqual(len(result), 1)
+
     def test_429_sets_source_cooldown_without_advancing(self):
         headers = Message(); headers["Retry-After"] = "120"
         error = urllib.error.HTTPError("url", 429, "rate", headers, io.BytesIO())

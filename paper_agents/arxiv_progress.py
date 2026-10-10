@@ -19,6 +19,10 @@ from paper_agents.scout import arxiv_entry_to_candidate, dedupe_candidates
 ATTEMPT_BUDGET = 3
 PAGE_SIZE = 10
 REFRESH_SECONDS = 7 * 86400
+# An exhausted provider page is different from a deep continuation cursor.
+# Refresh exhausted queries on the next nightly cycle so an empty run does not
+# suppress the same query for a week.
+EXHAUSTED_REFRESH_SECONDS = 86400
 TRAVERSAL_SECONDS = 30 * 86400
 TRANSIENT_HTTP_STATUSES = {500, 502, 503, 504}
 
@@ -94,7 +98,8 @@ class ArxivProgress:
             if clock - deep["started"] >= TRAVERSAL_SECONDS:
                 state["deep"] = deep = self._new_traversal(freshness_months)
                 state["last_refresh"] = clock
-            refresh = clock - state["last_refresh"] >= REFRESH_SECONDS
+            refresh_window = EXHAUSTED_REFRESH_SECONDS if deep["exhausted"] else REFRESH_SECONDS
+            refresh = clock - state["last_refresh"] >= refresh_window
             if deep["exhausted"] and not refresh:
                 continue
             traversal = self._new_traversal(freshness_months) if refresh else deep
