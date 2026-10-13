@@ -44,9 +44,14 @@ print(f"status={status}")
 print(f"latest_cycle_id={latest.get('id', '')} latest_cycle_state={latest.get('state', '')} days_since_last_cycle={payload.get('days_since_last_cycle', '')}")
 for warning in warnings:
     print(f"{warning.get('level', 'warning').upper()}: {warning.get('message', '')}")
-for key, value in profile.items():
-    if value not in (None, 0, [], {}, ""):
-        print(f"profile_{key}={value}")
+if isinstance(profile, dict):
+    for key, value in profile.items():
+        if value not in (None, 0, [], {}, ""):
+            print(f"profile_{key}={value}")
+elif profile:
+    # The health payload currently returns maintenance notices as a list.
+    # Keep the snapshot readable without assuming a mapping shape.
+    print("profile_maintenance=" + json.dumps(profile, sort_keys=True))
 print("latest_source_runs:")
 for run in payload.get("latest_scout_runs_by_source") or []:
     print("  " + json.dumps(run, sort_keys=True))
