@@ -60,6 +60,10 @@ jobs:
           fi
           python3 scripts/mini_health_trend_summary.py "$PAPER_MINI_HEALTH_OUTPUT" \
             --jsonl "$PAPER_MINI_HEALTH_DIR/health-trend.jsonl" > "$PAPER_MINI_HEALTH_DIR/health-trend.txt"
+          echo "MINI_HEALTH_SNAPSHOT"
+          cat "$RUNNER_TEMP/paper-health.txt"
+          echo "MINI_HEALTH_TRENDS"
+          cat "$PAPER_MINI_HEALTH_DIR/health-trend.txt"
           {
             echo "## Mini production health"
             echo
