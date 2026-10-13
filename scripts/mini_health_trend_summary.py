@@ -97,6 +97,31 @@ def render_table(records: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def render_source_trends(payload: dict[str, Any]) -> str:
+    """Summarize the recent source-run rows already included by db health."""
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    for run in payload.get("recent_scout_runs") or []:
+        source = str(run.get("source") or "unknown")
+        by_source.setdefault(source, []).append(run)
+    lines = ["7-day source trends (based on the health payload's recent runs):"]
+    if not by_source:
+        return lines[0] + "\n  no source runs in the health window"
+    for source in sorted(by_source):
+        runs = by_source[source][:5]
+        low_pool = sum((run.get("eligible_count") or 0) < 10 for run in runs)
+        zero_recommendations = sum(
+            (run.get("recommendation_count") or 0) == 0 and (run.get("eligible_count") or 0) > 0
+            for run in runs
+        )
+        healthy = sum((run.get("eligible_count") or 0) >= 10 and (run.get("recommendation_count") or 0) > 0 for run in runs)
+        lines.append(
+            f"  {source}: eligible_count < 10 on {low_pool} of {len(runs)} recent runs; "
+            f"recommendations=0 with eligible papers on {zero_recommendations} of {len(runs)}; "
+            f"healthy {healthy} of {len(runs)}"
+        )
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("health_json", type=Path)
@@ -106,6 +131,7 @@ def main() -> int:
     records = build_records(payload, captured_at=payload.get("captured_at"))
     args.jsonl.write_text("".join(json.dumps(record, sort_keys=True) + "\n" for record in records), encoding="utf-8")
     print(render_table(records))
+    print(render_source_trends(payload))
     return 0
 
 

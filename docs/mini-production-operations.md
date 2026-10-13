@@ -177,6 +177,14 @@ written to production SQLite. Repeated source warnings should be handled as a
 health/dashboard improvement rather than becoming a reason for recurring SSH
 inspection.
 
+The Actions summary also prints a `7-day source trends` section directly. It
+uses the recent source-run rows already returned by `db health --json` and
+reports, per source, how often the eligible pool was below 10, how often there
+were eligible papers but zero recommendations, and how many recent runs looked
+healthy. GitHub Actions retention limits this to the runs and health window
+still available; it does not reconstruct missing history or infer provider
+429s when the source did not record a provider error.
+
 ## Acceptance evidence
 
 Authoritative successful acceptance:
