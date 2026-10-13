@@ -40,7 +40,9 @@ jobs:
         shell: bash
         run: |
           set +e
-          export PAPER_MINI_HEALTH_OUTPUT="$RUNNER_TEMP/paper-health.json"
+          export PAPER_MINI_HEALTH_DIR="$RUNNER_TEMP/mini-health"
+          export PAPER_MINI_HEALTH_OUTPUT="$PAPER_MINI_HEALTH_DIR/paper-health.json"
+          mkdir -p "$PAPER_MINI_HEALTH_DIR"
           bash scripts/mini_health_snapshot.sh > "$RUNNER_TEMP/paper-health.txt" 2>&1
           result=$?
           if [[ ! -s "$PAPER_MINI_HEALTH_OUTPUT" ]]; then
@@ -56,6 +58,8 @@ jobs:
           )
           PY
           fi
+          python3 scripts/mini_health_trend_summary.py "$PAPER_MINI_HEALTH_OUTPUT" \
+            --jsonl "$PAPER_MINI_HEALTH_DIR/health-trend.jsonl" > "$PAPER_MINI_HEALTH_DIR/health-trend.txt"
           {
             echo "## Mini production health"
             echo
@@ -64,6 +68,12 @@ jobs:
             echo
             echo '```text'
             cat "$RUNNER_TEMP/paper-health.txt"
+            echo
+            echo "### Trend"
+            echo
+            echo '```text'
+            cat "$PAPER_MINI_HEALTH_DIR/health-trend.txt"
+            echo '```'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           echo "exit_code=$result" >> "$GITHUB_OUTPUT"
@@ -74,7 +84,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: mini-health-${{ github.run_id }}
-          path: ${{ runner.temp }}/paper-health.json
+          path: ${{ runner.temp }}/mini-health
           if-no-files-found: ignore
           retention-days: 14
 
