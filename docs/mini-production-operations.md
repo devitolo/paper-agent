@@ -142,6 +142,32 @@ SSH is not the default operating path. Use the
 and get explicit operator approval before opening a Mini shell for production
 work.
 
+## Read-only health signal
+
+The **Mini Health Snapshot** GitHub Actions workflow is the first SRE signal
+for production problems. It runs manually from the Actions tab and on a daily
+schedule on the `project-paper-mini` self-hosted runner. The workflow enters
+the already-running app container with `python -m paper_agents.cli db health
+--json`, writes the status, warnings/criticals, latest source runs, funnel
+counts, recent job events, and diagnostic run IDs to the Actions step summary,
+and uploads the raw JSON snapshot for 14 days. It is read-only: it does not
+restart containers, run migrations, change the database, alter cron, or deploy.
+
+Configure the runner/repository variable `PAPER_MINI_ENV_FILE` with the
+absolute path to the private production env file. The workflow passes that
+path to Docker Compose for interpolation; it never sources or prints the file.
+The local equivalent is:
+
+```sh
+PAPER_MINI_ENV_FILE=/absolute/path/to/production.env \
+  scripts/mini_health_snapshot.sh
+```
+
+Warnings and criticals make the workflow fail after preserving the summary so
+SRE can triage without opening SSH. The snapshot includes source run IDs and
+the provider/cooldown details already exposed by the health report. SSH remains
+an explicit-approval path for follow-up investigation only.
+
 ## Acceptance evidence
 
 Authoritative successful acceptance:
