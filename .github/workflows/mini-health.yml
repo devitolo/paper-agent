@@ -27,7 +27,7 @@ jobs:
       PAPER_MINI_ENV_FILE: ${{ vars.PAPER_MINI_ENV_FILE }}
     steps:
       - name: Checkout trusted health script
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
