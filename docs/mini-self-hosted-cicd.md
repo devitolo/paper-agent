@@ -81,6 +81,11 @@ critical health result fails the workflow after preserving its summary; it does
 not restart or mutate production. Use SSH only for bounded follow-up evidence
 when the workflow output is insufficient.
 
+The uploaded artifact includes `health-trend.jsonl`, a normalized per-warning
+record suitable for comparing recent runs. It keeps source, run ID, counts,
+severity, category, and whether the issue came from production health or
+workflow plumbing; it does not add database state.
+
 ## One-time GitHub setup
 
 Create the deployment branch once:

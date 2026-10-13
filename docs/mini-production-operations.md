@@ -150,7 +150,7 @@ schedule on the `project-paper-mini` self-hosted runner. The workflow enters
 the already-running app container with `python -m paper_agents.cli db health
 --json`, writes the status, warnings/criticals, latest source runs, funnel
 counts, recent job events, and diagnostic run IDs to the Actions step summary,
-and uploads the raw JSON snapshot for 14 days. It is read-only: it does not
+and uploads the raw JSON snapshot plus a JSONL trend file for 14 days. It is read-only: it does not
 restart containers, run migrations, change the database, alter cron, or deploy.
 
 Configure the runner/repository variable `PAPER_MINI_ENV_FILE` with the
@@ -167,6 +167,23 @@ Warnings and criticals make the workflow fail after preserving the summary so
 SRE can triage without opening SSH. The snapshot includes source run IDs and
 the provider/cooldown details already exposed by the health report. SSH remains
 an explicit-approval path for follow-up investigation only.
+
+Each artifact also contains `health-trend.jsonl`. It has one stable record per
+warning or collection failure with the capture time, normalized category,
+source, run ID, candidate/eligible/recommendation counts, severity, and origin
+(`production_health` versus `workflow_plumbing`). SRE can compare the last 7 or
+30 workflow runs with `gh run list` and `gh run download`; no trend rows are
+written to production SQLite. Repeated source warnings should be handled as a
+health/dashboard improvement rather than becoming a reason for recurring SSH
+inspection.
+
+The Actions summary also prints a `7-day source trends` section directly. It
+uses the recent source-run rows already returned by `db health --json` and
+reports, per source, how often the eligible pool was below 10, how often there
+were eligible papers but zero recommendations, and how many recent runs looked
+healthy. GitHub Actions retention limits this to the runs and health window
+still available; it does not reconstruct missing history or infer provider
+429s when the source did not record a provider error.
 
 ## Acceptance evidence
 
