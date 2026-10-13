@@ -476,6 +476,19 @@ class ModelPreparationTests(unittest.TestCase):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_workflows_pin_node24_checkout_action(self):
+        old_checkout_sha = "11bd71901bbe5b1630ceea73d27597364c9af683"
+        checkout_v6_sha = "d23441a48e516b6c34aea4fa41551a30e30af803"
+        workflows = sorted((ROOT / ".github/workflows").glob("*.yml"))
+        self.assertTrue(workflows)
+        checkout_references = []
+        for workflow_path in workflows:
+            workflow = workflow_path.read_text(encoding="utf-8")
+            self.assertNotIn(old_checkout_sha, workflow, workflow_path.name)
+            checkout_references.extend(re.findall(r"actions/checkout@([^\s]+)", workflow))
+        self.assertTrue(checkout_references)
+        self.assertTrue(all(reference == checkout_v6_sha for reference in checkout_references))
+
     def test_container_packages_license_and_notice(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
