@@ -45,16 +45,16 @@ jobs:
           result=$?
           if [[ ! -s "$PAPER_MINI_HEALTH_OUTPUT" ]]; then
             python3 - "$RUNNER_TEMP/paper-health.txt" "$PAPER_MINI_HEALTH_OUTPUT" <<'PY'
-import json
-import sys
-from pathlib import Path
+          import json
+          import sys
+          from pathlib import Path
 
-message = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").strip()
-Path(sys.argv[2]).write_text(
-    json.dumps({"status": "critical", "collection_error": message}, indent=2) + "\n",
-    encoding="utf-8",
-)
-PY
+          message = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").strip()
+          Path(sys.argv[2]).write_text(
+              json.dumps({"status": "critical", "collection_error": message}, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
           fi
           {
             echo "## Mini production health"
