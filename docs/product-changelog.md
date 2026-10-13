@@ -2,6 +2,32 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-10-13
+
+### Mini Health Snapshot trend visibility
+
+Status: Implemented on `main` and promoted to `mini-production` in commit
+`6cf16d1`.
+
+Decision: The Mini Health Snapshot workflow should be useful from GitHub
+Actions without opening SSH, while preserving machine-readable artifacts for
+short-term trend comparison.
+
+Completed behavior:
+
+- Print the human-readable health snapshot and trend summary directly in the
+  workflow log and step summary.
+- Upload the raw health JSON and normalized `health-trend.jsonl` artifact with
+  14-day retention.
+- Add a 7-day source trend summary from the `db health --json` recent source
+  rows, including low eligible pools, zero-recommendation runs with eligible
+  papers, and healthy recent runs by source.
+- Keep warning/critical health results intentionally failing the workflow after
+  summaries and artifacts are preserved, so "attention required" is visible in
+  Actions.
+- Format `profile_maintenance` whether the health payload is a mapping or the
+  current list of maintenance notices.
+
 ## 2026-10-06
 
 ### v0.2 quality and installability milestone

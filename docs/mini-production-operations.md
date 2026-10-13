@@ -145,13 +145,15 @@ work.
 ## Read-only health signal
 
 The **Mini Health Snapshot** GitHub Actions workflow is the first SRE signal
-for production problems. It runs manually from the Actions tab and on a daily
-schedule on the `project-paper-mini` self-hosted runner. The workflow enters
-the already-running app container with `python -m paper_agents.cli db health
---json`, writes the status, warnings/criticals, latest source runs, funnel
-counts, recent job events, and diagnostic run IDs to the Actions step summary,
-and uploads the raw JSON snapshot plus a JSONL trend file for 14 days. It is read-only: it does not
-restart containers, run migrations, change the database, alter cron, or deploy.
+for production problems. It runs on pushes to `mini-production`, manually from
+the Actions tab, and on a daily schedule on the `project-paper-mini`
+self-hosted runner. The workflow enters the already-running app container with
+`python -m paper_agents.cli db health --json`, writes the status,
+warnings/criticals, latest source runs, funnel counts, recent job events,
+diagnostic run IDs, and the trend summary to both the Actions log and step
+summary, and uploads the raw JSON snapshot plus a JSONL trend file for 14 days.
+It is read-only: it does not restart containers, run migrations, change the
+database, alter cron, or deploy.
 
 Configure the runner/repository variable `PAPER_MINI_ENV_FILE` with the
 absolute path to the private production env file. The workflow passes that
@@ -163,19 +165,23 @@ PAPER_MINI_ENV_FILE=/absolute/path/to/production.env \
   scripts/mini_health_snapshot.sh
 ```
 
-Warnings and criticals make the workflow fail after preserving the summary so
-SRE can triage without opening SSH. The snapshot includes source run IDs and
-the provider/cooldown details already exposed by the health report. SSH remains
-an explicit-approval path for follow-up investigation only.
+Warnings and criticals intentionally make the workflow fail after preserving the
+summary and artifact. A failed Mini Health Snapshot means "attention required,"
+not that the health collection itself necessarily broke. The snapshot includes
+source run IDs, provider/cooldown details already exposed by the health report,
+and profile maintenance notices. The formatter accepts both the older mapping
+shape and the current list-shaped `profile_maintenance` notices so maintenance
+warnings remain readable in the log. SSH remains an explicit-approval path for
+follow-up investigation only.
 
 Each artifact also contains `health-trend.jsonl`. It has one stable record per
 warning or collection failure with the capture time, normalized category,
 source, run ID, candidate/eligible/recommendation counts, severity, and origin
 (`production_health` versus `workflow_plumbing`). SRE can compare the last 7 or
-30 workflow runs with `gh run list` and `gh run download`; no trend rows are
-written to production SQLite. Repeated source warnings should be handled as a
-health/dashboard improvement rather than becoming a reason for recurring SSH
-inspection.
+30 workflow runs with `gh run list` and `gh run download` while artifacts are
+retained. No trend rows are written to production SQLite. Repeated source
+warnings should be handled as a health/dashboard improvement rather than
+becoming a reason for recurring SSH inspection.
 
 The Actions summary also prints a `7-day source trends` section directly. It
 uses the recent source-run rows already returned by `db health --json` and

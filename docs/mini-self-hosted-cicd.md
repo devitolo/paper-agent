@@ -74,17 +74,21 @@ normal inspection path.
 
 The **Mini Health Snapshot** workflow is the standard recurring health check.
 It runs read-only on the `project-paper-mini` runner, summarizes the same
-`db health --json` warnings used by `/health`, and uploads a short-lived JSON
-artifact for triage. Configure the runner/repository variable
-`PAPER_MINI_ENV_FILE` with the private production env-file path. A warning or
-critical health result fails the workflow after preserving its summary; it does
-not restart or mutate production. Use SSH only for bounded follow-up evidence
-when the workflow output is insufficient.
+`db health --json` warnings used by `/health`, prints the snapshot and trend
+summary in the workflow log and step summary, and uploads a 14-day artifact for
+triage. Configure the runner/repository variable `PAPER_MINI_ENV_FILE` with the
+private production env-file path. A warning or critical health result
+intentionally fails the workflow after preserving its summary and artifact; it
+does not restart or mutate production. Use SSH only for bounded follow-up
+evidence when the workflow output is insufficient.
 
-The uploaded artifact includes `health-trend.jsonl`, a normalized per-warning
-record suitable for comparing recent runs. It keeps source, run ID, counts,
-severity, category, and whether the issue came from production health or
-workflow plumbing; it does not add database state.
+The uploaded artifact includes the raw health JSON and `health-trend.jsonl`, a
+normalized per-warning record suitable for comparing recent runs. It keeps
+source, run ID, counts, severity, category, and whether the issue came from
+production health or workflow plumbing; it does not add database state. The log
+also includes a 7-day source trend summary for low eligible pools,
+zero-recommendation runs with eligible papers, and healthy recent runs by
+source.
 
 ## One-time GitHub setup
 
