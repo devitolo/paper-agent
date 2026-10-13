@@ -72,6 +72,15 @@ or source-ingestion evidence, record the need and prefer adding it to the health
 dashboard, workflow summaries, or committed runbooks instead of making SSH the
 normal inspection path.
 
+The **Mini Health Snapshot** workflow is the standard recurring health check.
+It runs read-only on the `project-paper-mini` runner, summarizes the same
+`db health --json` warnings used by `/health`, and uploads a short-lived JSON
+artifact for triage. Configure the runner/repository variable
+`PAPER_MINI_ENV_FILE` with the private production env-file path. A warning or
+critical health result fails the workflow after preserving its summary; it does
+not restart or mutate production. Use SSH only for bounded follow-up evidence
+when the workflow output is insufficient.
+
 ## One-time GitHub setup
 
 Create the deployment branch once:
