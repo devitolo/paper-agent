@@ -40,11 +40,24 @@ jobs:
           export PAPER_MINI_HEALTH_OUTPUT="$RUNNER_TEMP/paper-health.json"
           bash scripts/mini_health_snapshot.sh > "$RUNNER_TEMP/paper-health.txt" 2>&1
           result=$?
+          if [[ ! -s "$PAPER_MINI_HEALTH_OUTPUT" ]]; then
+            python3 - "$RUNNER_TEMP/paper-health.txt" "$PAPER_MINI_HEALTH_OUTPUT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+message = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").strip()
+Path(sys.argv[2]).write_text(
+    json.dumps({"status": "critical", "collection_error": message}, indent=2) + "\n",
+    encoding="utf-8",
+)
+PY
+          fi
           {
             echo "## Mini production health"
             echo
             echo "- Captured: $(date --iso-8601=seconds)"
-            echo "- Runner: `$(hostname)`"
+            echo "- Runner: $(hostname)"
             echo
             echo '```text'
             cat "$RUNNER_TEMP/paper-health.txt"
