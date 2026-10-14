@@ -480,3 +480,11 @@ CREATE TABLE IF NOT EXISTS excluded_papers (
 
 CREATE INDEX IF NOT EXISTS idx_excluded_papers_created_at
 ON excluded_papers (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS topic_agent_allowance (
+    allowance_day TEXT PRIMARY KEY,
+    limit_count INTEGER NOT NULL,
+    reserved_count INTEGER NOT NULL DEFAULT 0,
+    consumed_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
