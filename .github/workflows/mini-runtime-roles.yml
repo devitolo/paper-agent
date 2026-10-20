@@ -28,6 +28,7 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 -m unittest discover -s tests/runtime_roles -v
+          python3 -m unittest discover -s tests/nonprod_snapshot -v
           PYTHONPATH=tests python3 -W ignore::ResourceWarning -m unittest test_package_runtime test_migration_scheduler test_mini_release_pipeline -q
           git diff --check
       - name: Record source bundle

@@ -1,6 +1,7 @@
 """Read-only validation of explicit synthetic Mini state; no restore or migration."""
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import sqlite3
 
@@ -10,7 +11,10 @@ from .industry_config import load_zenml_config
 SCHEMA = Path(__file__).resolve().parents[1] / 'sql/schema.sql'
 
 
-def validate(root):
+def validate(root, *, full=True):
+    if os.environ.get('PAPER_AGENT_STARTUP_MODE') == 'serving-snapshot':
+        from .nonprod_snapshot import validate_runtime
+        return validate_runtime(root, full=full)
     root = Path(root).absolute()
     if any(p.is_symlink() for p in (root, *root.parents)):
         raise RuntimeError('Synthetic state root must not be aliased')

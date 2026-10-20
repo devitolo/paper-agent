@@ -2791,6 +2791,10 @@ def render_app_header(page_title: str, subtitle: str, controls_html: str, curren
     environment_marker = ""
     if os.environ.get("PAPER_NON_PRODUCTION", "0") == "1":
         label = escape(os.environ.get("PAPER_UI_ENV_LABEL", "NON-PROD"))
+        if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "serving-snapshot":
+            from paper_agents.nonprod_snapshot import load_provenance
+            snapshot = load_provenance(Path('.'))
+            label += ' · Mini production snapshot ' + escape(snapshot['captured_at']) + ' · local edits only; no sync'
         environment_marker = f'''<style>
           .nonprod-watermark {{ position: fixed; inset: 0; display: grid; place-items: center;
             pointer-events: none; z-index: 10; opacity: .045; font-weight: 800;

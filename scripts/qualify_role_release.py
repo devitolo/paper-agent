@@ -1,10 +1,11 @@
-"""Hosted production image checks; no nonprod startup/HTTP/inference tests."""
+"""Hosted runtime and bounded nonprod snapshot/loopback ingress checks; no inference."""
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 
 
 def docker(*args):
@@ -31,13 +32,52 @@ def main():
     assert hashes
     for path, value in hashes.items():
         assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == value
+    for path in ('scripts/mini_nonprod_refresh.py', 'deploy/mini-nonprod/compose.ingress.yml'):
+        actual = docker(*run, '-c', 'import hashlib;from pathlib import Path;print(hashlib.sha256(Path(' + repr(path) + ').read_bytes()).hexdigest())').strip()
+        assert actual == hashlib.sha256(Path(path).read_bytes()).hexdigest()
     docker('run', '--rm', '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,size=64m',
            '--mount', 'type=bind,src=' + str(Path.cwd()/'tests/runtime_roles') + ',dst=/app/tests/runtime_roles,readonly',
            '--entrypoint', 'python', image, '-m', 'unittest', 'discover', '-s', 'tests/runtime_roles', '-v')
+    docker('run', '--rm', '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,size=128m',
+           '--mount', 'type=bind,src=' + str(Path.cwd()/'tests/nonprod_snapshot') + ',dst=/app/tests/nonprod_snapshot,readonly',
+           '--entrypoint', 'python', image, '-m', 'unittest', 'discover', '-s', 'tests/nonprod_snapshot', '-v')
+    # Exercise real read-only mounts and ownership transfer with the same
+    # restricted capabilities as the operator, using disposable CI fixtures.
+    with tempfile.TemporaryDirectory() as temp:
+        temp = Path(temp)
+        temp.chmod(0o777)
+        for name in ('source', 'stage', 'target'):
+            (temp/name).mkdir(mode=0o777)
+            (temp/name).chmod(0o777)
+        base = ['run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+                '--security-opt', 'no-new-privileges:true', '--tmpfs', '/tmp:rw,size=64m']
+        docker(*base, '--user', '10001:10001', '--mount', 'type=bind,src='+str(temp/'source')+',dst=/fixture',
+               '--entrypoint', 'python', image, '-c',
+               "import runpy;runpy.run_path('scripts/mini_nonprod_fixture.py')['create']('/fixture/input')")
+        docker(*base, '--user', '10001:10001',
+               '--mount', 'type=bind,src='+str(temp/'source'/'input')+',dst=/source,readonly',
+               '--mount', 'type=bind,src='+str(temp/'stage')+',dst=/stage',
+               '--entrypoint', 'python', image, '-m', 'paper_agents.nonprod_snapshot', 'capture',
+               '/source', '/stage/new', '--source-revision', os.environ['GITHUB_SHA'], '--source-image', image)
+        docker(*base, '--user', '0:0', '--mount', 'type=bind,src='+str(temp/'target')+',dst=/target',
+               '--entrypoint', 'python', image, '-c',
+               "from pathlib import Path;[(Path('/target')/name).mkdir() for name in ('data','config')]")
+        docker(*base, '--user', '0:0', '--cap-add', 'CHOWN', '--cap-add', 'DAC_READ_SEARCH',
+               '--mount', 'type=bind,src='+str(temp/'stage')+',dst=/stage,readonly',
+               '--mount', 'type=bind,src='+str(temp/'target')+',dst=/target',
+               '--entrypoint', 'python', image, '-m', 'paper_agents.nonprod_snapshot', 'install',
+               '/stage/new', '/target', '--role', 'ui')
+        docker(*base, '--user', '10001:10001',
+               '--mount', 'type=bind,src='+str(temp/'target')+',dst=/target,readonly',
+               '--entrypoint', 'python', image, '-m', 'paper_agents.nonprod_snapshot', 'verify', '/target')
+        # Restore disposable host test directory permissions for runner cleanup.
+        docker(*base, '--user', '0:0', '--cap-add', 'FOWNER', '--cap-add', 'DAC_OVERRIDE',
+               '--mount', 'type=bind,src='+str(temp)+',dst=/fixture', '--entrypoint', 'python', image,
+               '-c', "from pathlib import Path;import os;p=Path('/fixture');paths=[p,*p.rglob('*')];[(os.chmod(x,0o777 if x.is_dir() else 0o666)) for x in paths]")
     evidence = {'revision': os.environ['GITHUB_SHA'], 'source_bundle_sha256': os.environ['SOURCE_BUNDLE'],
                 'image': image, 'config_id': info['Id'], 'platform': 'linux/amd64', 'packages': packages,
                 'source_bytes_match': True, 'production_role_checks': 'passed',
-                'nonprod_tests': 'held; no nonprod startup/HTTP/inference/browser checks',
+                'nonprod_tests': 'snapshot safety, review rendering and loopback private proxy passed; no providers/inference',
                 'run_url': 'https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']}
     Path('role-release-evidence.json').write_text(json.dumps(evidence, indent=2)+'\n')
 

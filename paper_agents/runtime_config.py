@@ -36,9 +36,9 @@ def gemini_enabled() -> bool:
 def migration_settings() -> dict | None:
     """Explicit opt-in parity settings; never infer native configuration."""
     mode = os.environ.get("PAPER_AGENT_STARTUP_MODE", "fresh")
-    if mode not in {"fresh", "imported", "serving"}:
+    if mode not in {"fresh", "imported", "serving", "serving-snapshot"}:
         raise ValueError("Invalid PAPER_AGENT_STARTUP_MODE")
-    if mode == "serving":
+    if mode in {"serving", "serving-snapshot"}:
         if not packaged() or not serving_only() or os.environ.get("PAPER_NON_PRODUCTION") != "1":
             raise ValueError("Serving bootstrap requires explicit packaged non-production mode")
         for flag in ("PAPER_AGENT_SCHEDULER_ENABLED", "PAPER_AGENT_GEMINI_ENABLED",

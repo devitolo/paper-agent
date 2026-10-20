@@ -23,7 +23,7 @@ def initialize(root: Path = Path("."), templates: Path = TEMPLATES) -> None:
     """Seed missing files only; reject broken existing state without reseeding."""
     from paper_agents.runtime_config import migration_settings
     settings = migration_settings()
-    if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "serving":
+    if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"serving", "serving-snapshot"}:
         from paper_agents.mini_nonprod_state import validate
         validate(root)
         return
@@ -147,7 +147,7 @@ def main() -> int:
             with urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=5) as response:
                 return 0 if json.load(response)["ready"] else 1
         if command == "check-state":
-            if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "serving":
+            if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"serving", "serving-snapshot"}:
                 from paper_agents.runtime_config import migration_settings
                 from paper_agents.mini_nonprod_state import validate
                 migration_settings()
@@ -190,7 +190,7 @@ def main() -> int:
             from paper_agents.web import run_review_ui
             def run_role():
                 run_review_ui(host="0.0.0.0", port=8000)
-        if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"imported", "serving"}:
+        if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"imported", "serving", "serving-snapshot"}:
             from paper_agents.migration_lifecycle import lease, downgrade, validate_container_contract
             if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
                 validate_container_contract()

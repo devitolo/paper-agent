@@ -98,6 +98,7 @@ COPY paper_agents ./paper_agents
 COPY scripts ./scripts
 COPY sql ./sql
 COPY deploy/templates ./paper_agents/package_templates
+COPY deploy/mini-nonprod/compose.ingress.yml ./deploy/mini-nonprod/compose.ingress.yml
 RUN python scripts/image_runtime_inventory.py "${PYTHON_BASE_IMAGE}" /app/image-runtime-inputs.json "${SOURCE_BUNDLE_SHA256}" "${VCS_REF}"
 ENV PAPER_AGENT_MINILM_BACKEND=http
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
