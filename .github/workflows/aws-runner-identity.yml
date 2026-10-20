@@ -1,0 +1,36 @@
+name: AWS Runner Identity
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  runner-identity:
+    name: Report sanitized AWS runner identity
+    runs-on: [self-hosted, linux, x64, project-paper-aws-deploy]
+    environment: aws-production
+    timeout-minutes: 2
+    steps:
+      - name: Report runner identity and basic host facts
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          IDENTITY_RUNNER_NAME: ${{ runner.name }}
+          IDENTITY_RUNNER_OS: ${{ runner.os }}
+          IDENTITY_RUNNER_ARCH: ${{ runner.arch }}
+          IDENTITY_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          # Allowlist printable characters and cap each value; never dump the environment.
+          report() {
+            local value
+            value="$(printf '%s' "$2" | LC_ALL=C tr -cd 'A-Za-z0-9._ -' | cut -c 1-80)"
+            printf '%s: %s\n' "$1" "$value"
+          }
+
+          report runner_name "$IDENTITY_RUNNER_NAME"
+          report runner_os "$IDENTITY_RUNNER_OS"
+          report runner_arch "$IDENTITY_RUNNER_ARCH"
+          report runner_environment "$IDENTITY_RUNNER_ENVIRONMENT"
+          report kernel_name "$(uname -s)"
+          report kernel_release "$(uname -r)"
+          report machine_arch "$(uname -m)"
