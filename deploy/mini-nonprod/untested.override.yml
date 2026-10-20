@@ -1,0 +1,6 @@
+# Requested build/deploy-only window. No automatic readiness probes or tests.
+# Combine only with the existing isolated Mini nonprod app contract.
+services:
+  app:
+    healthcheck:
+      disable: true

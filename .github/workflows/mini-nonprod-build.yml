@@ -1,0 +1,82 @@
+name: Mini Nonprod Build Only
+on:
+  push:
+    tags:
+      - 'mini-nonprod-build-*'
+permissions:
+  contents: read
+concurrency:
+  group: mini-nonprod-build
+  cancel-in-progress: false
+jobs:
+  build-publish:
+    if: github.repository == 'devitolo/paper-agent'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PYTHON_BASE: docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Record exact source identity
+        id: source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "mini-nonprod-build-$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "bundle=$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish AMD64 nonprod app
+        id: app
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          file: deploy/mini-nonprod/Dockerfile
+          platforms: linux/amd64
+          provenance: false
+          push: true
+          tags: ghcr.io/devitolo/paper-agent:mini-nonprod-${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/devitolo/paper-agent
+          build-args: |
+            MINI_NONPROD_BASE_IMAGE=${{ env.PYTHON_BASE }}
+            VCS_REF=${{ github.sha }}
+            SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.bundle }}
+      - name: Record delivery identity without running the image
+        env:
+          APP_DIGEST: ${{ steps.app.outputs.digest }}
+          SOURCE_BUNDLE: ${{ steps.source.outputs.bundle }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          digest = os.environ['APP_DIGEST']
+          if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
+              raise RuntimeError('Expected immutable build digest')
+          evidence = {
+              'revision': os.environ['GITHUB_SHA'],
+              'source_bundle_sha256': os.environ['SOURCE_BUNDLE'],
+              'image': 'ghcr.io/devitolo/paper-agent@' + digest,
+              'platform': 'linux/amd64',
+              'base': os.environ['PYTHON_BASE'],
+              'run_url': 'https://github.com/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + os.environ['GITHUB_RUN_ID'],
+              'testing': 'intentionally held by user; image not executed',
+              'deployment': 'not performed by Actions',
+          }
+          with open('nonprod-delivery.json', 'w') as output:
+              json.dump(evidence, output, indent=2)
+              output.write('\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mini-nonprod-delivery-${{ github.sha }}
+          path: nonprod-delivery.json
+          if-no-files-found: error
+          retention-days: 30
