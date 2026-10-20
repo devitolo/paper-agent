@@ -1,5 +1,6 @@
 name: Mini Standalone MiniLM Release
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'mini-minilm-release-*'
@@ -10,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build-publish:
-    if: github.repository == 'devitolo/paper-agent'
+    if: github.repository == 'devitolo/paper-agent' && (github.event_name == 'push' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     permissions:
@@ -26,7 +27,11 @@ jobs:
       - name: Verify exact release source and tests
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = "mini-minilm-release-$GITHUB_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            test "$GITHUB_REF" = refs/heads/main
+          else
+            test "$GITHUB_REF_NAME" = "mini-minilm-release-$GITHUB_SHA"
+          fi
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 -m unittest discover -s tests/minilm_service -v
           PYTHONPATH=tests python3 -W ignore::ResourceWarning -m unittest test_curator_interest test_curator_v2 test_curator_v3 test_minilm_eval test_minilm_shadow test_mini_release_pipeline test_package_runtime -q

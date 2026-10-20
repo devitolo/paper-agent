@@ -1,6 +1,7 @@
 # Standalone MiniLM production app target
 
-This release is based on deployed source6cf16d1798bdd09f5a679dc90b9f73cffdd46f1d.
+The initial release was based on deployed source6cf16d1798bdd09f5a679dc90b9f73cffdd46f1d.
+Its three scoped commits are now integrated onto main without unrelated prep history.
 Only MiniLM transport, its explicit new app target and verification change; schema,
 import/restore, Qwen/Gemini behavior and production cron remain unchanged.
 
@@ -32,5 +33,11 @@ SDLC owns backup, writer exclusion, exact current mounts/network/env retention,
 production-specific internal inference network and service validation before app
 cutover. Keep prior image/config/embedded model mount as rollback. Never run the
 legacy broad update script merely to apply this image: it rewrites cron; current
-scope preserves cron. No main promotion, AWS action or public image publication.
+scope preserves cron. No AWS action or public runtime image publication.
 All actual image/archive identities and test results accompany the delivery file.
+
+For the authorized main release, manually dispatch `mini-minilm-release.yml` with
+ref `main`. Dispatches on other branches are rejected. The workflow builds and
+qualifies both immutable AMD64 images on GitHub-hosted runners and records the
+main commit and source bundle in its evidence artifact. It does not deploy;
+SDLC performs the separately authorized Mini cutover using both recorded digests.
