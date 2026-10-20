@@ -20,15 +20,34 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class HTTPMiniLMScorer:
-    def __init__(self, url: str, timeout: float = 10):
+    def __init__(self, url: str, timeout: float = 10, *, raw_pairs: bool = False):
         parsed = urllib.parse.urlsplit(url)
         if (parsed.scheme != 'http' or not parsed.hostname or parsed.username or parsed.password
                 or parsed.query or parsed.fragment or parsed.path not in ('', '/')
                 or not 0 < timeout <= 30):
             raise ValueError('MiniLM requires an internal HTTP origin and timeout in (0,30]')
-        self.url = url.rstrip('/') + '/v1/score'
+        self.origin = url.rstrip('/')
+        self.url = self.origin + ('/v1/score-raw' if raw_pairs else '/v1/score')
         self.timeout = timeout
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+
+    def check_ready(self) -> dict:
+        try:
+            with self.opener.open(self.origin + '/ready', timeout=self.timeout) as response:
+                raw = response.read(MAX_BYTES+1)
+            if len(raw) > MAX_BYTES:
+                raise ValueError('oversized readiness')
+            result = json.loads(raw)
+            if (not isinstance(result, dict) or result.get('ready') is not True
+                    or result.get('api_version') != API_VERSION or result.get('identity') != IDENTITY):
+                raise ValueError('readiness identity mismatch')
+            return result
+        except urllib.error.HTTPError as exc:
+            code=exc.code
+            exc.close()
+            raise RuntimeError('MiniLM readiness failed: HTTP ' + str(code)) from None
+        except (OSError, ValueError, TypeError):
+            raise RuntimeError('MiniLM readiness unavailable or identity mismatch') from None
 
     def score_pairs(self, pairs: list[dict]) -> list[float]:
         if not 1 <= len(pairs) <= MAX_PAIRS:
