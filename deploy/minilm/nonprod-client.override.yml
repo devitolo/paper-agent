@@ -1,0 +1,13 @@
+# SDLC: combine ONLY with the reviewed Mini nonprod app, never production by default.
+services:
+  app:
+    environment:
+      PAPER_AGENT_MINILM_BACKEND: http
+      PAPER_AGENT_MINILM_URL: http://paper-minilm:8091
+      PAPER_AGENT_MINILM_TIMEOUT: "10"
+    networks:
+      - inference
+networks:
+  inference:
+    external: true
+    name: paper-mini-inference
