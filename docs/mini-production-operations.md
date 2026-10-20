@@ -1,5 +1,28 @@
 # Mini production container operations
 
+## Pipeline-role deployment and recovery
+
+For the UI/pipeline separation release, use the
+[runtime-role procedure](mini-runtime-roles.md). Production keeps the `app`
+service for cron but runs `PAPER_AGENT_RUNTIME_ROLE=pipeline`, without a web
+listener or published port. Use `python -m paper_agents.package_runtime
+check-pipeline` inside that container for local readiness; do not request HTTP.
+The image identity for an actual cutover comes from its main Actions evidence.
+
+`scripts/mini_production_update.sh` and its generated recovery scripts are
+**unsupported for the pipeline-role release**: they expect HTTP and rewrite cron.
+Do not use the legacy updater instructions below for a pipeline container.
+The supported operator path fences/drains jobs, takes a consistent backup,
+preserves the existing env/override/image for rollback, and changes only the
+image, role, removed port and healthcheck in the override already named by cron.
+Verify local readiness, absent listener/port, unchanged state and static cron
+command compatibility, then release fences. On failure, restore the retained
+image/env/override (including its former role/port) against current data, without
+restoring a stale DB or rewriting cron. AWS and sync are outside this operation.
+
+The snapshot and HTTP examples below describe the earlier combined UI/pipeline
+runtime. They remain applicable only when explicitly rolling back to that role.
+
 This runbook records the production state established on 2026-09-24. It is for
 the Project Paper Mini operator, not the public first-user package.
 
