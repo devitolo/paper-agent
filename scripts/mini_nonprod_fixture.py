@@ -21,8 +21,6 @@ def create(destination, repo=None):
     try:
         with db:
             db.executescript((repo / 'sql/schema.sql').read_text())
-            from paper_agents.sync_exchange import _setup
-            _setup(db)
             db.row_factory = None
             db.execute("INSERT INTO papers(canonical_key,title) VALUES (?,?)",
                        ('mini-nonprod-synthetic', 'SYNTHETIC Mini non-production example'))
@@ -34,10 +32,12 @@ def create(destination, repo=None):
     (destination / 'data/profile.json').write_text(json.dumps(dict(
         interests=[], positive_signals=[], negative_signals=[], feedback_history=[])))
     (destination / 'config/topics.yaml').write_text('topics: []\n')
-    (destination / 'config/industry.json').write_text('{}\n')
+    (destination / 'config/industry.json').write_text(json.dumps(dict(
+        enabled=False, include_signals=[], exclude_signals=[], max_items_per_run=1,
+        schedule='Disabled — synthetic nonprod bootstrap')) + '\n')
     (destination / 'data/MINI_NONPROD_SYNTHETIC').write_text('synthetic-v1\n')
-    from paper_agents.serving_state import validate
-    validate(destination, migrate=False)
+    from paper_agents.mini_nonprod_state import validate
+    validate(destination)
     for name in ('logs', 'control', 'generated'):
         (destination / name).mkdir()
     files = {str(p.relative_to(destination)): hashlib.sha256(p.read_bytes()).hexdigest()

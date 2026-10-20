@@ -12,7 +12,7 @@ from pathlib import Path
 
 from paper_agents import db
 from paper_agents.local_extract import DEFAULT_MODEL
-from paper_agents.runtime_config import ollama_url
+from paper_agents.runtime_config import ollama_url, serving_only
 from paper_agents.topics import load_topic_config
 
 PACKAGE_SCHEMA_VERSION = 1
@@ -23,6 +23,10 @@ def initialize(root: Path = Path("."), templates: Path = TEMPLATES) -> None:
     """Seed missing files only; reject broken existing state without reseeding."""
     from paper_agents.runtime_config import migration_settings
     settings = migration_settings()
+    if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "serving":
+        from paper_agents.mini_nonprod_state import validate
+        validate(root)
+        return
     if settings is not None:
         # Optional provider readiness must not prevent browsing imported state.
         from paper_agents.gemini_runtime import readiness_error
@@ -96,6 +100,9 @@ def request_json(path: str, payload: dict | None = None, timeout: float = 5) -> 
 
 
 def model_status() -> dict:
+    if serving_only():
+        return {"api": "disabled", "model": None, "present": False,
+                "inference": "disabled", "detail": "Synthetic serving-only runtime; inference disabled"}
     try:
         payload = request_json("/api/tags")
         if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
@@ -136,6 +143,12 @@ def main() -> int:
             with urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=5) as response:
                 return 0 if json.load(response)["ready"] else 1
         if command == "check-state":
+            if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "serving":
+                from paper_agents.runtime_config import migration_settings
+                from paper_agents.mini_nonprod_state import validate
+                migration_settings()
+                print(json.dumps(validate(Path(".")), sort_keys=True))
+                return 0
             from paper_agents.import_state import validate_live_artifact_paths
             count = validate_live_artifact_paths(Path("."))
             print(json.dumps({"artifact_paths": "valid", "artifact_count": count}, sort_keys=True))
@@ -151,9 +164,10 @@ def main() -> int:
         if command != "start":
             raise RuntimeError("Expected start, check-app, check-state, check-model, check-gemini or manual-scout")
         from paper_agents.web import run_review_ui
-        if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
+        if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"imported", "serving"}:
             from paper_agents.migration_lifecycle import lease, downgrade, validate_container_contract
-            validate_container_contract()
+            if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
+                validate_container_contract()
             # First-slice validation must not treat the lifecycle lock as snapshot input.
             # The lock lives in a separate persistent shared mount, outside authoritative data.
             with lease(Path(os.environ["PAPER_AGENT_LIFECYCLE_DIR"]), exclusive=True) as descriptor:

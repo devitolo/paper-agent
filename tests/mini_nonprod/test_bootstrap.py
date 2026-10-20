@@ -16,13 +16,16 @@ spec.loader.exec_module(fixture)
 class BootstrapTests(unittest.TestCase):
     def test_fixture_serving_startup_and_persistence(self):
         from paper_agents.package_runtime import initialize
-        from paper_agents.serving_state import validate
+        from paper_agents.mini_nonprod_state import validate
         from paper_agents.migration_lifecycle import lease
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()/'state'
             fixture.create(root)
             env = {'PAPER_AGENT_STARTUP_MODE':'serving','PAPER_AGENT_PACKAGED':'1',
-                   'PAPER_AGENT_SERVING_ONLY':'1'}
+                   'PAPER_AGENT_SERVING_ONLY':'1','PAPER_NON_PRODUCTION':'1',
+                   'PAPER_AGENT_SCHEDULER_ENABLED':'0','PAPER_AGENT_GEMINI_ENABLED':'0',
+                   'PAPER_AGENT_TELEMETRY':'0','PAPER_AGENT_MINILM_ENABLED':'0',
+                   'PAPER_AGENT_SYNC_SHARED_SECRET':''}
             with patch.dict(os.environ, env), lease(root/'control', exclusive=True):
                 initialize(root)
                 self.assertEqual(validate(root)['papers'],1)
