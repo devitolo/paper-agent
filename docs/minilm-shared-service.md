@@ -1,10 +1,29 @@
-# MiniLM inference extraction — Developer handoff
+# MiniLM inference extraction
+
+## Current state
+
+The service described here is now the active production MiniLM backend, released
+from `main` commit `5970bcdbb6bde52c852df57fc32b41fd92a1a4cf`. Production uses
+the HTTP backend only after release qualification established exact score parity
+with the retained embedded scorer. The service is private, internal-only, and
+has no host port, application state, provider credentials, or writable model
+mount.
+
+The isolated non-production app and inference containers currently remain
+stopped. Their browser-port publication issue is unresolved, and no browser
+test, scheduled non-production job, production synchronization, shared PDF
+pool, or AWS integration is established by this work. The intended future
+non-production setup may use this service, but it is not a validated deployment
+path yet.
+
+## Original extraction design
 
 This source change starts from cached main `2ee45dcc3d84d98070c7267fe78983477559e9eb`,
 not the AWS-derived bootstrap history. The existing scorer and Curator interest
 module match that baseline. It does not supply the separate serving bootstrap/UI
 ports discussed in b8f71d6. SDLC owns their integration on an approved app baseline.
-No production default, ranking logic, Qwen prompt, cron or host is changed.
+At the time of the original extraction design, no production default, ranking
+logic, Qwen prompt, cron, or host was changed.
 
 ## Model and client contract
 
@@ -30,7 +49,8 @@ interests, performs per-interest scoring, maximum selection and existing stable
 ordering. Evaluation/shadow paths remain embedded. No score calibration changes.
 On HTTP failure the existing caller records `interest_fit.status=unavailable`,
 score=null, with a sanitized reason. Existing Curator continues other evaluation;
-this is NOT a new fail-closed pipeline or a fabricated zero score.
+this is not a new fail-closed pipeline or a fabricated zero score. It also does
+not silently fall back to embedded MiniLM at runtime.
 
 ## Private API v1
 
@@ -64,8 +84,10 @@ whole-request deadline. This is a trusted internal service, not an Internet API.
 
 Build `deploy/minilm/Dockerfile` on an approved CI/development builder only, with
 `MINILM_BASE_IMAGE` set to an approved Python3.12 slim Debian immutable base digest,
-platform linux/amd64, and immutable result digest recorded. No build ran here.
-No service image digest is yet available; never substitute a fake parser digest.
+platform linux/amd64, and immutable result digest recorded. The completed main
+release produced the production service digest documented in
+`minilm-production-http-release.md`; future releases must likewise use Actions
+and recorded immutable digests rather than building on the Mini.
 
 `deploy/minilm/compose.yml` is a separate project `paper-minilm-inference`. It has
 no host port, application DB/feedback/config/PDF volume, credential or provider
@@ -78,33 +100,36 @@ trust_remote_code:false. Tokenizer hashes are exposed for baseline comparison;
 they are not newly hard-coded approved hashes. Validate the complete model/tokenizer
 manifest against the approved embedded deployment before any parity claim.
 
-Provisional service cap:512MiB memory, memory+swap512MiB (no swap),1 CPU,64 PIDs,
-two1MiB log files. Preserve scorer thread settings even under CPU quota. These
-limits need measured startup/steady/long-input memory and latency; no actual-model
-resource qualification has occurred. Budget service, app, Qwen, dockerd and existing
-production work together. No swap/host resizing, downloads or new cloud resources.
+The service cap is 512MiB memory, memory+swap512MiB (no swap), 1 CPU, 64 PIDs,
+and two 1MiB log files. Preserve scorer thread settings even under CPU quota. The
+completed release verified healthy containers with zero restart/OOM events, but
+measured startup/steady/long-input capacity remains a separate acceptance gate.
+Budget service, app, Qwen, dockerd and existing production work together. No
+swap/host resizing, downloads or new cloud resources.
 
 SDLC must create/verify an isolated **internal** Docker network `paper-mini-inference`
 (external to these Compose projects) after scoped host approval. Existing same-name
 networks require identity/driver/internal/attachment inspection, not blind reuse.
-Attach only the service and authorized nonprod client initially. Docker membership
-is the trust boundary; there is no bearer secret or TLS inside this private network.
-No host/public publish, host-gateway, AWS connection or production attachment.
+Docker membership is the trust boundary; there is no bearer secret or TLS inside
+this private network. The completed production release attaches only the approved
+production app and MiniLM service. The intended nonprod client remains stopped.
+There is no host/public publish, host-gateway, AWS connection, or production-to-
+nonprod network attachment.
 `nonprod-client.override.yml` supplies the client network and opt-in variables;
 render/inspect the merged Compose with the chosen nonprod baseline. It does not
 turn off serving-only mode or enable MiniLM pipeline jobs. Bootstrap therefore
 continues its safe initial mode; use explicit synthetic scoring tests first.
 
 Qwen/Ollama configuration is untouched. Shared Qwen access and cross-production
-inference admission remain SDLC/Architect gates. Do not attach production to the
-new network or set its HTTP backend during nonprod validation. Later separately
-approved production switch changes only backend/network wiring after parity,
-resources and failure behavior are accepted. Roll back to embedded by restoring
-that backend and its prior qualified read-only model access; preserve production
-state and prior image. Stop only this inference project's service on failure;
-never stop/prune production. No scheduler/cron edits.
+inference admission remain SDLC/Architect gates. The completed production switch
+attached production only after parity, resource, and failure behavior were
+accepted. Roll back to embedded by restoring the prior qualified backend/image
+and read-only model access; preserve production state and never automatically
+restore an old database snapshot. Stop only this inference project's service on
+failure; never stop/prune unrelated production services. No scheduler/cron edits
+were part of the switch.
 
-## Validation and remaining gates
+## Original validation and remaining gates
 
 Local HTTP tests use real loopback transport and a deterministic fake scorer to
 cover load-once, multiple interests/max, stable ties, invalid metadata, size/batch
@@ -123,11 +148,11 @@ No input text is printed. Capture runtime/model/tokenizer manifests alongside it
 
 The optional real-model unittest runs this harness against a loaded local service
 when ONNX/Transformers and the pinned model exist; otherwise it explicitly skips.
-This workstation lacks ONNX Runtime, Transformers, NumPy and the known model/cache
-paths. No packages or models were downloaded. Real numerical parity, built-image
-identity, model-filesystem permissions, container limits/network isolation and
-Mini resource/production-health qualification remain OPEN. No SSH, host mutation,
-main merge, workflow dispatch or production switch is part of this work.
+This workstation lacked ONNX Runtime, Transformers, NumPy and the known model/cache
+paths. No packages or models were downloaded during this original design work.
+The later main release supplied real numerical parity, built-image identity,
+model filesystem, internal-network, backup, and production-health evidence.
+Measured load capacity and nonprod browser ingress remain open.
 
 Local validation result:7 API/transport tests passed with ResourceWarning treated
 as an error;1 real-engine test skipped for missing offline runtime/model.40 existing

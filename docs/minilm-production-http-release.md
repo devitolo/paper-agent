@@ -1,9 +1,29 @@
 # Standalone MiniLM production app target
 
-The initial release was based on deployed source6cf16d1798bdd09f5a679dc90b9f73cffdd46f1d.
-Its three scoped commits are now integrated onto main without unrelated prep history.
-Only MiniLM transport, its explicit new app target and verification change; schema,
-import/restore, Qwen/Gemini behavior and production cron remain unchanged.
+## Released Mini state
+
+The standalone MiniLM production target was released from `main` commit
+`5970bcdbb6bde52c852df57fc32b41fd92a1a4cf` through the
+[qualified main release workflow](https://github.com/devitolo/paper-agent/actions/runs/39507617042).
+The deployed app image is
+`ghcr.io/devitolo/paper-agent@sha256:bbbe83615264947497b9dea0a5099e1c98cec07710c3fb083dc64347134d6204`;
+the separate MiniLM service image is
+`ghcr.io/devitolo/paper-agent-minilm@sha256:6015647271e23c9e667c8f7c50440d2330a36ef780578990b4c4f932fd08ff1b`.
+
+The app now uses the explicit `mini-production-http` Docker target and calls a
+private MiniLM service over the internal Docker network. The app image no longer
+contains MiniLM inference dependencies or mounts the model; the service loads the
+verified model once from its read-only mount. Qwen/Ollama remains a separate,
+unchanged service. Schema, import/restore behavior, Gemini behavior, production
+cron, and authoritative production data/configuration remain unchanged.
+
+Release qualification compared the retained embedded scorer and the HTTP service
+on real production model assets: all nine valid Curator pairs, ordering, maximum
+winner, invalid-input handling, and two legacy raw pairs matched with maximum
+score delta `0`. This is functional transport parity, not a load-capacity or
+recommendation-quality claim.
+
+## Release contract
 
 Select Docker target `mini-production-http` explicitly. It inherits the same
 migration/Gemini runtime as the embedded target but does not install MiniLM
@@ -36,8 +56,15 @@ legacy broad update script merely to apply this image: it rewrites cron; current
 scope preserves cron. No AWS action or public runtime image publication.
 All actual image/archive identities and test results accompany the delivery file.
 
-For the authorized main release, manually dispatch `mini-minilm-release.yml` with
+For an authorized main release, manually dispatch `mini-minilm-release.yml` with
 ref `main`. Dispatches on other branches are rejected. The workflow builds and
 qualifies both immutable AMD64 images on GitHub-hosted runners and records the
 main commit and source bundle in its evidence artifact. It does not deploy;
-SDLC performs the separately authorized Mini cutover using both recorded digests.
+SDLC performs a separately authorized Mini cutover using both recorded digests.
+
+The immediately previous app and service images, production configuration, and
+backup remain rollback assets. A rollback changes app/service images and
+configuration over current authoritative data; it must not automatically restore
+an old database snapshot. The main release retained a verified backup at
+`/backups/minilm-main-20261020` and left the production database, config, model
+tree, and cron unchanged.

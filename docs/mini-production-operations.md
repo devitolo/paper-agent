@@ -7,7 +7,8 @@ the Project Paper Mini operator, not the public first-user package.
 
 | Component | Production state |
 |---|---|
-| App | `paper-mini-production-app-1`, image `sha256:817716e84db53235c0ec082323880f3af4c2e62843699749336b84ff89115eb9`, healthy, published as `127.0.0.1:8000->8000/tcp` |
+| App | `paper-mini-production-app-1`, `ghcr.io/devitolo/paper-agent@sha256:bbbe83615264947497b9dea0a5099e1c98cec07710c3fb083dc64347134d6204`, healthy, published as `127.0.0.1:8000->8000/tcp` |
+| MiniLM | `paper-minilm-production-minilm-1`, `ghcr.io/devitolo/paper-agent-minilm@sha256:6015647271e23c9e667c8f7c50440d2330a36ef780578990b4c4f932fd08ff1b`, healthy, private internal API only |
 | Ollama | `paper-mini-production-ollama-1`, image `sha256:0ab10b9b9dc5f50d30dc61aec25e3316822ca22cf0f27d4e98d74cc7dedd7c80`, running |
 | Web systemd unit | Native `project-paper-web.service` inactive |
 | Ollama systemd unit | Native `ollama.service` inactive |
@@ -25,12 +26,13 @@ Use the live host crontab as the schedule source of truth during the soak:
 crontab -l
 ```
 
-Confirm the two production containers and loopback publication:
+Confirm the app, standalone MiniLM service, and Ollama containers, plus loopback
+publication:
 
 ```sh
 docker ps --filter name=paper-mini-production
 docker inspect --format '{{.Name}} {{.Image}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' \
-  paper-mini-production-app-1 paper-mini-production-ollama-1
+  paper-mini-production-app-1 paper-minilm-production-minilm-1 paper-mini-production-ollama-1
 curl --fail --silent --show-error http://127.0.0.1:8000/ >/dev/null
 ```
 
@@ -233,6 +235,23 @@ the preserved cutover evidence and a separately approved operator procedure; do
 not improvise by enabling native services alongside the containers.
 ## Curator model and scheduled-job safety
 
-Production uses MiniLM for active Curator interest fit, `qwen3:4b` for active Curator evidence assessment, and `qwen2.5:1.5b-instruct` for review-field extraction. Deployment runs bounded MiniLM and Qwen3 checks as post-deploy verification and fails the rollout if either required check fails. Curator unloads Qwen3 after each candidate batch. A runtime Qwen3 assessment failure falls back to the deterministic Curator score and does not stop the source pipeline.
+Production uses a standalone, internal MiniLM service for active Curator
+interest fit, `qwen3:4b` for active Curator evidence assessment, and
+`qwen2.5:1.5b-instruct` for review-field extraction. The app has no embedded
+MiniLM inference dependencies or model mount. Deployment runs bounded MiniLM
+and Qwen3 checks as post-deploy verification and fails the rollout if either
+required check fails. Curator unloads Qwen3 after each candidate batch. A runtime
+Qwen3 assessment failure falls back to the deterministic Curator score; a MiniLM
+HTTP failure records unavailable interest fit without a score and does not
+silently select the embedded backend or stop the source pipeline.
+
+The 2026-10-20 main release established exact functional parity between the
+retained embedded scorer and the standalone service for its selected Curator and
+legacy raw-input cases. It retained the prior app/service images, production
+configuration, and backup as rollback assets. Rollback changes images and
+configuration over current authoritative state; do not automatically restore an
+old database snapshot. The separate non-production app/inference containers are
+currently stopped, with browser ingress still unresolved; do not describe them
+as validated or attach production to non-production inference networking.
 
 Only one managed scheduled job runs at a time. An overlapping invocation is skipped for that day, exits successfully, and records the reason in `data/job-events.jsonl`. The Health page shows the event under **Scheduled jobs** and raises a warning when the most recent event for that job is `skipped_busy`.

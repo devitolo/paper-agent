@@ -2,6 +2,37 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-10-20
+
+### Standalone MiniLM production service
+
+Status: Released from `main` commit
+`5970bcdbb6bde52c852df57fc32b41fd92a1a4cf`; main release workflow
+`39507617042` completed and the Mini production cutover was verified.
+
+Decision: Move active Curator MiniLM interest fit from the app image into a
+private, standalone service while preserving exact scoring behavior and keeping
+production data ownership unchanged.
+
+Completed behavior:
+
+- The production app uses the explicit `mini-production-http` target and calls
+  the standalone MiniLM service over an internal Docker network.
+- The app image has no embedded MiniLM inference dependencies or model mount;
+  the service loads the pinned read-only model once and exposes no host port,
+  provider access, or application state volumes.
+- Real production-model parity checks found zero maximum score delta across the
+  selected valid Curator and legacy raw-input cases, with equal ordering,
+  maximum winners, and invalid-input behavior.
+- HTTP timeout or service failure marks MiniLM interest fit unavailable with no
+  fabricated score or silent embedded fallback; Curator continues its remaining
+  evaluation.
+- Qwen/Ollama, production SQLite/data/config/models, cron, and AWS state were
+  not changed. Prior app/service images, configuration, and backup were retained
+  for rollback; rollback must not automatically restore an old database snapshot.
+- The isolated non-production app and inference containers remain stopped;
+  browser ingress and end-to-end non-production validation are still pending.
+
 ## 2026-10-13
 
 ### Mini Health Snapshot trend visibility
