@@ -49,6 +49,8 @@ class ProxyTests(unittest.TestCase):
     def test_fixed_upstream_get_and_feedback_post(self):
         self.assertEqual(self.request(),(200,b'paper'))
         self.assertEqual(self.request('POST','/feedback',b'notes=local'),(200,b'notes=local'))
+        self.assertEqual(self.request(headers={'Host':'192.168.1.110:18080'}),(200,b'paper'))
+        self.assertEqual(self.request(headers={'Host':'127.0.0.1:18080', 'Origin':'http://127.0.0.1:18080'}),(200,b'paper'))
 
     def test_open_proxy_and_external_origin_refused(self):
         self.assertEqual(self.request(path='http://example.org/')[0],400)
@@ -60,4 +62,5 @@ class ProxyTests(unittest.TestCase):
     def test_body_limit_and_client_network_refused(self):
         self.assertEqual(self.request('POST',headers={'Content-Length':str(proxy.MAX_BODY+1)})[0],413)
         self.proxy.network=ipaddress.ip_network('192.168.1.0/24')
+        self.proxy.allow_loopback=False
         self.assertEqual(self.request()[0],403)

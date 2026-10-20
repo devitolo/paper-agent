@@ -12,6 +12,7 @@ UPSTREAM_PORT = 8000
 MAX_BODY = 1024 * 1024
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
        'te', 'trailer', 'transfer-encoding', 'upgrade'}
+APPROVED_AUTHORITIES = {'192.168.1.110:18080', '127.0.0.1:18080'}
 
 
 class Server(ThreadingHTTPServer):
@@ -21,11 +22,15 @@ class Server(ThreadingHTTPServer):
     def __init__(self, address, authority, cidr):
         host, port = authority.split(':')
         network = ipaddress.ip_network(cidr, strict=True)
-        if not ipaddress.ip_address(host).is_private or ipaddress.ip_address(host) not in network:
-            raise ValueError('Private authority within allowed network required')
+        if authority not in APPROVED_AUTHORITIES:
+            raise ValueError('Unapproved private authority')
+        if not ipaddress.ip_address(host).is_private:
+            raise ValueError('Private authority required')
         if not network.is_private or int(port) != 18080:
             raise ValueError('Private CIDR and dedicated port18080 required')
         self.authority, self.network = authority, network
+        self.authorities = APPROVED_AUTHORITIES
+        self.allow_loopback = True
         self.slots = threading.BoundedSemaphore(16)
         super().__init__(address, Handler)
 
@@ -58,18 +63,19 @@ class Handler(BaseHTTPRequestHandler):
         pass  # No paper IDs, feedback, request paths or headers in ingress logs.
 
     def relay(self):
-        if ipaddress.ip_address(self.client_address[0]) not in self.server.network:
+        client_ip = ipaddress.ip_address(self.client_address[0])
+        if client_ip not in self.server.network and not (self.server.allow_loopback and client_ip.is_loopback):
             self.send_error(403)
             return
         target = urlsplit(self.path)
         if not self.path.startswith('/') or self.path.startswith('//') or target.scheme or target.netloc:
             self.send_error(400)
             return
-        if self.headers.get_all('Host') != [self.server.authority]:
+        if self.headers.get('Host') not in self.server.authorities:
             self.send_error(400)
             return
         origin = self.headers.get('Origin')
-        if origin and origin != 'http://' + self.server.authority:
+        if origin and origin not in {'http://' + authority for authority in self.server.authorities}:
             self.send_error(403)
             return
         if self.headers.get('Sec-Fetch-Site') == 'cross-site':
