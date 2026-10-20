@@ -1,0 +1,7 @@
+# Append to the retained nonprod app configuration; retain all existing state.
+services:
+  app:
+    environment:
+      PAPER_AGENT_RUNTIME_ROLE: ui
+    healthcheck:
+      disable: true

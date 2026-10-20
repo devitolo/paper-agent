@@ -4,6 +4,7 @@ import html
 import hashlib
 import json
 import mimetypes
+import os
 import re
 import signal
 import sqlite3
@@ -32,7 +33,7 @@ from paper_agents.topic_agent import (
     topic_proposal_to_json,
 )
 from paper_agents.scout import SCOUT_SOURCES
-from paper_agents.runtime_config import default_sources, gemini_enabled, packaged
+from paper_agents.runtime_config import default_sources, gemini_enabled, packaged, serving_only
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,
@@ -90,7 +91,7 @@ LEGACY_SUMMARY_FEEDBACK_SIGNALS = {"up", "down"}
 
 def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEFAULT_DB_PATH) -> None:
     init_db(db_path)
-    if packaged():
+    if packaged() and not serving_only():
         from paper_agents.manual_scout import status as scout_status
         scout_status(db_path)
     server = ThreadingHTTPServer((host, port), make_handler(db_path))
@@ -115,7 +116,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path == "/scout/status":
-                if not packaged():
+                if not packaged() or serving_only():
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
                 payload = json.dumps(manual_scout_snapshot(db_path)).encode("utf-8")
@@ -131,6 +132,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 status = app_status(db_path)
                 if parsed.path == "/runtime":
                     status["model"] = model_status()
+                    status["mode"] = "serving-only" if serving_only() else "worker"
                 payload = json.dumps(status).encode("utf-8")
                 self.send_response(HTTPStatus.OK if status["ready"] else HTTPStatus.SERVICE_UNAVAILABLE)
                 self.send_header("Content-Type", "application/json")
@@ -215,7 +217,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path == "/scout/run":
-                if not packaged():
+                if not packaged() or serving_only():
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
                 from paper_agents.manual_scout import ScoutBusy, start
@@ -239,6 +241,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 form = urllib.parse.parse_qs(body)
                 try:
                     action = form.get("action", [""])[0]
+                    if serving_only() and action in {"propose", "apply_proposal"}:
+                        self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Topic Agent disabled in synthetic bootstrap")
+                        return
                     if action == "propose":
                         conversation = topic_conversation_from_form(form)
                         request_text = form.get("request_text", [""])[0]
@@ -483,7 +488,7 @@ def manual_scout_snapshot(db_path: Path, config_path: Path = DEFAULT_TOPIC_CONFI
 
 
 def render_manual_scout_panel(db_path: Path, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> str:
-    if not packaged():
+    if not packaged() or serving_only():
         return ""
     state = manual_scout_snapshot(db_path, config_path)
     label = "Retry Scout" if state["status"] in {"failed", "empty", "interrupted"} else "Run Scout"
@@ -1306,6 +1311,8 @@ def render_topics_page(
     topic_mode = topic_mode if topic_mode in {"inventory", "agent"} else "inventory"
     if proposal or conversation:
         topic_mode = "agent"
+    if serving_only():
+        topic_mode = "inventory"
     if topic_mode == "agent":
         selected_source = "all"
     selected_source = selected_source if selected_source in {*academic_sources, "all"} else "arxiv"
@@ -1352,6 +1359,8 @@ def render_topics_page(
             f'<a class="academic-source-card academic-mode-card{" selected" if topic_mode == "inventory" and selected_source == "all" else ""}" '
             f'href="/topics?source=all"><strong>All topics</strong><span>{total_topics} configured</span></a>'
         )
+        if serving_only():
+            topic_agent_link = ""
         mode_switch = f'<div class="academic-schedule-actions">{topic_agent_link}{all_link}</div>'
         schedule_panel = f"""<section class="academic-schedule" aria-labelledby="academic-schedule-title">
           <div class="academic-section-head">
@@ -2779,7 +2788,18 @@ def render_view_toggle(view_value: str) -> str:
 
 def render_app_header(page_title: str, subtitle: str, controls_html: str, current_page: str) -> str:
     controls_block = f'<div class="header-controls">{controls_html}</div>' if controls_html.strip() else ""
-    return f"""<header class="topbar">
+    environment_marker = ""
+    if os.environ.get("PAPER_NON_PRODUCTION", "0") == "1":
+        label = escape(os.environ.get("PAPER_UI_ENV_LABEL", "NON-PROD"))
+        environment_marker = f'''<style>
+          .nonprod-watermark {{ position: fixed; inset: 0; display: grid; place-items: center;
+            pointer-events: none; z-index: 10; opacity: .045; font-weight: 800;
+            font-size: clamp(28px, 7vw, 96px); transform: rotate(-25deg); }}
+          .nonprod-label {{ display: inline-block; padding: 3px 9px; border: 1px solid currentColor;
+            border-radius: 5px; color: #d89830; font-size: 12px; font-weight: 700; }}
+          </style><div class="nonprod-watermark" aria-hidden="true">NON-PRODUCTION</div>
+          <div class="nonprod-label" role="status">NON-PROD · {label}</div>'''
+    return f"""{environment_marker}<header class="topbar">
       <div class="header-main">
         <div>
           <h1 class="brand-title">
@@ -3058,7 +3078,7 @@ def save_feedback(
         "profile_apply_error": None,
         "profile_apply_queued": False,
     }
-    if ingest_output is None or not gemini_enabled():
+    if ingest_output is None or serving_only() or not gemini_enabled():
         return result
 
     from paper_agents.gemini_runtime import readiness_error
@@ -3247,6 +3267,8 @@ def run_profile_apply_worker(
     structured_feedback_ids: list[int],
     profile_provider_fn: ProfileProvider | None = None,
 ) -> None:
+    if serving_only():
+        return
     try:
         with connect_db(db_path) as connection:
             apply_feedback_to_profile(

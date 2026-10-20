@@ -1,0 +1,67 @@
+name: Mini Runtime Roles Release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mini-minilm-release
+  cancel-in-progress: false
+jobs:
+  build-publish:
+    if: github.repository == 'devitolo/paper-agent' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PYTHON_BASE: docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d
+      NODE_BASE: docker.io/library/node@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify production runtime lifecycle and exact main source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m unittest discover -s tests/runtime_roles -v
+          PYTHONPATH=tests python3 -W ignore::ResourceWarning -m unittest test_package_runtime test_migration_scheduler test_mini_release_pipeline -q
+          git diff --check
+      - name: Record source bundle
+        id: source
+        run: echo "bundle=$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish shared AMD64 role image
+        id: app
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          target: mini-production-http
+          platforms: linux/amd64
+          provenance: false
+          push: true
+          tags: ghcr.io/devitolo/paper-agent:mini-roles-${{ github.sha }}
+          build-args: |
+            PYTHON_BASE_IMAGE=${{ env.PYTHON_BASE }}
+            NODE_BASE_IMAGE=${{ env.NODE_BASE }}
+            VCS_REF=${{ github.sha }}
+            VERSION=mini-roles-${{ github.sha }}
+            SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.bundle }}
+      - name: Inspect immutable image and verify production runtime modules
+        env:
+          APP_IMAGE: ghcr.io/devitolo/paper-agent@${{ steps.app.outputs.digest }}
+          SOURCE_BUNDLE: ${{ steps.source.outputs.bundle }}
+        run: python3 scripts/qualify_role_release.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mini-role-release-${{ github.sha }}
+          path: role-release-evidence.json
+          if-no-files-found: error
+          retention-days: 30
