@@ -1,0 +1,119 @@
+{
+  "base": {
+    "distribution": "Debian Bookworm slim",
+    "platform": "linux/amd64",
+    "python": "3.12.15",
+    "reference": "docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d",
+    "resolution": "Docker Hub official Python manifest inspected during this preparation"
+  },
+  "checks": {
+    "Mini_access_performed": false,
+    "Qwen_integration": "disabled-pending-qualified-existing-endpoint-and-admission",
+    "app_image_synthetic_http_and_restart": "passed",
+    "execution_platform": "AMD64 emulation on ARM Docker Desktop",
+    "export_archive_OCI_blob_hashes": "25 verified across both archives",
+    "image_imports_and_pip_check": "passed",
+    "image_source_bytes_match_archive": true,
+    "native_Mini_resources": "unrun",
+    "operator_model_manifest_tests_passed": 4,
+    "real_model_parity": "unrun",
+    "real_model_tests_skipped": 1,
+    "service_tests_in_exact_image_passed": 7,
+    "source_tests_previously_passed": 86,
+    "temporary_local_test_objects": "removed"
+  },
+  "disk_budget": {
+    "archive_bytes": 211021312,
+    "minimum_free_after_images_and_reserves_bytes": 2147483648,
+    "uncompressed_layers_upper_bound_bytes": 653227520
+  },
+  "evidence": {
+    "app-build-metadata.json": "35a5678606b00d9e66d3178d2b842ad8f317ec7a73146ef8bbc1bb6d630f58e6",
+    "app-image-smoke.json": "e64a765c5db38454f2d75f0a04e8e89fd545aee1ce72610b957cff0603582b48",
+    "app-runtime.json": "98930e111e00dcc8dad88e45b129dcb913c284b680ddf09f4bad7794ead0a703",
+    "images.json": "7a7b28a254b77c157593ac78a56b1d3742138985e3e3f3c6b7d7e0790248363d",
+    "minilm-build-metadata.json": "c0b13d03e3f1bc79371bcf95dff5f38f12f0cfe74a0fc4b81ae7bd6171968529",
+    "minilm-runtime.json": "e239334640c388c1d3ef2e9e264a94e8b58654199921aad7da408bc1e684404f",
+    "verify_local_images.py": "f89189a30947eda9d96059807b6387324fae8157db87b7bc677b7539f28746ac"
+  },
+  "fixture_manifest": "/private/tmp/paper-mini-nonprod-preparation-h7cjtr0h/synthetic-state/fixture.json",
+  "fixture_manifest_sha256": "ca35252a5020d6b985a01b613dbe74d45395f27fbd218383704c9050110b31b2",
+  "images": {
+    "app": {
+      "architecture": "amd64",
+      "archive": {
+        "bytes": 52509696,
+        "name": "app-amd64.docker.tar",
+        "sha256": "ab854fac57b0d49f8cb9a0c41026e4704653c1a1d24c41880294b347b661e932"
+      },
+      "config_digest": "sha256:7947da6941df0e0995072807ecace15179afc0bcc74da7355ada4555be04b7fb",
+      "image_id": "sha256:a8b50c80b157711be04e8bf52a4ac4db0e4cde94909f53a267285f8a3cd8cf81",
+      "labels": {
+        "org.opencontainers.image.revision": "d6522ee78eb37675e01d8164c8b1f4674e83d3ff",
+        "org.projectpaper.base-image": "docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d",
+        "org.projectpaper.environment": "mini-nonproduction",
+        "org.projectpaper.source-bundle-sha256": "7eecf7405583f82ac6ca0245c51f960daa21788d56172b245dfc313b1ca7ce84"
+      },
+      "manifest_digest": "sha256:a8b50c80b157711be04e8bf52a4ac4db0e4cde94909f53a267285f8a3cd8cf81",
+      "reference": "paper-mini-nonprod-prep@sha256:a8b50c80b157711be04e8bf52a4ac4db0e4cde94909f53a267285f8a3cd8cf81",
+      "repo_digests": [
+        "paper-mini-nonprod-prep@sha256:a8b50c80b157711be04e8bf52a4ac4db0e4cde94909f53a267285f8a3cd8cf81"
+      ],
+      "size": 52491863,
+      "tag": "paper-mini-nonprod-prep:d6522ee-amd64",
+      "uncompressed_layer_bytes_including_shared_base": 147248640
+    },
+    "minilm": {
+      "architecture": "amd64",
+      "archive": {
+        "bytes": 158511616,
+        "name": "minilm-amd64.docker.tar",
+        "sha256": "2bbebeba8de9c3109191ee60af69fa545380c2c6c3e4c4bc37dad30f854dd3d8"
+      },
+      "config_digest": "sha256:0a5a5af1f2bbbb3a0ea9c3a08f9d5a8d3f5ca5b35915ebd9cc51e747699fabce",
+      "image_id": "sha256:81d1d7b5ff54fd02fffa934c05c36927c83cee38ccdb980dcebd011aadfe2739",
+      "labels": {
+        "org.opencontainers.image.revision": "d6522ee78eb37675e01d8164c8b1f4674e83d3ff",
+        "org.projectpaper.base-image": "docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d",
+        "org.projectpaper.environment": "mini-nonproduction-validation",
+        "org.projectpaper.source-bundle-sha256": "7eecf7405583f82ac6ca0245c51f960daa21788d56172b245dfc313b1ca7ce84"
+      },
+      "manifest_digest": "sha256:81d1d7b5ff54fd02fffa934c05c36927c83cee38ccdb980dcebd011aadfe2739",
+      "offline_import_and_missing_model_check": [
+        "1.23.2",
+        "['AzureExecutionProvider', 'CPUExecutionProvider']",
+        "missing_model_rejected_before_listen"
+      ],
+      "reference": "paper-minilm-prep@sha256:81d1d7b5ff54fd02fffa934c05c36927c83cee38ccdb980dcebd011aadfe2739",
+      "repo_digests": [
+        "paper-minilm-prep@sha256:81d1d7b5ff54fd02fffa934c05c36927c83cee38ccdb980dcebd011aadfe2739"
+      ],
+      "size": 158498359,
+      "tag": "paper-minilm-prep:d6522ee-amd64",
+      "uncompressed_layer_bytes_including_shared_base": 505978880
+    }
+  },
+  "model": {
+    "complete_asset_manifest": null,
+    "expected_container_model_directory": "/models/minilm",
+    "historical_container_mount": "/models",
+    "historical_volume": "paper-agent-minilm-model-cache",
+    "identity_source_commit": "557d28308328e0c69de19cb4b6ba907d1f234f4e",
+    "identity_source_date": "2026-09-26",
+    "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
+    "onnx_sha256": "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a",
+    "revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "runtime_source_commit": "401c1e2338d2e8d4037683d3be360417d9b1bca6",
+    "runtime_source_date": "2026-10-06",
+    "status": "recorded-identity-only-current-Mini-files-unverified",
+    "tokenizer_sha256": null,
+    "verified_host_directory": null
+  },
+  "operator_helpers": {
+    "scripts/mini_nonprod_model_manifest.py": "c1fc8ccf252180198190be58ecc2eee2f1404b5c978d455cfee801a98d25b4f5"
+  },
+  "source_archive": "/private/tmp/paper-mini-nonprod-preparation-h7cjtr0h/source.tar",
+  "source_archive_sha256": "7eecf7405583f82ac6ca0245c51f960daa21788d56172b245dfc313b1ca7ce84",
+  "source_commit": "d6522ee78eb37675e01d8164c8b1f4674e83d3ff",
+  "status": "local-image-checked-awaiting-scoped-Mini-approval"
+}
