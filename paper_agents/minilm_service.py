@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import socket
+import signal
 import threading
 import time
 from .curator_interest import abstract_status
@@ -15,7 +16,7 @@ from .minilm_eval import MiniLMScorer, MODEL_DIR
 from .minilm_http import API_VERSION, IDENTITY, MAX_BYTES, MAX_PAIRS
 
 
-def validate_pairs(payload):
+def validate_pairs(payload, *, raw_pairs=False):
     if not isinstance(payload,dict) or set(payload) != {'api_version','pairs'} or type(payload['api_version']) is not int or payload['api_version'] != API_VERSION:
         raise ValueError('invalid envelope')
     pairs = payload['pairs']
@@ -27,6 +28,11 @@ def validate_pairs(payload):
             raise ValueError('invalid pair')
         if any(not isinstance(v,str) for v in item.values()):
             raise ValueError('strings required')
+        if raw_pairs:
+            if not all(item[k].strip() for k in ('title','abstract','interest')):
+                raise ValueError('nonempty raw pair required')
+            result.append((item['title'],item['abstract'],item['interest']))
+            continue
         title=' '.join(item['title'].split())
         status,abstract=abstract_status(item['abstract'])
         if not title or status != 'valid' or not item['interest'].strip():
@@ -42,7 +48,7 @@ def metadata(model_dir):
         path=Path(model_dir)/name
         if path.is_file(): files[name]=hashlib.sha256(path.read_bytes()).hexdigest()
     return {'identity':IDENTITY,'api_version':API_VERSION,'tokenizer_files':files,
-            'runtime':{name:importlib.metadata.version(name) for name in ('onnxruntime','transformers')},
+            'runtime':{name:importlib.metadata.version(name) for name in ('onnxruntime','transformers','numpy','tokenizers')},
             'max_pairs':MAX_PAIRS,'max_request_bytes':MAX_BYTES,'inference_concurrency':1}
 
 
@@ -107,7 +113,7 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200,{'ready':True, **self.server.details})
 
     def do_POST(self):
-        if self.path != '/v1/score': return self.respond(404,{'error':'not_found'})
+        if self.path not in ('/v1/score','/v1/score-raw'): return self.respond(404,{'error':'not_found'})
         lengths=self.headers.get_all('Content-Length',[])
         if (len(lengths)!=1 or self.headers.get('Transfer-Encoding') is not None
                 or self.headers.get_content_type()!='application/json'):
@@ -118,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             raw=self.rfile.read(length)
             if len(raw)!=length: raise ValueError('short body')
-            pairs=validate_pairs(json.loads(raw))
+            pairs=validate_pairs(json.loads(raw),raw_pairs=self.path=='/v1/score-raw')
         except (ValueError,TypeError,UnicodeError): return self.respond(422,{'error':'invalid_input'})
         except (OSError,socket.timeout): return self.respond(408,{'error':'read_timeout'})
         if not self.server.inference.acquire(blocking=False):
@@ -150,6 +156,11 @@ def main():
     parser.add_argument('--port',type=int,default=8091)
     args=parser.parse_args()
     with create_server((args.host,args.port)) as server:
+        def stop(signum, frame):
+            # shutdown must run outside the serve_forever thread to avoid deadlock.
+            threading.Thread(target=server.shutdown, daemon=True).start()
+        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGINT, stop)
         server.serve_forever()
 
 if __name__=='__main__': main()
