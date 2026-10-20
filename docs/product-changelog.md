@@ -30,8 +30,13 @@ Completed behavior:
 - Qwen/Ollama, production SQLite/data/config/models, cron, and AWS state were
   not changed. Prior app/service images, configuration, and backup were retained
   for rollback; rollback must not automatically restore an old database snapshot.
-- The isolated non-production app and inference containers remain stopped;
-  browser ingress and end-to-end non-production validation are still pending.
+- A separate isolated non-production app deployment is running from source
+  revision `246483b33d7e4cbc285b592f6239097004e7ce7b` after Actions run
+  `39509451567`, but it is intentionally untested: automatic health checking is
+  disabled and no browser, HTTP, model, provider, pipeline, or resource checks
+  have run. Its `127.0.0.1:18080` mapping is not effectively published (only
+  internal `172.23.0.2:8000` was observed); the retained non-production MiniLM
+  service remains stopped. This is not production-release evidence.
 
 ## 2026-10-13
 

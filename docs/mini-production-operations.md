@@ -250,8 +250,13 @@ retained embedded scorer and the standalone service for its selected Curator and
 legacy raw-input cases. It retained the prior app/service images, production
 configuration, and backup as rollback assets. Rollback changes images and
 configuration over current authoritative state; do not automatically restore an
-old database snapshot. The separate non-production app/inference containers are
-currently stopped, with browser ingress still unresolved; do not describe them
-as validated or attach production to non-production inference networking.
+old database snapshot. A separate non-production app is running from source
+revision `246483b33d7e4cbc285b592f6239097004e7ce7b`, built by Actions run
+`39509451567`, but it is intentionally untested and its automatic health check
+is disabled. No browser, HTTP, model, provider, pipeline, or resource checks
+have run. The requested `127.0.0.1:18080` mapping is not effectively published
+(only internal `172.23.0.2:8000` was observed), and its retained non-production
+MiniLM service remains stopped. Do not describe this as validated or attach
+production to non-production inference services.
 
 Only one managed scheduled job runs at a time. An overlapping invocation is skipped for that day, exits successfully, and records the reason in `data/job-events.jsonl`. The Health page shows the event under **Scheduled jobs** and raises a warning when the most recent event for that job is `skipped_busy`.

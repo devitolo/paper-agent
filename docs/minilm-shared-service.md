@@ -9,12 +9,19 @@ with the retained embedded scorer. The service is private, internal-only, and
 has no host port, application state, provider credentials, or writable model
 mount.
 
-The isolated non-production app and inference containers currently remain
-stopped. Their browser-port publication issue is unresolved, and no browser
-test, scheduled non-production job, production synchronization, shared PDF
-pool, or AWS integration is established by this work. The intended future
-non-production setup may use this service, but it is not a validated deployment
-path yet.
+The isolated non-production app is running from source revision
+`246483b33d7e4cbc285b592f6239097004e7ce7b` and image digest
+`c830f89c974bb053e38ae57c7fad3eb5dca5a4a53cb7a43be40970e3caf2dad0`, but
+this is an explicitly **untested** deployment. Its automatic health check is
+disabled; no HTTP, browser, model, provider, pipeline, or resource checks have
+been made. The retained non-production MiniLM service remains stopped.
+
+The requested `127.0.0.1:18080` mapping is not effectively published (only the
+app's internal `172.23.0.2:8000` address was observed), so browser access is
+unresolved. Five synthetic state volumes and the internal networks were retained.
+No production synchronization, shared PDF pool, AWS integration, scheduled
+non-production job, or production-service connectivity was created or tested.
+This is not a validated non-production path.
 
 ## Original extraction design
 
@@ -112,9 +119,10 @@ SDLC must create/verify an isolated **internal** Docker network `paper-mini-infe
 networks require identity/driver/internal/attachment inspection, not blind reuse.
 Docker membership is the trust boundary; there is no bearer secret or TLS inside
 this private network. The completed production release attaches only the approved
-production app and MiniLM service. The intended nonprod client remains stopped.
-There is no host/public publish, host-gateway, AWS connection, or production-to-
-nonprod network attachment.
+production app and MiniLM service. A separately deployed nonprod app is running,
+but its retained nonprod MiniLM service remains stopped and no service
+connectivity has been validated. There is no host/public publish, host-gateway,
+AWS connection, or production-to-nonprod service attachment.
 `nonprod-client.override.yml` supplies the client network and opt-in variables;
 render/inspect the merged Compose with the chosen nonprod baseline. It does not
 turn off serving-only mode or enable MiniLM pipeline jobs. Bootstrap therefore

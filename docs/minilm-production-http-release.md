@@ -23,6 +23,12 @@ winner, invalid-input handling, and two legacy raw pairs matched with maximum
 score delta `0`. This is functional transport parity, not a load-capacity or
 recommendation-quality claim.
 
+A separate non-production app deployment is running from source revision
+`246483b33d7e4cbc285b592f6239097004e7ce7b` after Actions run `39509451567`.
+It is intentionally untested, its automatic health check is disabled, and its
+browser ingress is unresolved; it is not evidence for this production release.
+The retained non-production MiniLM service remains stopped.
+
 ## Release contract
 
 Select Docker target `mini-production-http` explicitly. It inherits the same
