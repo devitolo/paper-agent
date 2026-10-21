@@ -1,0 +1,4 @@
+# Match inspected Mini production inference versions; no model downloads.
+-r requirements-minilm.txt
+numpy==2.5.3
+tokenizers==0.22.2

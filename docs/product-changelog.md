@@ -2,6 +2,68 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-10-20
+
+### Standalone MiniLM production service
+
+Status: Released from `main` commit
+`5970bcdbb6bde52c852df57fc32b41fd92a1a4cf`; main release workflow
+`39507617042` completed and the Mini production cutover was verified.
+
+Decision: Move active Curator MiniLM interest fit from the app image into a
+private, standalone service while preserving exact scoring behavior and keeping
+production data ownership unchanged.
+
+Completed behavior:
+
+- The production app uses the explicit `mini-production-http` target and calls
+  the standalone MiniLM service over an internal Docker network.
+- The app image has no embedded MiniLM inference dependencies or model mount;
+  the service loads the pinned read-only model once and exposes no host port,
+  provider access, or application state volumes.
+- Real production-model parity checks found zero maximum score delta across the
+  selected valid Curator and legacy raw-input cases, with equal ordering,
+  maximum winners, and invalid-input behavior.
+- HTTP timeout or service failure marks MiniLM interest fit unavailable with no
+  fabricated score or silent embedded fallback; Curator continues its remaining
+  evaluation.
+- Qwen/Ollama, production SQLite/data/config/models, cron, and AWS state were
+  not changed. Prior app/service images, configuration, and backup were retained
+  for rollback; rollback must not automatically restore an old database snapshot.
+- A separate isolated non-production app deployment is running from source
+  revision `246483b33d7e4cbc285b592f6239097004e7ce7b` after Actions run
+  `39509451567`, but it is intentionally untested: automatic health checking is
+  disabled and no browser, HTTP, model, provider, pipeline, or resource checks
+  have run. Its `127.0.0.1:18080` mapping is not effectively published (only
+  internal `172.23.0.2:8000` was observed); the retained non-production MiniLM
+  service remains stopped. This is not production-release evidence.
+
+## 2026-10-13
+
+### Mini Health Snapshot trend visibility
+
+Status: Implemented on `main` and promoted to `mini-production` in commit
+`6cf16d1`.
+
+Decision: The Mini Health Snapshot workflow should be useful from GitHub
+Actions without opening SSH, while preserving machine-readable artifacts for
+short-term trend comparison.
+
+Completed behavior:
+
+- Print the human-readable health snapshot and trend summary directly in the
+  workflow log and step summary.
+- Upload the raw health JSON and normalized `health-trend.jsonl` artifact with
+  14-day retention.
+- Add a 7-day source trend summary from the `db health --json` recent source
+  rows, including low eligible pools, zero-recommendation runs with eligible
+  papers, and healthy recent runs by source.
+- Keep warning/critical health results intentionally failing the workflow after
+  summaries and artifacts are preserved, so "attention required" is visible in
+  Actions.
+- Format `profile_maintenance` whether the health payload is a mapping or the
+  current list of maintenance notices.
+
 ## 2026-10-06
 
 ### v0.2 quality and installability milestone

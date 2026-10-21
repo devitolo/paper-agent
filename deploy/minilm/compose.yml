@@ -1,0 +1,45 @@
+# Standalone inference service. No application/database/provider volumes or host ports.
+name: paper-minilm-inference
+services:
+  minilm:
+    image: ${PAPER_MINILM_SERVICE_IMAGE:?Set reviewed immutable AMD64 service digest}
+    platform: linux/amd64
+    pull_policy: never
+    restart: "no"
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+    pids_limit: 64
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,mode=1777"]
+    environment:
+      PAPER_AGENT_MINILM_MODEL_DIR: /models/minilm
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    volumes:
+      - type: bind
+        source: ${PAPER_MINILM_MODEL_SOURCE:?Set verified existing model-only directory}
+        target: /models/minilm
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      inference:
+        aliases: [paper-minilm]
+    healthcheck:
+      test: [CMD, python, -c, "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8091/ready',timeout=2))['ready']"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: "1m", max-file: "2"}
+networks:
+  inference:
+    external: true
+    name: paper-mini-inference

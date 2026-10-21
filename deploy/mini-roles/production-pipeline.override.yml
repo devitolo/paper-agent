@@ -1,0 +1,9 @@
+# Append to the existing production Compose stack. Keep service app for host cron.
+# Requires Compose support for !reset; never substitute an ordinary merged [] list.
+services:
+  app:
+    environment:
+      PAPER_AGENT_RUNTIME_ROLE: pipeline
+    ports: !reset []
+    healthcheck:
+      test: [CMD, python, -m, paper_agents.package_runtime, check-pipeline]

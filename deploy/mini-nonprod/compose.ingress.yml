@@ -1,0 +1,36 @@
+# Dedicated private ingress only. App remains on its internal networks.
+name: paper-mini-nonprod-ingress
+services:
+  proxy:
+    image: ${PAPER_MINI_NONPROD_IMAGE:?Approved immutable AMD64 image required}
+    platform: linux/amd64
+    pull_policy: never
+    entrypoint: [python, -m, paper_agents.nonprod_proxy]
+    command: [--authority, '192.168.1.110:18080', --allow-cidr, '192.168.1.0/24']
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+    pids_limit: 32
+    ports: ['192.168.1.110:18080:8080']
+    networks: [ingress, isolated]
+    healthcheck:
+      disable: true
+    labels:
+      org.projectpaper.environment: mini-nonproduction
+      org.projectpaper.role: private-ingress
+    logging:
+      driver: json-file
+      options:
+        max-size: '1m'
+        max-file: '2'
+networks:
+  ingress:
+    driver: bridge
+  isolated:
+    external: true
+    name: paper-mini-nonprod-internal

@@ -4,6 +4,7 @@ import html
 import hashlib
 import json
 import mimetypes
+import os
 import re
 import signal
 import sqlite3
@@ -32,7 +33,8 @@ from paper_agents.topic_agent import (
     topic_proposal_to_json,
 )
 from paper_agents.scout import SCOUT_SOURCES
-from paper_agents.runtime_config import default_sources, gemini_enabled, packaged
+from paper_agents.runtime_config import default_sources, gemini_enabled, packaged, serving_only
+from paper_agents.sync_exchange import MAX_BODY_BYTES, build_input_snapshot, receive_result_batch, verify_request
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,
@@ -90,7 +92,7 @@ LEGACY_SUMMARY_FEEDBACK_SIGNALS = {"up", "down"}
 
 def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEFAULT_DB_PATH) -> None:
     init_db(db_path)
-    if packaged():
+    if packaged() and not serving_only():
         from paper_agents.manual_scout import status as scout_status
         scout_status(db_path)
     server = ThreadingHTTPServer((host, port), make_handler(db_path))
@@ -114,8 +116,30 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
     class ReviewHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/sync/input":
+                if not verify_request(self.headers, b"", "GET", parsed.path):
+                    self.send_error(HTTPStatus.UNAUTHORIZED); return
+                self.send_json(json.dumps(build_input_snapshot(db_path), sort_keys=True).encode())
+                return
+            if parsed.path == "/sync/backup":
+                if not verify_request(self.headers, b"", "GET", parsed.path):
+                    self.send_error(HTTPStatus.UNAUTHORIZED); return
+                import tempfile, tarfile
+                from paper_agents.sync_backup import create_backup, MAX_ARCHIVE_BYTES
+                try:
+                    with tempfile.TemporaryDirectory(prefix="paper-recovery-") as directory:
+                        staging = Path(directory); backup = create_backup(db_path, Path("config"), staging, root=Path(".")); archive = staging / "state.tar.gz"
+                        with tarfile.open(archive, "w:gz", compresslevel=9) as output:
+                            for source in sorted(backup.rglob("*")):
+                                if source.is_file(): output.add(source, arcname=source.relative_to(backup).as_posix(), recursive=False)
+                        if archive.stat().st_size > MAX_ARCHIVE_BYTES: raise ValueError("Backup exceeds transfer limit")
+                        self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "application/gzip"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(archive.stat().st_size)); self.end_headers()
+                        with archive.open("rb") as source:
+                            while chunk := source.read(65536): self.wfile.write(chunk)
+                except (OSError, ValueError, sqlite3.Error): self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Recovery backup unavailable")
+                return
             if parsed.path == "/scout/status":
-                if not packaged():
+                if not packaged() or serving_only():
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
                 payload = json.dumps(manual_scout_snapshot(db_path)).encode("utf-8")
@@ -131,6 +155,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 status = app_status(db_path)
                 if parsed.path == "/runtime":
                     status["model"] = model_status()
+                    status["mode"] = "serving-only" if serving_only() else "worker"
                 payload = json.dumps(status).encode("utf-8")
                 self.send_response(HTTPStatus.OK if status["ready"] else HTTPStatus.SERVICE_UNAVAILABLE)
                 self.send_header("Content-Type", "application/json")
@@ -214,8 +239,25 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path in {"/sync/results", "/sync/profile-proposals"}:
+                raw_length = self.headers.get("Content-Length", "")
+                if not raw_length.isdecimal() or self.headers.get("Transfer-Encoding"):
+                    self.send_error(HTTPStatus.BAD_REQUEST, "A valid Content-Length is required"); return
+                length = int(raw_length)
+                if length > MAX_BODY_BYTES: self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE); return
+                body = self.rfile.read(length)
+                if len(body) != length or not verify_request(self.headers, body, "POST", parsed.path):
+                    self.send_error(HTTPStatus.BAD_REQUEST if len(body) != length else HTTPStatus.UNAUTHORIZED); return
+                try:
+                    if parsed.path == "/sync/profile-proposals":
+                        from paper_agents.sync_exchange import receive_profile_proposal
+                        result = receive_profile_proposal(db_path, body, self.headers)
+                    else: result = receive_result_batch(db_path, body, self.headers)
+                except ValueError as error:
+                    self.send_error(HTTPStatus.UNPROCESSABLE_ENTITY, str(error)); return
+                self.send_json(json.dumps(result, sort_keys=True).encode()); return
             if parsed.path == "/scout/run":
-                if not packaged():
+                if not packaged() or serving_only():
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
                 from paper_agents.manual_scout import ScoutBusy, start
@@ -239,6 +281,9 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 form = urllib.parse.parse_qs(body)
                 try:
                     action = form.get("action", [""])[0]
+                    if serving_only() and action in {"propose", "apply_proposal"}:
+                        self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Topic Agent disabled in synthetic bootstrap")
+                        return
                     if action == "propose":
                         conversation = topic_conversation_from_form(form)
                         request_text = form.get("request_text", [""])[0]
@@ -451,6 +496,14 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
             with asset_path.open("rb") as handle:
                 self.wfile.write(handle.read())
 
+        def send_json(self, payload: bytes) -> None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
         def respond_html(self, content: str) -> None:
             data = content.encode("utf-8")
             self.send_response(HTTPStatus.OK)
@@ -483,7 +536,7 @@ def manual_scout_snapshot(db_path: Path, config_path: Path = DEFAULT_TOPIC_CONFI
 
 
 def render_manual_scout_panel(db_path: Path, config_path: Path = DEFAULT_TOPIC_CONFIG_PATH) -> str:
-    if not packaged():
+    if not packaged() or serving_only():
         return ""
     state = manual_scout_snapshot(db_path, config_path)
     label = "Retry Scout" if state["status"] in {"failed", "empty", "interrupted"} else "Run Scout"
@@ -1214,6 +1267,35 @@ def load_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> dic
     return {"runs": runs, "selected_run": selected, "items": items}
 
 
+def sync_health_snapshot() -> dict[str, str]:
+    path = Path(os.environ.get("PAPER_AGENT_ORCHESTRATOR_STATUS_FILE", "data/orchestrator-status.json"))
+    unknown = {"time": "unknown", "revision": "unknown", "age": "unknown", "size": "unknown", "failure": "none", "skipped": "unknown", "installed": "unknown", "state": "unknown"}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            return {**unknown, "state": "malformed"}
+        updated = value.get("updated_at")
+        age = "unknown"
+        if isinstance(updated, str):
+            from datetime import datetime, timezone
+            stamp = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+            seconds = max(0, (datetime.now(timezone.utc) - stamp).total_seconds())
+            age = f"{seconds / 3600:.1f}h"
+            if seconds > 48 * 3600:
+                return {**unknown, "time": str(value.get("updated_at", "unknown")), "revision": str(value.get("input_revision", "unknown")), "age": age, "state": "stale"}
+        result = str(value.get("overall_result", "unknown"))
+        return {"time": str(value.get("updated_at", "unknown")), "revision": str(value.get("input_revision", "unknown")), "age": age, "size": str(value.get("snapshot_size", "unknown")), "failure": str(value.get("reason", "none"))[:160], "skipped": "yes" if result == "skipped" else "no", "installed": str(value.get("installed_input_revision", value.get("input_revision", "unknown"))), "state": result}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {**unknown, "state": "unavailable"}
+
+
+def render_sync_health() -> str:
+    status = sync_health_snapshot()
+    labels = [("State", status["state"]), ("Last successful sync", status["time"] if status["state"] == "completed" else "unknown"), ("Current snapshot revision", status["revision"]), ("Snapshot age", status["age"]), ("Snapshot size", status["size"]), ("Last failure reason", status["failure"]), ("Pipeline run skipped", status["skipped"]), ("Installed input revision", status["installed"])]
+    rows = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in labels)
+    return f'<section class="health-section"><h2>Mini sync</h2><dl class="health-kv">{rows}</dl></section>'
+
+
 def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:
     days = days if days in {7, 21, 30, 90} else 21
     summary = health_summary(db_path, days=days, source=source_value)
@@ -1255,6 +1337,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
     {warning_html}
     <div class="health-cards">{card_html}</div>
+    {render_sync_health()}
     {render_profile_maintenance(summary["profile_maintenance"])}
     <section class="health-section">
       <h2>Scheduled jobs</h2>
@@ -1306,6 +1389,8 @@ def render_topics_page(
     topic_mode = topic_mode if topic_mode in {"inventory", "agent"} else "inventory"
     if proposal or conversation:
         topic_mode = "agent"
+    if serving_only():
+        topic_mode = "inventory"
     if topic_mode == "agent":
         selected_source = "all"
     selected_source = selected_source if selected_source in {*academic_sources, "all"} else "arxiv"
@@ -1352,6 +1437,8 @@ def render_topics_page(
             f'<a class="academic-source-card academic-mode-card{" selected" if topic_mode == "inventory" and selected_source == "all" else ""}" '
             f'href="/topics?source=all"><strong>All topics</strong><span>{total_topics} configured</span></a>'
         )
+        if serving_only():
+            topic_agent_link = ""
         mode_switch = f'<div class="academic-schedule-actions">{topic_agent_link}{all_link}</div>'
         schedule_panel = f"""<section class="academic-schedule" aria-labelledby="academic-schedule-title">
           <div class="academic-section-head">
@@ -2779,7 +2866,22 @@ def render_view_toggle(view_value: str) -> str:
 
 def render_app_header(page_title: str, subtitle: str, controls_html: str, current_page: str) -> str:
     controls_block = f'<div class="header-controls">{controls_html}</div>' if controls_html.strip() else ""
-    return f"""<header class="topbar">
+    environment_marker = ""
+    if os.environ.get("PAPER_NON_PRODUCTION", "0") == "1":
+        label = escape(os.environ.get("PAPER_UI_ENV_LABEL", "NON-PROD"))
+        if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "serving-snapshot":
+            from paper_agents.nonprod_snapshot import load_provenance
+            snapshot = load_provenance(Path('.'))
+            label += ' · Mini production snapshot ' + escape(snapshot['captured_at']) + ' · local edits only; no sync'
+        environment_marker = f'''<style>
+          .nonprod-watermark {{ position: fixed; inset: 0; display: grid; place-items: center;
+            pointer-events: none; z-index: 10; opacity: .045; font-weight: 800;
+            font-size: clamp(28px, 7vw, 96px); transform: rotate(-25deg); }}
+          .nonprod-label {{ display: inline-block; padding: 3px 9px; border: 1px solid currentColor;
+            border-radius: 5px; color: #d89830; font-size: 12px; font-weight: 700; }}
+          </style><div class="nonprod-watermark" aria-hidden="true">NON-PRODUCTION</div>
+          <div class="nonprod-label" role="status">NON-PROD · {label}</div>'''
+    return f"""{environment_marker}<header class="topbar">
       <div class="header-main">
         <div>
           <h1 class="brand-title">
@@ -3058,7 +3160,7 @@ def save_feedback(
         "profile_apply_error": None,
         "profile_apply_queued": False,
     }
-    if ingest_output is None or not gemini_enabled():
+    if ingest_output is None or serving_only() or not gemini_enabled():
         return result
 
     from paper_agents.gemini_runtime import readiness_error
@@ -3247,6 +3349,8 @@ def run_profile_apply_worker(
     structured_feedback_ids: list[int],
     profile_provider_fn: ProfileProvider | None = None,
 ) -> None:
+    if serving_only():
+        return
     try:
         with connect_db(db_path) as connection:
             apply_feedback_to_profile(
