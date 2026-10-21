@@ -57,10 +57,14 @@ CORE_PROGRESS_SCHEMA_MARKER = '-- Versioned CORE v3 Works offset traversal state
 CORE_PROGRESS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(CORE_PROGRESS_SCHEMA_MARKER, 1)[1]
 REVIEW_COLLECTIONS_SCHEMA_MARKER = '-- Personal review collections; isolated from feedback, ranking, and profile learning.'
 REVIEW_COLLECTIONS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(REVIEW_COLLECTIONS_SCHEMA_MARKER, 1)[1]
+SYNC_SCHEMA_MARKER = '-- Versioned sync route state; enabled only by the approved serving exchange migration.'
+SYNC_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SYNC_SCHEMA_MARKER, 1)[1]
 
 
-def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False):
+def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False, include_sync=True):
     from .db import migrate_structured_feedback_score_to_real, migrate_summary_field_quality_signals_to_three_state
+    if include_sync and SYNC_SCHEMA_MARKER not in sql:
+        sql += '\n' + SYNC_SCHEMA_SQL
     require(sql.count('score REAL,') == 1, 'Trusted score schema changed; review compatibility')
     variants = []
     for migrated in (False, True):
@@ -149,6 +153,11 @@ def pre_review_collections_schemas():
     sql = TRUSTED_SCHEMA.read_text().split(REVIEW_COLLECTIONS_SCHEMA_MARKER, 1)[0]
     return _schema_variants(sql)
 
+def pre_sync_schemas():
+    """Accepted production schema before the additive sync route tables."""
+    sql = TRUSTED_SCHEMA.read_text().split(SYNC_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql, include_sync=False)
+
 
 def pre_three_state_summary_signal_schemas():
     """Accepted production schema before three-state section feedback signals."""
@@ -186,6 +195,8 @@ def apply_approved_post_import_schema_deltas(root):
             delta_sql = ARXIV_PROGRESS_SCHEMA_SQL
         elif actual_schema in pre_summary_quality_signals_schemas():
             delta_sql = SUMMARY_QUALITY_SIGNALS_SCHEMA_SQL
+        elif actual_schema in pre_sync_schemas():
+            delta_sql = SYNC_SCHEMA_SQL
         elif actual_schema in pre_semantic_progress_schemas():
             delta_sql = SEMANTIC_PROGRESS_SCHEMA_SQL
         elif actual_schema in pre_minilm_eval_schemas():

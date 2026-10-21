@@ -481,7 +481,8 @@ CREATE TABLE IF NOT EXISTS excluded_papers (
 CREATE INDEX IF NOT EXISTS idx_excluded_papers_created_at
 ON excluded_papers (created_at DESC);
 
--- Cloud/isolated-worker exchange. Payloads are immutable and retry-safe.
+-- Cloud/isolated-worker exchange; additive after the serving schema baseline.
+-- Versioned sync route state; enabled only by the approved serving exchange migration.
 CREATE TABLE IF NOT EXISTS sync_result_batches (
     id INTEGER PRIMARY KEY,
     batch_key TEXT NOT NULL UNIQUE,
