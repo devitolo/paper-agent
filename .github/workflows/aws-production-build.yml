@@ -99,4 +99,4 @@ jobs:
           AWS_APP_IMAGE: ${{ needs.build.outputs.image }}
         shell: bash --noprofile --norc -euo pipefail {0}
         run: |
-          sudo -n /usr/bin/bash "$GITHUB_WORKSPACE/scripts/aws_production_update.sh"
+          sudo -n /usr/bin/bash "$GITHUB_WORKSPACE/scripts/aws_production_update.sh" "$AWS_APP_IMAGE"

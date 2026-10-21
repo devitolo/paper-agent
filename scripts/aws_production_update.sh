@@ -6,6 +6,7 @@ set -Eeuo pipefail
 # The caller must run this as root (the Compose file and production env are
 # intentionally root-owned).
 
+AWS_APP_IMAGE=${1:-${AWS_APP_IMAGE:-}}
 : "${AWS_APP_IMAGE:?AWS_APP_IMAGE must be an immutable registry digest}"
 [[ "$AWS_APP_IMAGE" =~ ^ghcr\.io/devitolo/paper-agent@sha256:[0-9a-f]{64}$ ]] || {
   echo 'AWS_APP_IMAGE must be a lowercase GHCR sha256 digest' >&2; exit 64;
