@@ -481,6 +481,7 @@ CREATE TABLE IF NOT EXISTS excluded_papers (
 CREATE INDEX IF NOT EXISTS idx_excluded_papers_created_at
 ON excluded_papers (created_at DESC);
 
+-- Versioned Topic Agent allowance state; part of the current Mini serving baseline.
 CREATE TABLE IF NOT EXISTS topic_agent_allowance (
     allowance_day TEXT PRIMARY KEY,
     limit_count INTEGER NOT NULL,

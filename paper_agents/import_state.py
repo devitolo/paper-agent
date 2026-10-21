@@ -59,12 +59,20 @@ REVIEW_COLLECTIONS_SCHEMA_MARKER = '-- Personal review collections; isolated fro
 REVIEW_COLLECTIONS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(REVIEW_COLLECTIONS_SCHEMA_MARKER, 1)[1]
 SYNC_SCHEMA_MARKER = '-- Versioned sync route state; enabled only by the approved serving exchange migration.'
 SYNC_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SYNC_SCHEMA_MARKER, 1)[1]
+TOPIC_ALLOWANCE_MARKER = '-- Versioned Topic Agent allowance state; part of the current Mini serving baseline.'
+TOPIC_ALLOWANCE_SQL = TRUSTED_SCHEMA.read_text().split(TOPIC_ALLOWANCE_MARKER, 1)[1].split('-- Cloud/isolated-worker exchange;', 1)[0]
 
 
 def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False, include_sync=True):
     from .db import migrate_structured_feedback_score_to_real, migrate_summary_field_quality_signals_to_three_state
     if include_sync and SYNC_SCHEMA_MARKER not in sql:
         sql += '\n' + SYNC_SCHEMA_SQL
+    if 'topic_agent_allowance' not in sql:
+        sync_boundary = '\n-- Cloud/isolated-worker exchange;'
+        if sync_boundary in sql:
+            sql = sql.replace(sync_boundary, TOPIC_ALLOWANCE_SQL + sync_boundary, 1)
+        else:
+            sql += TOPIC_ALLOWANCE_SQL
     require(sql.count('score REAL,') == 1, 'Trusted score schema changed; review compatibility')
     variants = []
     for migrated in (False, True):
