@@ -1,9 +1,6 @@
 name: Mini Health Snapshot
 
 "on":
-  push:
-    branches:
-      - mini-production
   workflow_dispatch:
   schedule:
     - cron: "20 13 * * *"
