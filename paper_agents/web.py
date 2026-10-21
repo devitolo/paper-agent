@@ -1219,6 +1219,35 @@ def load_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> dic
     return {"runs": runs, "selected_run": selected, "items": items}
 
 
+def sync_health_snapshot() -> dict[str, str]:
+    path = Path(os.environ.get("PAPER_AGENT_ORCHESTRATOR_STATUS_FILE", "data/orchestrator-status.json"))
+    unknown = {"time": "unknown", "revision": "unknown", "age": "unknown", "size": "unknown", "failure": "none", "skipped": "unknown", "installed": "unknown", "state": "unknown"}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            return {**unknown, "state": "malformed"}
+        updated = value.get("updated_at")
+        age = "unknown"
+        if isinstance(updated, str):
+            from datetime import datetime, timezone
+            stamp = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+            seconds = max(0, (datetime.now(timezone.utc) - stamp).total_seconds())
+            age = f"{seconds / 3600:.1f}h"
+            if seconds > 48 * 3600:
+                return {**unknown, "time": str(value.get("updated_at", "unknown")), "revision": str(value.get("input_revision", "unknown")), "age": age, "state": "stale"}
+        result = str(value.get("overall_result", "unknown"))
+        return {"time": str(value.get("updated_at", "unknown")), "revision": str(value.get("input_revision", "unknown")), "age": age, "size": str(value.get("snapshot_size", "unknown")), "failure": str(value.get("reason", "none"))[:160], "skipped": "yes" if result == "skipped" else "no", "installed": str(value.get("installed_input_revision", value.get("input_revision", "unknown"))), "state": result}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {**unknown, "state": "unavailable"}
+
+
+def render_sync_health() -> str:
+    status = sync_health_snapshot()
+    labels = [("State", status["state"]), ("Last successful sync", status["time"] if status["state"] == "completed" else "unknown"), ("Current snapshot revision", status["revision"]), ("Snapshot age", status["age"]), ("Snapshot size", status["size"]), ("Last failure reason", status["failure"]), ("Pipeline run skipped", status["skipped"]), ("Installed input revision", status["installed"])]
+    rows = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in labels)
+    return f'<section class="health-section"><h2>Mini sync</h2><dl class="health-kv">{rows}</dl></section>'
+
+
 def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:
     days = days if days in {7, 21, 30, 90} else 21
     summary = health_summary(db_path, days=days, source=source_value)
@@ -1260,6 +1289,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
     {warning_html}
     <div class="health-cards">{card_html}</div>
+    {render_sync_health()}
     {render_profile_maintenance(summary["profile_maintenance"])}
     <section class="health-section">
       <h2>Scheduled jobs</h2>
