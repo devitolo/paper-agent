@@ -15,6 +15,42 @@ from .topics import load_topic_config
 from .industry_config import load_zenml_config
 
 
+def _approved_optional_schema():
+    """Known additive tables retained by older AWS serving databases.
+
+    These tables are not migrated or written by serving startup.  We render the
+    definitions here so compatibility remains an exact, allowlisted check.
+    """
+    with closing(sqlite3.connect(':memory:')) as connection:
+        _setup(connection)
+        connection.executescript('''
+            CREATE TABLE topic_agent_allowance (
+                allowance_day TEXT PRIMARY KEY, limit_count INTEGER NOT NULL,
+                reserved_count INTEGER NOT NULL DEFAULT 0, consumed_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL DEFAULT(datetime('now'))
+            );
+            CREATE TABLE topic_agent_requests (
+                request_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, base_topics_hash TEXT NOT NULL,
+                request_text TEXT NOT NULL, conversation_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL,
+                proposal_json TEXT, error_category TEXT, created_at TEXT NOT NULL DEFAULT(datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT(datetime('now'))
+            );
+            CREATE INDEX idx_topic_agent_requests_status
+                ON topic_agent_requests(status, created_at);
+        ''')
+        return {(row[0], row[1]): row for row in schema(connection)}
+
+
+def _schema_row_key(row):
+    """Normalize SQLite's harmless SQL formatting differences for allowlists."""
+    if not row:
+        return row
+    if row[0] != 'table' and row[0] != 'index':
+        return row
+    sql = ' '.join((row[3] or '').replace('"', '').split())
+    return row[:3] + (sql,)
+
+
 def validate(root, *, full=True):
     root=Path(root).absolute()
     if any(p.is_symlink() for p in (root,*root.parents)):
@@ -31,13 +67,15 @@ def validate(root, *, full=True):
     with closing(sqlite3.connect(':memory:')) as metadata:
         _setup(metadata)
         optional={(r[0],r[1]):r for r in schema(metadata)}
+        optional.update(_approved_optional_schema())
     with closing(sqlite3.connect((root/'data/paper_agent.db').as_uri()+'?mode=ro',uri=True)) as db:
         actual={(r[0],r[1]):r for r in schema(db)}
         approved=False
         for expected in trusted_schemas():
             required={(r[0],r[1]):r for r in expected}
-            if all(actual.get(k)==v for k,v in required.items()) and all(
-                    k in required or optional.get(k)==v for k,v in actual.items()):
+            if all(_schema_row_key(actual.get(k, ())) == _schema_row_key(v) for k,v in required.items()) and all(
+                    k in required or _schema_row_key(optional.get(k, ())) == _schema_row_key(v)
+                    for k,v in actual.items()):
                 approved=True; break
         if not approved:raise RuntimeError('Unapproved AWS serving schema; no automatic migration')
         if full:

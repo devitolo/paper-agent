@@ -90,29 +90,13 @@ jobs:
     timeout-minutes: 35
     permissions: {}
     steps:
-      # The host-owned controller performs its own approval, backup, resource,
-      # writer-fence, readiness, and rollback checks. This runner never builds.
-      - name: Submit qualified release to host-owned service
+      - name: Checkout exact qualified release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Deploy qualified digest to existing AWS Compose service
         env:
-          IMAGE: ${{ needs.build.outputs.image }}
-          REVISION: ${{ needs.build.outputs.revision }}
-          BUNDLE: ${{ needs.build.outputs.bundle }}
+          AWS_APP_IMAGE: ${{ needs.build.outputs.image }}
         shell: bash --noprofile --norc -euo pipefail {0}
         run: |
-          sudo -n /usr/local/sbin/project-paper-aws-deploy submit "$IMAGE" "$REVISION" "$BUNDLE" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
-      - name: Observe sanitized transaction status
-        env:
-          IMAGE: ${{ needs.build.outputs.image }}
-        shell: bash --noprofile --norc -euo pipefail {0}
-        run: |
-          for attempt in {1..180}; do
-            result=0
-            sudo -n /usr/local/sbin/project-paper-aws-deploy status "$IMAGE" || result=$?
-            case "$result" in
-              0) exit 0 ;;
-              3) sleep 10 ;;
-              *) exit 1 ;;
-            esac
-          done
-          echo 'Observation timed out; the host service owns recovery. Inspect its transaction status.'
-          exit 1
+          sudo -n /usr/bin/bash "$GITHUB_WORKSPACE/scripts/aws_production_update.sh"
