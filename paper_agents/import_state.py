@@ -173,6 +173,19 @@ def pre_topic_allowance_schemas():
     sql = trusted.split(TOPIC_ALLOWANCE_MARKER, 1)[0] + boundary + trusted.split(boundary, 1)[1]
     return _schema_variants(sql, include_topic_allowance=False)
 
+def is_pre_topic_allowance_schema(actual_schema):
+    """Match the real Mini baseline with only the allowance table absent."""
+    allowance_free = lambda value: [row for row in value if row[1] != 'topic_agent_allowance']
+    return any(allowance_free(actual_schema) == allowance_free(value) and len(actual_schema) == len(value) - 1
+               for value in trusted_schemas())
+
+def read_schema(root):
+    connection = sqlite3.connect(f"file:{(Path(root) / 'data/paper_agent.db').resolve()}?mode=ro", uri=True)
+    try:
+        return schema(connection)
+    finally:
+        connection.close()
+
 
 def pre_three_state_summary_signal_schemas():
     """Accepted production schema before three-state section feedback signals."""
@@ -210,7 +223,7 @@ def apply_approved_post_import_schema_deltas(root):
             delta_sql = ARXIV_PROGRESS_SCHEMA_SQL
         elif actual_schema in pre_summary_quality_signals_schemas():
             delta_sql = SUMMARY_QUALITY_SIGNALS_SCHEMA_SQL
-        elif actual_schema in pre_topic_allowance_schemas():
+        elif actual_schema in pre_topic_allowance_schemas() or is_pre_topic_allowance_schema(actual_schema):
             delta_sql = TOPIC_ALLOWANCE_SQL
         elif actual_schema in pre_sync_schemas():
             delta_sql = SYNC_SCHEMA_SQL
@@ -401,7 +414,7 @@ def initialize(root, manifest_path):
         else:
             legacy_schema = approved['schema_sha256'] in {
                 digest(value) for values in (pre_sync_schemas(), pre_topic_allowance_schemas()) for value in values
-            }
+            } or is_pre_topic_allowance_schema(read_schema(root))
             if legacy_schema:
                 require(current['files'] == approved['files'], 'Imported state differs from manifest')
                 require(all(current['tables'].get(name) == value for name, value in approved['tables'].items()),
