@@ -128,7 +128,7 @@ jobs:
   deploy:
     name: Deploy to Mini
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/mini-production'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/mini-production') || github.event_name == 'workflow_dispatch'
     runs-on:
       - self-hosted
       - project-paper-mini
