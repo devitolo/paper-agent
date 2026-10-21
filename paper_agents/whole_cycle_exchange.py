@@ -23,10 +23,9 @@ def export_delta(db_path, root, state):
         cycles=[dict(r) for r in c.execute('SELECT * FROM workflow_cycles WHERE id>? ORDER BY id',(base['workflow_cycles'],))]
         rows={t:[dict(r) for r in c.execute(f'SELECT * FROM {t} WHERE id>? ORDER BY id',(base[t],))] for t in PIPELINE_TABLES}
         cycle_ids=[r['id'] for r in cycles]
-        candidates=[]
+        keys=set()
         if cycle_ids:
-            marks=','.join('?'*len(cycle_ids)); candidates=[dict(r) for r in c.execute(f'SELECT sc.*,p.canonical_key FROM scout_candidates sc JOIN papers p ON p.id=sc.paper_id JOIN scout_runs sr ON sr.id=sc.scout_run_id WHERE sr.workflow_cycle_id IN ({marks})',cycle_ids)]
-        keys={r['canonical_key'] for r in candidates}
+            marks=','.join('?'*len(cycle_ids)); keys={r[0] for r in c.execute(f'SELECT DISTINCT p.canonical_key FROM papers p JOIN curator_evaluations e ON e.paper_id=p.id JOIN curator_runs cr ON cr.id=e.curator_run_id WHERE cr.workflow_cycle_id IN ({marks})',cycle_ids)}
         papers=[dict(r) for r in c.execute('SELECT * FROM papers') if r['canonical_key'] in keys]
         sources=[dict(r) for r in c.execute('SELECT ps.*,p.canonical_key FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id') if r['canonical_key'] in keys]
         artifacts=[dict(r) for r in c.execute('SELECT a.*,p.canonical_key FROM artifacts a JOIN papers p ON p.id=a.paper_id') if r['canonical_key'] in keys]
@@ -35,7 +34,13 @@ def export_delta(db_path, root, state):
     for row in artifacts:
         path=pathlib.Path(row['path']); path=path if path.is_absolute() else pathlib.Path(root)/path
         row['content']=json.loads(path.read_text()) if path.exists() and row['artifact_type']=='triage_summary' else None
-    return {'schema':1,'pipeline_delta':rows,'normalized':{'papers':papers,'paper_sources':sources,'scout_candidates':candidates,'artifacts':artifacts},'results':results,'cycle_count':len(cycles)}
+    evaluations=[]; recommendations=[]
+    with connect_db(db_path) as c:
+        for cycle in cycles:
+            key=f"mini-cycle-{cycle['id']}"
+            evaluations += [dict(r)|{'cycle_key':key} for r in c.execute('SELECT e.*,p.canonical_key FROM curator_evaluations e JOIN curator_runs cr ON cr.id=e.curator_run_id JOIN papers p ON p.id=e.paper_id WHERE cr.workflow_cycle_id=?',(cycle['id'],))]
+            recommendations += [dict(r)|{'cycle_key':key} for r in c.execute('SELECT r.*,p.canonical_key FROM recommendations r JOIN curator_runs cr ON cr.id=r.curator_run_id JOIN papers p ON p.id=r.paper_id WHERE cr.workflow_cycle_id=?',(cycle['id'],))]
+    return {'schema':1,'normalized':{'papers':papers,'paper_sources':sources,'artifacts':artifacts,'evaluations':evaluations,'recommendations':recommendations},'results':[],'cycle_count':len(cycles)}
 
 def push(db_path, root, state, url):
     state=pathlib.Path(state); outbox=state/'pipeline-outbox.json'

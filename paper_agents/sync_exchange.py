@@ -96,7 +96,7 @@ def _source(c,pid,item):
     metadata=item.get('metadata_json',encoded(item.get('metadata',{})).decode())
     c.execute('INSERT INTO paper_sources(paper_id,source,source_id,url,pdf_url,metadata_json) VALUES(?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET url=excluded.url,pdf_url=excluded.pdf_url,metadata_json=excluded.metadata_json',(pid,source,sid,item.get('url'),item.get('pdf_url'),metadata))
 
-def _apply_normalized(c, normalized):
+def _apply_normalized(c, normalized, root=Path('.')):
     papers={}
     for item in normalized.get('papers',[]):
         pid=_paper(c,item); papers[item['canonical_key']]=pid
@@ -105,9 +105,23 @@ def _apply_normalized(c, normalized):
     for item in normalized.get('artifacts',[]):
         item=dict(item); pid=papers[item['canonical_key']]; content=item.pop('content',None); item.pop('canonical_key',None); item.pop('id',None); item['paper_id']=pid
         if content is not None:
-            path=Path('data/sync-summaries')/(_digest(encoded(content))+'.json'); target=Path('.')/path; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(encoded(content)); item['path']=str(path)
+            path=Path('data/sync-summaries')/(_digest(encoded(content))+'.json'); target=Path(root)/path; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(encoded(content)); item['path']=str(path)
         cols={r[1] for r in c.execute('PRAGMA table_info(artifacts)')}; item={k:v for k,v in item.items() if k in cols}
         c.execute('INSERT OR IGNORE INTO artifacts('+','.join(item)+') VALUES('+','.join('?'*len(item))+')',tuple(item.values()))
+    cycles={}
+    for item in normalized.get('evaluations',[]):
+        key=item['cycle_key'];
+        if key not in cycles:
+            cycles[key]=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','imported',?)",(encoded({'sync_cycle_key':key}).decode(),)).lastrowid
+        cr=c.execute('SELECT id FROM curator_runs WHERE workflow_cycle_id=?',(cycles[key],)).fetchone()
+        cur=cr[0] if cr else c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycles[key],encoded({'sync_cycle_key':key}).decode())).lastrowid
+        pid=papers[item['canonical_key']]
+        c.execute('INSERT OR IGNORE INTO curator_evaluations(curator_run_id,paper_id,score,rationale,matched_signals_json,quality_threshold_met) VALUES(?,?,?,?,?,?)',(cur,pid,item['score'],item['rationale'],item.get('matched_signals_json','[]'),item.get('quality_threshold_met',0)))
+    for item in normalized.get('recommendations',[]):
+        key=item['cycle_key']; cycle_id=cycles.get(key)
+        if cycle_id is None: cycle_id=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','imported',?)",(encoded({'sync_cycle_key':key}).decode(),)).lastrowid; cycles[key]=cycle_id
+        cr=c.execute('SELECT id FROM curator_runs WHERE workflow_cycle_id=?',(cycle_id,)).fetchone(); cur=cr[0] if cr else c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycle_id,encoded({'sync_cycle_key':key}).decode())).lastrowid
+        c.execute('INSERT OR IGNORE INTO recommendations(curator_run_id,paper_id,recommendation_order,rationale,status) VALUES(?,?,?,?,?)',(cur,papers[item['canonical_key']],item['recommendation_order'],item['rationale'],item.get('status','recommended')))
 
 def apply_input_snapshot(db_path,snapshot,root):
     """Mirror AWS-owned history into isolated Mini DB, remapping every foreign key."""
@@ -199,7 +213,7 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
         c.execute('INSERT INTO sync_result_batches(batch_key,input_revision,payload_hash,payload_json,status) VALUES(?,?,?,?,?)',(key,payload['input_revision'],content_hash,body.decode(),'received'))
         normalized=payload.get('normalized',{})
         if not isinstance(normalized,dict): raise ValueError('invalid normalized pipeline payload')
-        _apply_normalized(c, normalized)
+        _apply_normalized(c, normalized, root)
         cycle=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','sync',?)",(encoded({'batch_key':key,'input_revision':payload['input_revision'],'producer_id':producer,'run_sequence':seq,'pipeline_delta_counts':{k:len(v) for k,v in delta.items()}}).decode(),)).lastrowid
         run=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycle,encoded({'imported':True}).decode())).lastrowid
         seen=set()
