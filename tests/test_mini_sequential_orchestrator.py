@@ -11,6 +11,8 @@ class SequentialOrchestratorTests(unittest.TestCase):
         self.assertIn('for stage in openalex arxiv semantic core profile', script)
         self.assertIn('flock -n 9', script)
         self.assertIn('stage failed; later stages were not run', script)
+        self.assertIn('PAPER_AGENT_SYNC_PRE_RUN_COMMAND', script)
+        self.assertIn('PAPER_AGENT_SYNC_POST_RUN_COMMAND', script)
         self.assertIn('ORCHESTRATOR_LOG_DIR', script)
         self.assertIn('profile', script)
 

@@ -116,7 +116,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
     class ReviewHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
-            if parsed.path == "/sync/input":
+            if parsed.path in {"/sync/snapshot", "/sync/input"}:
                 if not verify_request(self.headers, b"", "GET", parsed.path):
                     self.send_error(HTTPStatus.UNAUTHORIZED); return
                 self.send_json(json.dumps(build_input_snapshot(db_path), sort_keys=True).encode())
@@ -239,7 +239,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
-            if parsed.path in {"/sync/results", "/sync/profile-proposals"}:
+            if parsed.path in {"/sync/pipeline-results", "/sync/results", "/sync/profile-proposals"}:
                 raw_length = self.headers.get("Content-Length", "")
                 if not raw_length.isdecimal() or self.headers.get("Transfer-Encoding"):
                     self.send_error(HTTPStatus.BAD_REQUEST, "A valid Content-Length is required"); return

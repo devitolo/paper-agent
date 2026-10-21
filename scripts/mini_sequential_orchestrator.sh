@@ -21,6 +21,19 @@ with os.fdopen(fd, 'w') as out: json.dump(payload, out, sort_keys=True); out.wri
 os.replace(tmp, path)
 PY
 }
+run_hook() {
+  local name="$1" command="${2:-}"
+  [[ -n "$command" ]] || return 0
+  local log_file="$log_dir/${run_id}-${name}.log"
+  printf '[%s] start %s\n' "$(date -u +%FT%TZ)" "$name" | tee -a "$log_file"
+  if ! bash -c "$command" >> "$log_file" 2>&1; then
+    printf '[%s] failed %s\n' "$(date -u +%FT%TZ)" "$name" | tee -a "$log_file"
+    write_status "$name" failed 'sync hook failed; pipeline was not run'
+    return 1
+  fi
+  printf '[%s] completed %s\n' "$(date -u +%FT%TZ)" "$name" | tee -a "$log_file"
+}
+if ! run_hook sync_snapshot "${PAPER_AGENT_SYNC_PRE_RUN_COMMAND:-}"; then exit 1; fi
 run_stage() {
   local stage="$1"
   write_status "$stage" running
@@ -37,4 +50,5 @@ run_stage() {
 for stage in openalex arxiv semantic core profile; do
   if ! run_stage "$stage"; then exit 1; fi
 done
+if ! run_hook sync_pipeline_results "${PAPER_AGENT_SYNC_POST_RUN_COMMAND:-}"; then exit 1; fi
 write_status complete completed

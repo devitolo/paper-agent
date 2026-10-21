@@ -40,8 +40,8 @@ class ExchangeTests(unittest.TestCase):
   bad=dict(a);bad['revision']='broken'
   with self.assertRaises(ValueError):apply_input_snapshot(self.mdb,bad,self.mini)
  def test_auth_binding_expiry_nonfinite(self):
-  h=self.header('one');h['X-Paper-Sync-Timestamp']=str(time.time());h['X-Paper-Sync-Signature']=signature('POST','/sync/results',h['X-Paper-Sync-Timestamp'],b'{}','one')
-  self.assertTrue(verify_request(h,b'{}','POST','/sync/results'));self.assertFalse(verify_request(h,b'[]','POST','/sync/results'));h.replace_header('X-Paper-Sync-Idempotency','two');self.assertFalse(verify_request(h,b'{}','POST','/sync/results'));h.replace_header('X-Paper-Sync-Timestamp','nan');self.assertFalse(verify_request(h,b'{}','POST','/sync/results'))
+  h=self.header('one');h['X-Paper-Sync-Timestamp']=str(time.time());h['X-Paper-Sync-Signature']=signature('POST','/sync/pipeline-results',h['X-Paper-Sync-Timestamp'],b'{}','one')
+  self.assertTrue(verify_request(h,b'{}','POST','/sync/pipeline-results'));self.assertFalse(verify_request(h,b'[]','POST','/sync/pipeline-results'));h.replace_header('X-Paper-Sync-Idempotency','two');self.assertFalse(verify_request(h,b'{}','POST','/sync/pipeline-results'));h.replace_header('X-Paper-Sync-Timestamp','nan');self.assertFalse(verify_request(h,b'{}','POST','/sync/pipeline-results'))
  def test_import_real_review_ui_and_preserve_summary_feedback(self):
   p=self.batch();self.receive(p)
   with connect_db(self.db) as c:
@@ -74,7 +74,7 @@ class ExchangeTests(unittest.TestCase):
  def test_worker_lost_publish_retry_does_not_repeat_inference(self):
   calls=[];fail=[True]
   def transport(url,method,body,secret,path,key=''):
-   if path=='/sync/input':return self.snapshot()
+   if path=='/sync/snapshot':return self.snapshot()
    result=receive_result_batch(self.db,body,self.header(key),self.aws)
    if fail[0]:fail[0]=False;raise OSError('reply lost after application')
    return result
@@ -89,7 +89,7 @@ class ExchangeTests(unittest.TestCase):
   self.feedback();calls=[];fail=[True]
   def provider(payload,model):calls.append(payload);return {'profile':self.profile,'change_summary':'specific'}
   def transport(url,method,body,secret,path,key=''):
-   if path=='/sync/input':return self.snapshot()
+   if path=='/sync/snapshot':return self.snapshot()
    result=receive_profile_proposal(self.db,body,self.header(key))
    if fail[0]:fail[0]=False;raise OSError('receipt lost')
    return result
@@ -113,8 +113,8 @@ class ExchangeTests(unittest.TestCase):
  def test_worker_run_and_publish_completes_in_one_invocation(self):
   calls=[]
   def transport(url,method,body,secret,path,key=''):
-   if path=='/sync/input':return self.snapshot()
-   if path=='/sync/results':return receive_result_batch(self.db,body,self.header(key),self.aws)
+   if path=='/sync/snapshot':return self.snapshot()
+   if path=='/sync/pipeline-results':return receive_result_batch(self.db,body,self.header(key),self.aws)
    raise AssertionError(path)
   def runner(*args):calls.append(1);return self.batch()['results']
   state=self.mini/'exchange'
