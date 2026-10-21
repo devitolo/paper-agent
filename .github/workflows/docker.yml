@@ -201,26 +201,9 @@ jobs:
           name: project-paper-release-metadata-${{ needs.validate.outputs.release_version }}
           path: release-metadata/
 
-  exact-image-acceptance:
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Mini registry acceptance
         env:
-          PAPER_MINI_ACCEPTANCE_IMAGE: ${{ needs.publish.outputs.image_ref }}
+          PAPER_MINI_ACCEPTANCE_IMAGE: ${{ steps.ref.outputs.image_ref }}
         run: bash scripts/mini_registry_acceptance.sh
 
       - name: Upload Mini acceptance evidence
@@ -230,7 +213,7 @@ jobs:
           path: release-acceptance-results/
 
   full-exact-image-acceptance:
-    needs: [publish, exact-image-acceptance]
+    needs: publish
     if: needs.publish.result == 'success' && (needs.publish.outputs.version != '' && (startsWith(needs.publish.outputs.version, 'v') || github.event_name == 'workflow_dispatch'))
     runs-on: ubuntu-latest
     permissions:
@@ -257,8 +240,8 @@ jobs:
           path: release-acceptance-results/
 
   deploy-mini-candidate:
-    needs: [publish, exact-image-acceptance]
-    if: needs.publish.result == 'success' && needs.exact-image-acceptance.result == 'success' && needs.publish.outputs.version != '' && (startsWith(needs.publish.outputs.version, 'mini-candidate-') || github.event_name == 'workflow_dispatch')
+    needs: publish
+    if: needs.publish.result == 'success' && needs.publish.outputs.version != '' && (startsWith(needs.publish.outputs.version, 'mini-candidate-') || github.event_name == 'workflow_dispatch')
     runs-on:
       - self-hosted
       - project-paper-mini
