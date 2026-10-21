@@ -119,8 +119,15 @@ mkdir -p "$CANDIDATE_DIR/scripts"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-migration.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-rehearsal.yml" "$CANDIDATE_DIR/docker-compose.mini-rehearsal.yml"
 install -m 0755 "$SOURCE_DIR/scripts/mini_container_job.sh" "$CANDIDATE_DIR/scripts/mini_container_job.sh"
+# Cron runs these from the host candidate tree, outside the application image.
+# Installation does not alter cron, private configuration, or activation flags.
+bash -n "$SOURCE_DIR/scripts/mini_sequential_orchestrator.sh" "$SOURCE_DIR/scripts/mini_sync_exchange.sh"
 install -m 0755 "$SOURCE_DIR/scripts/mini_sequential_orchestrator.sh" "$CANDIDATE_DIR/scripts/mini_sequential_orchestrator.sh"
 install -m 0755 "$SOURCE_DIR/scripts/mini_sync_exchange.sh" "$CANDIDATE_DIR/scripts/mini_sync_exchange.sh"
+for host_wrapper in mini_sequential_orchestrator.sh mini_sync_exchange.sh; do
+  cmp "$SOURCE_DIR/scripts/$host_wrapper" "$CANDIDATE_DIR/scripts/$host_wrapper"
+  sha256sum "$CANDIDATE_DIR/scripts/$host_wrapper" >> "$RELEASE_DIR/host-wrappers.sha256"
+done
 install -m 0755 "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh"
 install -m 0755 "$SOURCE_DIR/scripts/minilm_shadow_after_pipeline.sh" "$CANDIDATE_DIR/scripts/minilm_shadow_after_pipeline.sh"
 install -m 0755 "$SOURCE_DIR/scripts/mini_production_update.sh" "$CANDIDATE_DIR/scripts/mini_production_update.sh"

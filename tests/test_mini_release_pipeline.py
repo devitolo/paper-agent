@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+import os
+import tempfile
 import unittest
 
 
@@ -9,6 +11,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MiniReleasePipelineTests(unittest.TestCase):
+    def test_release_preparation_installs_current_host_exchange_wrappers(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text()
+        start = script.index('mkdir -p "$CANDIDATE_DIR/scripts"')
+        end = script.index("\n{\n  printf 'started_at=", start)
+        preparation = script[start:end]
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "candidate with spaces"
+            release = Path(directory) / "release"
+            (candidate / "scripts").mkdir(parents=True)
+            release.mkdir()
+            (candidate / "scripts/mini_sequential_orchestrator.sh").write_text("# stale wrapper\n")
+            result = subprocess.run(["bash", "-eu", "-c", preparation],
+                env={**os.environ,"SOURCE_DIR":str(ROOT),"CANDIDATE_DIR":str(candidate),"RELEASE_DIR":str(release)},
+                capture_output=True,text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in ("mini_sequential_orchestrator.sh", "mini_sync_exchange.sh"):
+                installed = candidate / "scripts" / name
+                self.assertEqual(installed.read_bytes(), (ROOT / "scripts" / name).read_bytes())
+                self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+            self.assertEqual(len((release / "host-wrappers.sha256").read_text().splitlines()), 2)
+            # The deployed helper stays inert until explicitly enabled by SRE.
+            env = {k:v for k,v in os.environ.items() if not k.startswith("PAPER_AGENT_SYNC_")}
+            disabled = subprocess.run(["bash",str(candidate / "scripts/mini_sync_exchange.sh"),"pull"],
+                env=env,capture_output=True,text=True)
+            self.assertEqual(disabled.returncode, 0, disabled.stderr)
+            self.assertIn("sync disabled", disabled.stdout)
+
     def test_docker_workflow_builds_and_accepts_mini_target(self):
         workflow = (ROOT / ".github/workflows/docker.yml").read_text(encoding="utf-8")
         self.assertIn("MINI_TARGET: mini-production", workflow)
