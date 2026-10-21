@@ -1,0 +1,74 @@
+name: AWS Production Image Build
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: project-paper-aws-image-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/aws-production'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout exact protected release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Validate AWS build and deployment contracts
+        run: |
+          python3 -m unittest discover -s tests/aws_build -v
+          python3 -m unittest discover -s tests/aws_deploy -v
+          python3 -m unittest tests.sync_exchange.test_http_serving -v
+      - name: Record exact source bundle
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "bundle=$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish AMD64 serving candidate with attestations
+        id: image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          target: cloud-production
+          platforms: linux/amd64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ghcr.io/devitolo/paper-agent:aws-candidate-${{ github.sha }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.bundle }}
+            VERSION=aws-${{ github.sha }}
+      - name: Accept exact immutable candidate on hosted Docker
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+          BUNDLE: ${{ steps.source.outputs.bundle }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 64
+          image="ghcr.io/devitolo/paper-agent@$DIGEST"
+          python3 scripts/aws_image_acceptance.py --image "$image" --revision "$GITHUB_SHA" --bundle "$BUNDLE" --output .aws-build-evidence/acceptance.json
+          printf 'Synthetic-accepted image: `%s`\n\nRevision: `%s`\n\nBundle: `%s`\n\nNo deployment or production approval.\n' "$image" "$GITHUB_SHA" "$BUNDLE" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain sanitized image identity and acceptance evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: aws-serving-image-${{ github.sha }}
+          path: .aws-build-evidence/acceptance.json
+          if-no-files-found: error
+          retention-days: 14

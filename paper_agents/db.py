@@ -28,7 +28,13 @@ WORKFLOW_STATES = {
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
-    from paper_agents.runtime_config import serving_only
+    from paper_agents.runtime_config import serving_only, aws_production_serving
+    if serving_only() and aws_production_serving():
+        from paper_agents.runtime_config import migration_settings
+        from paper_agents.aws_serving import validate
+        migration_settings()
+        state = validate(db_path.absolute().parent.parent, full=False)
+        return {"db_path": str(db_path), "schema_path": str(schema_path), "tables": state["tables"]}
     if serving_only():
         from paper_agents.mini_nonprod_state import validate
         state = validate(db_path.absolute().parent.parent, full=False)

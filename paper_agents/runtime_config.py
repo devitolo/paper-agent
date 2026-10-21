@@ -18,6 +18,11 @@ def serving_only() -> bool:
     return os.environ.get("PAPER_AGENT_SERVING_ONLY", "0") == "1"
 
 
+def aws_production_serving() -> bool:
+    return (os.environ.get("PAPER_AGENT_AWS_PRODUCTION") == "1"
+            and os.environ.get("PAPER_AGENT_STARTUP_MODE") == "serving")
+
+
 def default_sources() -> list[str]:
     settings = migration_settings()
     if settings is not None:
@@ -38,6 +43,19 @@ def migration_settings() -> dict | None:
     mode = os.environ.get("PAPER_AGENT_STARTUP_MODE", "fresh")
     if mode not in {"fresh", "imported", "serving", "serving-snapshot"}:
         raise ValueError("Invalid PAPER_AGENT_STARTUP_MODE")
+    if aws_production_serving():
+        if not packaged() or not serving_only() or os.environ.get("PAPER_NON_PRODUCTION", "0") != "0":
+            raise ValueError("AWS production requires packaged serving-only mode")
+        if os.environ.get("PAPER_AGENT_RUNTIME_ROLE", "ui") != "ui":
+            raise ValueError("AWS serving cannot execute the pipeline role")
+        for flag in ("PAPER_AGENT_SCHEDULER_ENABLED", "PAPER_AGENT_MINILM_ENABLED", "PAPER_AGENT_TELEMETRY"):
+            if os.environ.get(flag) != "0":
+                raise ValueError("AWS serving requires disabled " + flag)
+        gemini = os.environ.get("PAPER_AGENT_GEMINI_ENABLED")
+        sources = os.environ.get("PAPER_AGENT_DEFAULT_SOURCES", "").split(",")
+        if gemini not in {"0", "1"} or not sources or len(set(sources)) != len(sources) or not set(sources) <= {"arxiv", "openalex", "semantic_scholar", "core"}:
+            raise ValueError("Explicit AWS source and integration settings required")
+        return {"sources": sources, "PAPER_AGENT_GEMINI_ENABLED": gemini == "1", "PAPER_AGENT_TELEMETRY": False}
     if mode in {"serving", "serving-snapshot"}:
         if not packaged() or not serving_only() or os.environ.get("PAPER_NON_PRODUCTION") != "1":
             raise ValueError("Serving bootstrap requires explicit packaged non-production mode")
