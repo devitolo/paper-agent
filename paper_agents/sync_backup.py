@@ -126,7 +126,7 @@ def restore_backup(backup: Path, target: Path) -> Path:
 MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
 
 
-def download_backup(base_url: str, destination: Path, *, allow_http_loopback: bool = False) -> Path:
+def download_backup(base_url: str, destination: Path, *, allow_http_loopback: bool = False, endpoint: str = '/sync/backup') -> Path:
     """Pull a recovery archive to staging; publish only after full validation."""
     from .sync_exchange import signature
     parsed = urllib.parse.urlparse(base_url)
@@ -139,8 +139,9 @@ def download_backup(base_url: str, destination: Path, *, allow_http_loopback: bo
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     timestamp = str(time.time())
-    path = '/sync/backup'
+    path = endpoint
     request = urllib.request.Request(base_url.rstrip('/') + path, headers={
+        'Accept': 'application/gzip',
         'X-Paper-Sync-Timestamp': timestamp,
         'X-Paper-Sync-Signature': signature('GET', path, timestamp, b''),
     })

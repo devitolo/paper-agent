@@ -28,11 +28,16 @@ run_hook() {
   printf '[%s] start %s\n' "$(date -u +%FT%TZ)" "$name" | tee -a "$log_file"
   if ! bash -c "$command" >> "$log_file" 2>&1; then
     printf '[%s] failed %s\n' "$(date -u +%FT%TZ)" "$name" | tee -a "$log_file"
-    write_status "$name" failed 'sync hook failed; pipeline was not run'
+    write_status "$name" failed 'exchange failed; cycle stopped; inspect durable sync state'
     return 1
   fi
   printf '[%s] completed %s\n' "$(date -u +%FT%TZ)" "$name" | tee -a "$log_file"
 }
+# Hold the deployment lease across restore, every source and publish.
+if [[ "${PAPER_AGENT_SYNC_ENABLED:-0}" == 1 && -n "${PAPER_MIGRATION_DEPLOY_LOCK_FILE:-}" ]]; then
+  exec 7>"$PAPER_MIGRATION_DEPLOY_LOCK_FILE"
+  if ! flock -n -s 7; then write_status sync_snapshot failed 'deployment in progress'; exit 1; fi
+fi
 pre_sync_command="${PAPER_AGENT_SYNC_PRE_RUN_COMMAND:-}"
 post_sync_command="${PAPER_AGENT_SYNC_POST_RUN_COMMAND:-}"
 if [[ "${PAPER_AGENT_SYNC_ENABLED:-0}" == 1 ]]; then
