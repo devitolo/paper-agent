@@ -19,7 +19,7 @@ PAPER_MINILM_SHADOW_ENABLED=0
 
 # Paused afternoon: 0 16 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh openalex >> logs/pipeline-openalex.log 2>&1
 
-## OpenAlex, arXiv, Semantic Scholar, and profile run sequentially from the authoritative orchestrator above.
+## OpenAlex, arXiv, Semantic Scholar, CORE, and profile run sequentially from the authoritative orchestrator above.
 
 # Weekly Industry / ZenML discovery. Uses separate config and no academic MiniLM ranking.
 30 23 * * 0 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh zenml >> logs/pipeline-zenml.log 2>&1
