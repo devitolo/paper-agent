@@ -216,6 +216,7 @@ jobs:
       - name: Mini registry acceptance
         env:
           PAPER_MINI_ACCEPTANCE_IMAGE: ${{ needs.publish.outputs.image_ref }}
+          PAPER_MINI_EXPECTED_PLATFORMS: ${{ startsWith(needs.publish.outputs.version, 'v') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         run: bash scripts/mini_registry_acceptance.sh
 
       - name: Upload Mini acceptance evidence

@@ -8,16 +8,19 @@ mkdir -p "$REPORT_DIR"
 
 raw=$(docker buildx imagetools inspect "$IMAGE" --raw)
 printf '%s\n' "$raw" > "$REPORT_DIR/manifest.json"
-python3 - "$IMAGE" "$REPORT_DIR/manifest.json" "$REPORT_DIR/status.txt" <<'PY'
+PAPER_MINI_EXPECTED_PLATFORMS=${PAPER_MINI_EXPECTED_PLATFORMS:-linux/amd64} \
+python3 - "$IMAGE" "$REPORT_DIR/manifest.json" "$REPORT_DIR/status.txt" "$PAPER_MINI_EXPECTED_PLATFORMS" <<'PY'
 import json, sys
-image, manifest_path, status_path = sys.argv[1:]
+image, manifest_path, status_path, expected_text = sys.argv[1:]
 data = json.load(open(manifest_path))
 manifests = data.get("manifests", [])
 platforms = {
     ((m.get("platform") or {}).get("os"), (m.get("platform") or {}).get("architecture"))
     for m in manifests
 }
-required = {("linux", "amd64"), ("linux", "arm64")}
+required = {tuple(item.split("/", 1)) for item in expected_text.split(",") if item}
+if any(len(item) != 2 for item in required):
+    raise SystemExit(f"invalid expected platform specification: {expected_text}")
 if not required.issubset(platforms):
     raise SystemExit(f"missing required platforms: {sorted(required - platforms)}")
 with open(status_path, "w") as out:
