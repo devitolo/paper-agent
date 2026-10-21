@@ -34,7 +34,7 @@ run_stage() {
   printf '[%s] completed %s\n' "$(date -u +%FT%TZ)" "$stage" | tee -a "$log_file"
   write_status "$stage" completed
 }
-for stage in openalex arxiv semantic profile; do
+for stage in openalex arxiv semantic core profile; do
   if ! run_stage "$stage"; then exit 1; fi
 done
 write_status complete completed

@@ -8,7 +8,7 @@ class SequentialOrchestratorTests(unittest.TestCase):
         cron = (ROOT / 'deploy/project-paper.crontab').read_text()
         script = (ROOT / 'scripts/mini_sequential_orchestrator.sh').read_text()
         self.assertEqual(cron.count('scripts/mini_sequential_orchestrator.sh'), 1)
-        self.assertIn('for stage in openalex arxiv semantic profile', script)
+        self.assertIn('for stage in openalex arxiv semantic core profile', script)
         self.assertIn('flock -n 9', script)
         self.assertIn('stage failed; later stages were not run', script)
         self.assertIn('ORCHESTRATOR_LOG_DIR', script)
