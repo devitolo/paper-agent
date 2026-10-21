@@ -516,7 +516,10 @@ phase_end
 
 phase_start "readiness"
 deadline=$((SECONDS + 120))
-until "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-app >/dev/null 2>&1; do
+runtime_role=$("${compose[@]}" exec -T app printenv PAPER_AGENT_RUNTIME_ROLE 2>/dev/null || true)
+readiness_check=check-app
+[[ "$runtime_role" == pipeline ]] && readiness_check=check-pipeline
+until "${compose[@]}" exec -T app python -m paper_agents.package_runtime "$readiness_check" >/dev/null 2>&1; do
   [[ "$SECONDS" -lt "$deadline" ]] || {
     "${compose[@]}" logs --no-color --tail=200 app > "$RELEASE_DIR/app-readiness-failure.log" 2>&1 || true
     echo "App readiness failed. Evidence: $RELEASE_DIR" >&2
@@ -527,9 +530,14 @@ done
 phase_end
 
 phase_start "post deploy checks"
-curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.html"
-"${compose[@]}" exec -T app python -m paper_agents.package_runtime check-model \
-  > "$RELEASE_DIR/qwen-check.json"
+if [[ "$runtime_role" == pipeline ]]; then
+  "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-pipeline \
+    > "$RELEASE_DIR/pipeline-check.json"
+else
+  curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.html"
+  "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-model \
+    > "$RELEASE_DIR/qwen-check.json"
+fi
 "${compose[@]}" exec -T app python - <<'PY' > "$RELEASE_DIR/minilm-check.json"
 import json
 from paper_agents.curator_interest import default_interest_scorer, score_interest_fit
