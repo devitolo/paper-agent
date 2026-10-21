@@ -25,15 +25,16 @@ def export_delta(db_path, root, state):
         cycle_ids=[r['id'] for r in cycles]
         keys=set()
         if cycle_ids:
-            marks=','.join('?'*len(cycle_ids)); keys={r[0] for r in c.execute(f'SELECT DISTINCT p.canonical_key FROM papers p JOIN curator_evaluations e ON e.paper_id=p.id JOIN curator_runs cr ON cr.id=e.curator_run_id WHERE cr.workflow_cycle_id IN ({marks})',cycle_ids)}
+            marks=','.join('?'*len(cycle_ids)); keys={r[0] for r in c.execute(f'SELECT DISTINCT p.canonical_key FROM papers p JOIN scout_candidates sc ON sc.paper_id=p.id JOIN scout_runs sr ON sr.id=sc.scout_run_id WHERE sr.workflow_cycle_id IN ({marks}) UNION SELECT DISTINCT p.canonical_key FROM papers p JOIN curator_evaluations e ON e.paper_id=p.id JOIN curator_runs cr ON cr.id=e.curator_run_id WHERE cr.workflow_cycle_id IN ({marks})',cycle_ids+cycle_ids)}
         papers=[dict(r) for r in c.execute('SELECT * FROM papers') if r['canonical_key'] in keys]
         sources=[dict(r) for r in c.execute('SELECT ps.*,p.canonical_key FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id') if r['canonical_key'] in keys]
-        artifacts=[dict(r) for r in c.execute('SELECT a.*,p.canonical_key FROM artifacts a JOIN papers p ON p.id=a.paper_id') if r['canonical_key'] in keys]
+        artifacts=[dict(r) for r in c.execute("SELECT a.*,p.canonical_key FROM artifacts a JOIN papers p ON p.id=a.paper_id WHERE a.artifact_type='triage_summary'") if r['canonical_key'] in keys]
     results=[]
     for cycle in cycles: results.extend(results_for_cycle(db_path, root, cycle['id']))
     for row in artifacts:
         path=pathlib.Path(row['path']); path=path if path.is_absolute() else pathlib.Path(root)/path
-        row['content']=json.loads(path.read_text()) if path.exists() and row['artifact_type']=='triage_summary' else None
+        row['content']=json.loads(path.read_text()) if path.exists() else None
+        if not isinstance(row['content'],dict): raise ValueError('triage summary artifact content must be an object')
     evaluations=[]; recommendations=[]
     with connect_db(db_path) as c:
         for cycle in cycles:

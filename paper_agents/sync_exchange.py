@@ -1,6 +1,7 @@
 """Versioned, bounded exchange; never execute SQL supplied by a peer."""
 from __future__ import annotations
 import hashlib, hmac, json, math, os, time, sqlite3
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from email.message import Message
 from pathlib import Path
@@ -86,7 +87,9 @@ def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.')):
 def _paper(c,item):
     key=item.get('canonical_key');title=item.get('title')
     if not isinstance(key,str) or not key or len(key)>500 or not isinstance(title,str) or not title:raise ValueError('paper identity/title required')
-    c.execute('INSERT INTO papers(canonical_key,title,abstract,published,doi,arxiv_id) VALUES(?,?,?,?,?,?) ON CONFLICT(canonical_key) DO UPDATE SET title=excluded.title,abstract=excluded.abstract,published=excluded.published,doi=excluded.doi,arxiv_id=excluded.arxiv_id',(key,title,item.get('abstract'),item.get('published'),item.get('doi'),item.get('arxiv_id')))
+    now=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    fields=(key,title,item.get('abstract'),item.get('published'),item.get('updated'),item.get('doi'),item.get('arxiv_id'),item.get('authors_json','[]'),item.get('categories_json','[]'),item.get('first_discovered_at') or now,item.get('last_discovered_at') or now)
+    c.execute('INSERT INTO papers(canonical_key,title,abstract,published,updated,doi,arxiv_id,authors_json,categories_json,first_discovered_at,last_discovered_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(canonical_key) DO UPDATE SET title=excluded.title,abstract=excluded.abstract,published=excluded.published,updated=excluded.updated,doi=excluded.doi,arxiv_id=excluded.arxiv_id,authors_json=excluded.authors_json,categories_json=excluded.categories_json,last_discovered_at=excluded.last_discovered_at',(fields))
     return c.execute('SELECT id FROM papers WHERE canonical_key=?',(key,)).fetchone()[0]
 def _source(c,pid,item):
     source=item.get('source');sid=item.get('source_id')
@@ -200,6 +203,17 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
     if not isinstance(results,list) or len(results)>100:raise ValueError('results must be bounded recommendations')
     delta=payload.get('pipeline_delta',{})
     if not isinstance(delta,dict) or any(k not in {'workflow_cycles','scout_runs','curator_runs','curator_evaluations','recommendations','artifacts'} for k in delta):raise ValueError('invalid pipeline delta')
+    normalized=payload.get('normalized',{'papers':[],'paper_sources':[],'artifacts':[],'evaluations':[],'recommendations':[]})
+    if not isinstance(normalized,dict) or set(normalized)!={'papers','paper_sources','artifacts','evaluations','recommendations'} or any(not isinstance(normalized[k],list) for k in normalized):raise ValueError('invalid normalized sections')
+    for row in normalized['papers']:
+        if not isinstance(row,dict) or not isinstance(row.get('canonical_key'),str) or not isinstance(row.get('title'),str):raise ValueError('invalid normalized paper')
+    for row in normalized['paper_sources']:
+        if not isinstance(row,dict) or not isinstance(row.get('canonical_key'),str) or not isinstance(row.get('source_id'),str):raise ValueError('invalid normalized source')
+    for row in normalized['artifacts']:
+        if not isinstance(row,dict) or row.get('artifact_type')!='triage_summary' or not isinstance(row.get('content'),dict):raise ValueError('invalid normalized summary')
+    for section in ('evaluations','recommendations'):
+        for row in normalized[section]:
+            if not isinstance(row,dict) or not isinstance(row.get('canonical_key'),str) or not isinstance(row.get('cycle_key'),str):raise ValueError('invalid normalized pipeline row')
     root=Path(root);content_hash=_digest(body)
     with connect_db(db_path) as c:
         _setup(c);c.commit();c.execute('BEGIN IMMEDIATE')
@@ -211,11 +225,11 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
         last=c.execute('SELECT sequence FROM sync_producers WHERE producer=? AND environment=?',(producer,environment)).fetchone()
         if last and seq<=last[0]:raise ValueError('stale result sequence')
         c.execute('INSERT INTO sync_result_batches(batch_key,input_revision,payload_hash,payload_json,status) VALUES(?,?,?,?,?)',(key,payload['input_revision'],content_hash,body.decode(),'received'))
-        normalized=payload.get('normalized',{})
-        if not isinstance(normalized,dict): raise ValueError('invalid normalized pipeline payload')
         _apply_normalized(c, normalized, root)
-        cycle=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','sync',?)",(encoded({'batch_key':key,'input_revision':payload['input_revision'],'producer_id':producer,'run_sequence':seq,'pipeline_delta_counts':{k:len(v) for k,v in delta.items()}}).decode(),)).lastrowid
-        run=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycle,encoded({'imported':True}).decode())).lastrowid
+        cycle=None; run=None
+        if results:
+            cycle=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','sync',?)",(encoded({'batch_key':key,'input_revision':payload['input_revision'],'producer_id':producer,'run_sequence':seq,'pipeline_delta_counts':{k:len(v) for k,v in delta.items()}}).decode(),)).lastrowid
+            run=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycle,encoded({'imported':True}).decode())).lastrowid
         seen=set()
         for index,item in enumerate(results):
             order=index%3+1
