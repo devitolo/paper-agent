@@ -12,7 +12,7 @@ from pathlib import Path
 
 from paper_agents import db
 from paper_agents.local_extract import DEFAULT_MODEL
-from paper_agents.runtime_config import ollama_url
+from paper_agents.runtime_config import ollama_url, serving_only
 from paper_agents.topics import load_topic_config
 
 PACKAGE_SCHEMA_VERSION = 1
@@ -23,6 +23,10 @@ def initialize(root: Path = Path("."), templates: Path = TEMPLATES) -> None:
     """Seed missing files only; reject broken existing state without reseeding."""
     from paper_agents.runtime_config import migration_settings
     settings = migration_settings()
+    if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"serving", "serving-snapshot"}:
+        from paper_agents.mini_nonprod_state import validate
+        validate(root)
+        return
     if settings is not None:
         # Optional provider readiness must not prevent browsing imported state.
         from paper_agents.gemini_runtime import readiness_error
@@ -96,6 +100,9 @@ def request_json(path: str, payload: dict | None = None, timeout: float = 5) -> 
 
 
 def model_status() -> dict:
+    if serving_only():
+        return {"api": "disabled", "model": None, "present": False,
+                "inference": "disabled", "detail": "Synthetic isolated runtime; inference disabled"}
     try:
         payload = request_json("/api/tags")
         if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
@@ -125,6 +132,10 @@ def check_model(timeout: float = 120) -> dict:
 def main() -> int:
     try:
         command = sys.argv[1] if len(sys.argv) > 1 else "start"
+        if command == "check-pipeline":
+            from paper_agents.pipeline_runtime import readiness
+            print(json.dumps(readiness(), sort_keys=True))
+            return 0
         if command == "check-gemini":
             from paper_agents.gemini_runtime import enabled, check_ready
             if not enabled():
@@ -136,9 +147,25 @@ def main() -> int:
             with urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=5) as response:
                 return 0 if json.load(response)["ready"] else 1
         if command == "check-state":
+            if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"serving", "serving-snapshot"}:
+                from paper_agents.runtime_config import migration_settings
+                from paper_agents.mini_nonprod_state import validate
+                migration_settings()
+                print(json.dumps(validate(Path(".")), sort_keys=True))
+                return 0
             from paper_agents.import_state import validate_live_artifact_paths
             count = validate_live_artifact_paths(Path("."))
             print(json.dumps({"artifact_paths": "valid", "artifact_count": count}, sort_keys=True))
+            return 0
+        if command == "check-minilm":
+            from paper_agents.curator_interest import default_interest_scorer, score_interest_fit
+            result = score_interest_fit(
+                {"title": "Synthetic incident diagnosis verification",
+                 "abstract": "This synthetic verification describes incident diagnosis with logs, metrics and traces across dependent services and controlled reliability experiments."},
+                ["incident diagnosis and recovery"], default_interest_scorer())
+            if result["status"] != "scored":
+                raise RuntimeError("MiniLM inference verification failed")
+            print(json.dumps(result, sort_keys=True))
             return 0
         if command == "check-model":
             print(json.dumps(check_model(float(os.environ.get("PAPER_MODEL_CHECK_TIMEOUT", "120")))))
@@ -149,20 +176,33 @@ def main() -> int:
             from paper_agents.manual_scout import worker_main
             return worker_main(Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]) if len(sys.argv) == 5 else None)
         if command != "start":
-            raise RuntimeError("Expected start, check-app, check-state, check-model, check-gemini or manual-scout")
-        from paper_agents.web import run_review_ui
-        if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
+            raise RuntimeError("Expected start, check-app, check-pipeline, check-state, check-model, check-minilm, check-gemini or manual-scout")
+        role = os.environ.get("PAPER_AGENT_RUNTIME_ROLE", "ui")
+        if role not in {"ui", "pipeline"}:
+            raise RuntimeError("Runtime role must be ui or pipeline")
+        if not serving_only() and os.environ.get("PAPER_AGENT_MINILM_BACKEND", "embedded") == "http":
+            from paper_agents.minilm_http import HTTPMiniLMScorer
+            HTTPMiniLMScorer(os.environ.get("PAPER_AGENT_MINILM_URL", ""),
+                            float(os.environ.get("PAPER_AGENT_MINILM_TIMEOUT", "10"))).check_ready()
+        if role == "pipeline":
+            from paper_agents.pipeline_runtime import run as run_role
+        else:
+            from paper_agents.web import run_review_ui
+            def run_role():
+                run_review_ui(host="0.0.0.0", port=8000)
+        if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"imported", "serving", "serving-snapshot"}:
             from paper_agents.migration_lifecycle import lease, downgrade, validate_container_contract
-            validate_container_contract()
+            if os.environ.get("PAPER_AGENT_STARTUP_MODE") == "imported":
+                validate_container_contract()
             # First-slice validation must not treat the lifecycle lock as snapshot input.
             # The lock lives in a separate persistent shared mount, outside authoritative data.
             with lease(Path(os.environ["PAPER_AGENT_LIFECYCLE_DIR"]), exclusive=True) as descriptor:
                 initialize()
                 downgrade(descriptor)
-                run_review_ui(host="0.0.0.0", port=8000)
+                run_role()
         else:
             initialize()
-            run_review_ui(host="0.0.0.0", port=8000)
+            run_role()
         return 0
     except Exception as error:
         print(f"Project Paper startup/readiness failed: {error}", file=sys.stderr)

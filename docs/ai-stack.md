@@ -32,7 +32,9 @@ path rather than those temporary evaluation pages.
 
 The production Mini uses local models with distinct responsibilities:
 
-- **MiniLM:** topical interest fit from title and abstract. This helps decide
+- **MiniLM:** topical interest fit from title and abstract. Production serves
+  the pinned MiniLM model through a private standalone HTTP service, so the app
+  image does not contain the inference runtime or model mount. This helps decide
   which candidates deserve deeper Curator attention.
 - **Qwen3 4B:** active Curator evidence assessment for the top 10 preliminary
   candidates. It can adjust Curator scoring through structured assessment.
@@ -45,6 +47,13 @@ or returns invalid output, Curator falls back to deterministic scoring.
 Conceptual, architecture, framework, and threat-model papers are not penalized
 merely because they are non-empirical; unsupported experimental claims remain
 weak evidence.
+
+MiniLM transport is explicit: the production app uses an internal HTTP origin
+with identity/readiness checks, a 10-second default client timeout, and no
+automatic retries, proxying, redirects, invented scores, or embedded fallback.
+An unavailable service produces an unavailable interest-fit result and lets the
+rest of Curator evaluation proceed. The HTTP service is not a public API and has
+no host port, provider access, or application data/configuration volumes.
 
 ## Public Package Boundary
 

@@ -14,7 +14,7 @@ from paper_agents import db
 from paper_agents.curator_agent import DEFAULT_MIN_QUALITY_SCORE
 from paper_agents.curator_scoring import SCORING_VERSION
 from paper_agents.local_extract import DEFAULT_MODEL, DEFAULT_OLLAMA_URL, extract_paper
-from paper_agents.minilm_eval import MODEL_ID, MODEL_REVISION, MODEL_SHA256, QUERY_VERSION, MiniLMScorer
+from paper_agents.minilm_eval import MODEL_ID, MODEL_REVISION, MODEL_SHA256, QUERY_VERSION, MiniLMScorer, default_eval_scorer
 from paper_agents.reviewer_agent import abstract_source_text
 
 
@@ -216,7 +216,7 @@ def run_shadow_experiment(
 
     started = time.monotonic()
     try:
-        scorer = scorer or MiniLMScorer()
+        scorer = scorer or default_eval_scorer()
         for candidate in candidates:
             candidate["minilm_score"] = (
                 float(scorer(candidate["title"], candidate["abstract"]))

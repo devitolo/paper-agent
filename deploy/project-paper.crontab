@@ -15,22 +15,16 @@ PAPER_MINILM_SHADOW_ENABLED=0
 # enters the existing production app container. Do not replace these with
 # native host-runtime jobs while the Mini container runtime is authoritative.
 
-0 4 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh openalex >> logs/pipeline-openalex.log 2>&1
+0 4 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_sequential_orchestrator.sh >> logs/pipeline-orchestrator.log 2>&1
 
 # Paused afternoon: 0 16 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh openalex >> logs/pipeline-openalex.log 2>&1
 
-0 5 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh arxiv >> logs/pipeline-daily.log 2>&1
-
-# Paused afternoon: 0 17 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh arxiv >> logs/pipeline-daily.log 2>&1
-
-0 6 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh semantic >> logs/pipeline-semantic-scholar.log 2>&1
+## OpenAlex, arXiv, Semantic Scholar, and profile run sequentially from the authoritative orchestrator above.
 
 # Weekly Industry / ZenML discovery. Uses separate config and no academic MiniLM ranking.
 30 23 * * 0 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh zenml >> logs/pipeline-zenml.log 2>&1
 
 # Paused afternoon: 0 18 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh semantic >> logs/pipeline-semantic-scholar.log 2>&1
-
-0 2 * * 1 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh profile >> logs/profile-rebuild-compare.log 2>&1
 
 0 1 * * 0 cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh backup >> logs/backup-db.log 2>&1
 

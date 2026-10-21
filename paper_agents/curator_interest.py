@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 from typing import Any, Callable
 
@@ -89,5 +90,14 @@ def score_interest_fit(
 
 
 def default_interest_scorer() -> Callable[[str, str, str], float]:
+    backend = os.environ.get("PAPER_AGENT_MINILM_BACKEND", "embedded")
+    if backend == "http":
+        from .minilm_http import HTTPMiniLMScorer
+        return HTTPMiniLMScorer(
+            os.environ.get("PAPER_AGENT_MINILM_URL", ""),
+            float(os.environ.get("PAPER_AGENT_MINILM_TIMEOUT", "10")),
+        ).score_pair
+    if backend != "embedded":
+        raise ValueError("MiniLM backend must be embedded or http")
     model = MiniLMScorer()
     return model.score_pair
