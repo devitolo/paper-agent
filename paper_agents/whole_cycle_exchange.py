@@ -22,9 +22,20 @@ def export_delta(db_path, root, state):
     with connect_db(db_path) as c:
         cycles=[dict(r) for r in c.execute('SELECT * FROM workflow_cycles WHERE id>? ORDER BY id',(base['workflow_cycles'],))]
         rows={t:[dict(r) for r in c.execute(f'SELECT * FROM {t} WHERE id>? ORDER BY id',(base[t],))] for t in PIPELINE_TABLES}
+        cycle_ids=[r['id'] for r in cycles]
+        candidates=[]
+        if cycle_ids:
+            marks=','.join('?'*len(cycle_ids)); candidates=[dict(r) for r in c.execute(f'SELECT sc.*,p.canonical_key FROM scout_candidates sc JOIN papers p ON p.id=sc.paper_id JOIN scout_runs sr ON sr.id=sc.scout_run_id WHERE sr.workflow_cycle_id IN ({marks})',cycle_ids)]
+        keys={r['canonical_key'] for r in candidates}
+        papers=[dict(r) for r in c.execute('SELECT * FROM papers') if r['canonical_key'] in keys]
+        sources=[dict(r) for r in c.execute('SELECT ps.*,p.canonical_key FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id') if r['canonical_key'] in keys]
+        artifacts=[dict(r) for r in c.execute('SELECT a.*,p.canonical_key FROM artifacts a JOIN papers p ON p.id=a.paper_id') if r['canonical_key'] in keys]
     results=[]
     for cycle in cycles: results.extend(results_for_cycle(db_path, root, cycle['id']))
-    return {'schema':1,'pipeline_delta':rows,'results':results,'cycle_count':len(cycles)}
+    for row in artifacts:
+        path=pathlib.Path(row['path']); path=path if path.is_absolute() else pathlib.Path(root)/path
+        row['content']=json.loads(path.read_text()) if path.exists() and row['artifact_type']=='triage_summary' else None
+    return {'schema':1,'pipeline_delta':rows,'normalized':{'papers':papers,'paper_sources':sources,'scout_candidates':candidates,'artifacts':artifacts},'results':results,'cycle_count':len(cycles)}
 
 def push(db_path, root, state, url):
     state=pathlib.Path(state); outbox=state/'pipeline-outbox.json'
