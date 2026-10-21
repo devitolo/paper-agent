@@ -160,6 +160,11 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('scripts/backup_db.sh /app/data/paper_agent.db /backups', script)
         self.assertNotIn('\u201d', script)
 
+    def test_production_update_copies_whole_cycle_host_scripts(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn('install -m 0755 "$SOURCE_DIR/scripts/mini_sequential_orchestrator.sh"', script)
+        self.assertIn('install -m 0755 "$SOURCE_DIR/scripts/mini_sync_exchange.sh"', script)
+
     def test_production_update_preflights_persisted_state_before_app_replacement(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         preflight = script.index('phase_start "preflight persisted state"')
