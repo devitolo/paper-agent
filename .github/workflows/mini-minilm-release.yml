@@ -21,7 +21,7 @@ jobs:
       PYTHON_BASE: docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d
       NODE_BASE: docker.io/library/node@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Verify exact release source and tests
@@ -39,15 +39,15 @@ jobs:
       - name: Record source bundle
         id: source
         run: echo "bundle=$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
-      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish AMD64 HTTP app
         id: app
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
           context: .
           target: mini-production-http
@@ -63,7 +63,7 @@ jobs:
             SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.bundle }}
       - name: Publish AMD64 MiniLM service
         id: service
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
           context: .
           file: deploy/minilm/Dockerfile
@@ -82,7 +82,7 @@ jobs:
           SERVICE_IMAGE: ghcr.io/devitolo/paper-agent-minilm@${{ steps.service.outputs.digest }}
           SOURCE_BUNDLE: ${{ steps.source.outputs.bundle }}
         run: python3 scripts/qualify_minilm_release.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: mini-minilm-release-${{ github.sha }}
           path: release-evidence.json
