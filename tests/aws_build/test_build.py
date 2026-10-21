@@ -97,13 +97,14 @@ class AWSStateTests(unittest.TestCase):
 
 
 class BuildContractTests(unittest.TestCase):
-    def test_hosted_manual_build_has_attestations_and_no_deploy(self):
+    def test_push_build_qualifies_then_deploys_automatically(self):
         text=(ROOT/'.github/workflows/aws-production-build.yml').read_text()
         for expected in ('workflow_dispatch:',"github.ref == 'refs/heads/aws-production'",'runs-on: ubuntu-24.04','target: cloud-production','platforms: linux/amd64','provenance: mode=max','sbom: true','steps.image.outputs.digest','scripts/aws_image_acceptance.py','git archive --format=tar HEAD'):
             self.assertIn(expected,text)
-        for forbidden in ('self-hosted','sudo ','ssh ','systemctl','workflow_run','environment: aws-production','project-paper-aws-deploy submit','mini-production','nonprod'):
+        for expected in ('\n  push:', 'environment: aws-production', 'project-paper-aws-deploy submit', 'needs: build', 'steps.accept.outputs.image'):
+            self.assertIn(expected,text)
+        for forbidden in ('ssh ','systemctl','workflow_run','mini-production','nonprod'):
             self.assertNotIn(forbidden,text)
-        self.assertNotIn('\n  push:',text)
         self.assertNotIn('\n  pull_request:',text)
 
     def test_cloud_stage_excludes_minilm_and_keeps_default_runtime(self):
