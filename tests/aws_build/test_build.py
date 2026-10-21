@@ -64,6 +64,27 @@ class AWSStateTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):package_runtime.initialize(self.root)
         self.assertFalse(path.exists())
 
+    def test_known_legacy_aws_tables_are_accepted_without_migration(self):
+        with closing(sqlite3.connect(self.root/'data/paper_agent.db')) as db:
+            db.executescript('''
+                CREATE TABLE topic_agent_allowance (
+                    allowance_day TEXT PRIMARY KEY, limit_count INTEGER NOT NULL,
+                    reserved_count INTEGER NOT NULL DEFAULT 0, consumed_count INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL DEFAULT(datetime('now'))
+                );
+                CREATE TABLE topic_agent_requests (
+                    request_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, base_topics_hash TEXT NOT NULL,
+                    request_text TEXT NOT NULL, conversation_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL,
+                    proposal_json TEXT, error_category TEXT, created_at TEXT NOT NULL DEFAULT(datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT(datetime('now'))
+                );
+                CREATE INDEX idx_topic_agent_requests_status ON topic_agent_requests(status, created_at);
+            ''')
+            db.commit()
+        before=self.files()
+        self.assertIn('topic_agent_requests', validate(self.root)['tables'])
+        self.assertEqual(before,self.files())
+
     def test_acceptance_http_feedback_and_restart_checks_execute_against_serving_handler(self):
         import threading
         from http.server import ThreadingHTTPServer
@@ -101,11 +122,18 @@ class BuildContractTests(unittest.TestCase):
         text=(ROOT/'.github/workflows/aws-production-build.yml').read_text()
         for expected in ('workflow_dispatch:',"github.ref == 'refs/heads/aws-production'",'runs-on: ubuntu-24.04','target: cloud-production','platforms: linux/amd64','provenance: mode=max','sbom: true','steps.image.outputs.digest','scripts/aws_image_acceptance.py','git archive --format=tar HEAD'):
             self.assertIn(expected,text)
-        for expected in ('\n  push:', 'environment: aws-production', 'project-paper-aws-deploy submit', 'needs: build', 'steps.accept.outputs.image'):
+        for expected in ('\n  push:', 'environment: aws-production', 'scripts/aws_production_update.sh', 'needs: build', 'steps.accept.outputs.image'):
             self.assertIn(expected,text)
         for forbidden in ('ssh ','systemctl','workflow_run','mini-production','nonprod'):
             self.assertNotIn(forbidden,text)
         self.assertNotIn('\n  pull_request:',text)
+
+    def test_simple_deploy_script_is_digest_only_and_aws_scoped(self):
+        text=(ROOT/'scripts/aws_production_update.sh').read_text()
+        for expected in ('AWS_APP_IMAGE', 'docker pull', 'docker compose', 'flock', '/ready', 'rollback'):
+            self.assertIn(expected,text)
+        for forbidden in ('mini', 'aws-deploy submit', 'workflow_run', 'docker system prune'):
+            self.assertNotIn(forbidden,text.lower())
 
     def test_cloud_stage_excludes_minilm_and_keeps_default_runtime(self):
         text=(ROOT/'Dockerfile').read_text()
