@@ -15,6 +15,11 @@ on:
         required: true
         type: boolean
         default: false
+      build_arm64:
+        description: Also build ARM64 images (normally paused)
+        required: true
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -78,7 +83,7 @@ jobs:
         with:
           context: .
           target: ${{ env.PUBLIC_TARGET }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ inputs.build_arm64 == true && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: false
           build-args: |
             BUILD_DATE=${{ github.event.repository.updated_at }}
@@ -86,12 +91,17 @@ jobs:
             VERSION=${{ steps.release.outputs.release_version }}
 
       - name: Validate Mini production build
+        if: steps.release.outputs.publish_candidate != 'true'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
         with:
           context: .
           target: ${{ env.MINI_TARGET }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ inputs.build_arm64 == true && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: false
+          cache-from: |
+            type=gha,scope=mini-production
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-mini
+          cache-to: type=gha,mode=max,scope=mini-production
           build-args: |
             BUILD_DATE=${{ github.event.repository.updated_at }}
             VCS_REF=${{ github.sha }}
@@ -142,8 +152,14 @@ jobs:
         with:
           context: .
           target: ${{ env.MINI_TARGET }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ inputs.build_arm64 == true && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: true
+          cache-from: |
+            type=gha,scope=mini-production
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-mini
+          cache-to: |
+            type=gha,mode=max,scope=mini-production
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-mini,mode=max
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -202,14 +218,80 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Mini exact-image acceptance
+      - name: Mini registry acceptance
         env:
           PAPER_MINI_ACCEPTANCE_IMAGE: ${{ needs.publish.outputs.image_ref }}
-          PAPER_MINI_ACCEPTANCE_VERSION: ${{ needs.publish.outputs.version }}
-        run: bash scripts/mini_release_acceptance.sh
+        run: bash scripts/mini_registry_acceptance.sh
 
       - name: Upload Mini acceptance evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: project-paper-mini-acceptance-${{ needs.publish.outputs.version }}
+          name: project-paper-mini-registry-acceptance-${{ needs.publish.outputs.version }}
           path: release-acceptance-results/
+
+  full-exact-image-acceptance:
+    needs: [publish, exact-image-acceptance]
+    if: needs.publish.result == 'success' && (needs.publish.outputs.version != '' && (startsWith(needs.publish.outputs.version, 'v') || github.event_name == 'workflow_dispatch'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Full Mini exact-image acceptance
+        env:
+          PAPER_MINI_ACCEPTANCE_IMAGE: ${{ needs.publish.outputs.image_ref }}
+          PAPER_MINI_ACCEPTANCE_VERSION: ${{ needs.publish.outputs.version }}
+        run: bash scripts/mini_release_acceptance.sh
+      - name: Upload full acceptance evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: project-paper-mini-full-acceptance-${{ needs.publish.outputs.version }}
+          path: release-acceptance-results/
+
+  deploy-mini-candidate:
+    needs: [publish, exact-image-acceptance]
+    if: needs.publish.result == 'success' && needs.exact-image-acceptance.result == 'success' && needs.publish.outputs.version != '' && (startsWith(needs.publish.outputs.version, 'mini-candidate-') || github.event_name == 'workflow_dispatch')
+    runs-on:
+      - self-hosted
+      - project-paper-mini
+      - linux
+      - x64
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: mini-production
+    steps:
+      - name: Checkout deployment source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Confirm production runner identity
+        shell: bash
+        run: |
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          docker version
+          docker compose version
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Deploy exact published digest to Mini
+        env:
+          PAPER_MINI_APP_IMAGE: ${{ needs.publish.outputs.image_ref }}
+          PAPER_MINI_DEPLOY_BRANCH: mini-production
+          PAPER_MINI_DRAIN_TIMEOUT: "1800"
+        run: bash scripts/mini_production_update.sh
