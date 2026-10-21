@@ -17,7 +17,8 @@ platforms = {
     ((m.get("platform") or {}).get("os"), (m.get("platform") or {}).get("architecture"))
     for m in manifests
 }
-required = {("linux", "amd64"), ("linux", "arm64")}
+requested = __import__('os').environ.get('PAPER_MINI_REQUIRED_PLATFORMS', 'linux/amd64').split()
+required = {tuple(item.split('/', 1)) for item in requested}
 if not required.issubset(platforms):
     raise SystemExit(f"missing required platforms: {sorted(required - platforms)}")
 with open(status_path, "w") as out:
