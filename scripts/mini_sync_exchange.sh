@@ -10,7 +10,6 @@ root="${PAPER_AGENT_SYNC_ROOT:-$repo}"
 environment="${PAPER_AGENT_SYNC_ENVIRONMENT:-production}"
 producer="${PAPER_AGENT_SYNC_PRODUCER:-mini-production}"
 case "${1:-}" in
-  pull) python -c "import os,pathlib; from paper_agents.sync_worker import request; from paper_agents.whole_cycle_exchange import pull; r=pathlib.Path(os.environ["PAPER_AGENT_SYNC_ROOT"]); s=pathlib.Path(os.environ["PAPER_AGENT_SYNC_STATE_DIR"]); pull(pathlib.Path(os.environ["PAPER_AGENT_SYNC_DB_PATH"]),r,s,request(os.environ["PAPER_AGENT_SYNC_AWS_URL"],"GET",b"",os.environ["PAPER_AGENT_SYNC_SHARED_SECRET"],"/sync/snapshot"))" ;;
-  push) python -c "import os,pathlib; from paper_agents.whole_cycle_exchange import push; push(pathlib.Path(os.environ["PAPER_AGENT_SYNC_DB_PATH"]),pathlib.Path(os.environ["PAPER_AGENT_SYNC_ROOT"]),pathlib.Path(os.environ["PAPER_AGENT_SYNC_STATE_DIR"]),os.environ["PAPER_AGENT_SYNC_AWS_URL"])" ;;
+  pull|push) python -m paper_agents.whole_cycle_exchange "$1" --db-path "$db_path" --root "$root" --state-dir "$state_dir" --aws-url "$PAPER_AGENT_SYNC_AWS_URL" ;;
   *) echo 'Usage: mini_sync_exchange.sh pull|push' >&2; exit 64 ;;
 esac

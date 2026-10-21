@@ -1,6 +1,6 @@
 """Guarded whole-cycle Mini to AWS exchange adapter."""
 from __future__ import annotations
-import json, os, pathlib, uuid
+import json, os, pathlib, uuid, argparse
 from .sync_exchange import apply_input_snapshot, encoded
 from .sync_worker import request, results_for_cycle
 from .sync_exchange import connect_db
@@ -12,10 +12,12 @@ def baseline(db_path):
         return {t: c.execute(f'SELECT COALESCE(MAX(id),0) FROM {t}').fetchone()[0] for t in PIPELINE_TABLES}
 
 def pull(db_path, root, state, snapshot):
+    state = pathlib.Path(state)
+    if list(state.glob('pipeline-outbox*.json')): raise ValueError('pending outbox blocks snapshot replacement')
     apply_input_snapshot(db_path, snapshot, root)
-    state = pathlib.Path(state); state.mkdir(parents=True, exist_ok=True)
-    (state/'baseline.json').write_text(json.dumps(baseline(db_path), sort_keys=True))
-    (state/'input-snapshot.json').write_bytes(encoded(snapshot))
+    state.mkdir(parents=True, exist_ok=True)
+    for name, value in (('baseline.json', baseline(db_path)), ('input-snapshot.json', snapshot)):
+        tmp=state/(name+'.tmp'); tmp.write_bytes(encoded(value)); tmp.replace(state/name)
 
 def export_delta(db_path, root, state):
     base=json.loads((pathlib.Path(state)/'baseline.json').read_text())
@@ -55,3 +57,12 @@ def push(db_path, root, state, url):
     receipt=request(url,'POST',encoded(payload),os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'],'/sync/pipeline-results',key)
     if receipt.get('status')!='applied' or receipt.get('batch_key')!=key: raise ValueError('invalid pipeline receipt')
     outbox.rename(state/f'published-{key}.json'); return receipt
+
+def main(argv=None):
+    p=argparse.ArgumentParser(); p.add_argument('command',choices=('pull','push')); p.add_argument('--db-path',required=True,type=pathlib.Path); p.add_argument('--root',required=True,type=pathlib.Path); p.add_argument('--state-dir',required=True,type=pathlib.Path); p.add_argument('--aws-url',required=True)
+    a=p.parse_args(argv)
+    if a.command=='pull': pull(a.db_path,a.root,a.state_dir,request(a.aws_url,'GET',b'',os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'],'/sync/snapshot'))
+    else: print(json.dumps(push(a.db_path,a.root,a.state_dir,a.aws_url),sort_keys=True))
+    return 0
+
+if __name__=='__main__': raise SystemExit(main())
