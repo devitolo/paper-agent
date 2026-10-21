@@ -178,6 +178,8 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set', script)
         self.assertIn('ARXIV_PROGRESS=${PAPER_MINI_ARXIV_PROGRESS:-}', script)
         self.assertIn('PAPER_MINI_ARXIV_PROGRESS must be 0 or 1 when set', script)
+        self.assertIn('CORE_SOURCE=${PAPER_MINI_CORE_SOURCE:-}', script)
+        self.assertIn('PAPER_MINI_CORE_SOURCE must be 0 or 1 when set', script)
         self.assertIn('arxiv_progress = sys.argv[5]', script)
         self.assertIn('PAPER_ARXIV_PROGRESS={arxiv_progress}', script)
         self.assertIn('openalex_cursor = sys.argv[6]', script)
