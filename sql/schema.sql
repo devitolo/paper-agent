@@ -510,4 +510,3 @@ CREATE TABLE IF NOT EXISTS sync_profile_proposals (
     change_summary TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('accepted','rejected')),
     created_at TEXT NOT NULL DEFAULT(datetime('now'))
 );
-);
