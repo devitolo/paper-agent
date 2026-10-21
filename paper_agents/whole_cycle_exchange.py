@@ -160,7 +160,7 @@ def main(argv=None):
         if a.command=='pull':
             if (a.state_dir/'pipeline-outbox.json').exists() or (a.state_dir/'active-cycle.json').exists():
                 raise ValueError('unfinished cycle blocks pull; recover/publish first')
-            backup=download_backup(a.aws_url,a.state_dir/'snapshots',endpoint='/sync/snapshot')
+            backup=download_backup(a.aws_url,a.state_dir/'snapshots',endpoint='/sync/backup')
             result=pull(a.db_path,a.root,a.state_dir,backup)
         else: result=push(a.db_path,a.root,a.state_dir,a.aws_url)
     print(json.dumps(result,sort_keys=True)); return 0

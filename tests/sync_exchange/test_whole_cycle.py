@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import inspect
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 
@@ -17,11 +18,17 @@ from paper_agents.db import init_db
 from paper_agents.sync_exchange import connect_db, encoded, receive_result_batch
 from paper_agents.web import make_handler
 from paper_agents.whole_cycle_exchange import export_delta, push
+import paper_agents.whole_cycle_exchange as whole_cycle_exchange
 
 REPO=Path(__file__).resolve().parents[2]
 
 
 class WholeCycleTests(unittest.TestCase):
+    def test_pull_uses_gzip_backup_endpoint(self):
+        source = inspect.getsource(whole_cycle_exchange.main)
+        self.assertIn("endpoint='/sync/backup'", source)
+        self.assertNotIn("endpoint='/sync/snapshot'", source)
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name).resolve(); self.aws=self.root/'aws'; self.mini=self.root/'mini'
