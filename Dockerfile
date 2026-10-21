@@ -108,6 +108,33 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.projectpaper.runtime="mini-production-http"
 USER paper
 
+# AWS production serving artifact; no embedded MiniLM/model or scheduled work.
+# Explicit target only; all existing targets and the default runtime are unchanged.
+FROM migration-gemini AS cloud-production
+USER root
+ARG BUILD_DATE=unknown
+ARG PYTHON_BASE_IMAGE
+ARG SOURCE_BUNDLE_SHA256=
+ARG VCS_REF=unknown
+ARG VERSION=dev
+COPY LICENSE NOTICE ./
+COPY paper_agents ./paper_agents
+COPY sql ./sql
+RUN python scripts/image_runtime_inventory.py "${PYTHON_BASE_IMAGE}" /app/image-runtime-inputs.json "${SOURCE_BUNDLE_SHA256}" "${VCS_REF}"
+ENV PAPER_AGENT_PACKAGED=1 PAPER_AGENT_STARTUP_MODE=serving \
+    PAPER_AGENT_SERVING_ONLY=1 PAPER_AGENT_AWS_PRODUCTION=1 \
+    PAPER_AGENT_RUNTIME_ROLE=ui PAPER_AGENT_SCHEDULER_ENABLED=0 \
+    PAPER_AGENT_MINILM_ENABLED=0 PAPER_AGENT_TELEMETRY=0 \
+    PAPER_AGENT_GEMINI_ENABLED=0 PAPER_AGENT_LIFECYCLE_DIR=/runtime-control
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.projectpaper.source-bundle-sha256="${SOURCE_BUNDLE_SHA256}" \
+      org.projectpaper.runtime="cloud-production"
+HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=12 \
+    CMD ["python", "-m", "paper_agents.package_runtime", "check-app"]
+USER paper
+
 FROM base AS runtime
 USER root
 ARG BUILD_DATE=unknown

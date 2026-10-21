@@ -76,10 +76,11 @@ bytes independently of a job checkout.
 
 The image must have been built for Linux AMD64 on a GitHub-hosted build runner,
 with reviewed source revision/bundle and `cloud-production` runtime labels. This
-series does not add or change Dockerfiles/build workflows. Current main lacks a
-qualified `cloud-production` target; producing and accepting that release artifact
-is an explicit prerequisite, not an implicit build on AWS or a reason to import
-unrelated preparation changes. Candidate and retained rollback images must each
+build-only follow-up adds an explicitly selected `cloud-production` stage and
+`.github/workflows/aws-production-build.yml`. The existing public/Mini targets,
+workflows and default final image are unchanged. Actual hosted image build and
+exact-digest acceptance remain required before deployment; local source tests
+alone do not qualify a release artifact. Candidate and retained rollback images must each
 pass the embedded read-only copied-state validator using existing main schema
 helpers. Missing helpers, unsupported schema, missing files or labels fail closed.
 
@@ -178,3 +179,53 @@ The review series runs only synthetic controller failure injection and temporary
 HTTP/SQLite tests. Actual host limits, installed service/fence, image/mounts,
 credential availability, private TLS, runtime readiness and disaster recovery
 remain qualification gates. No runner, host data, sync worker or cron is activated.
+
+
+## Build-only serving artifact
+
+After review and merge of this follow-up, manually dispatch **AWS Production
+Image Build** from `aws-production`. It runs only on GitHub-hosted Ubuntu AMD64,
+using contents-read/packages-write `GITHUB_TOKEN`. No deployment environment,
+AWS runner, SSH, live data, production credentials or deployment job is involved.
+The existing Docker workflow remains unchanged. This candidate was not dispatched.
+
+The workflow computes `git archive HEAD` SHA256 and builds explicit target
+`cloud-production`, publishing an `aws-candidate-<commit>` convenience tag plus
+BuildKit `mode=max` provenance and SBOM attestations in GHCR. Deployment uses only
+the resulting immutable index digest; a convenience tag is never an approval.
+A pushed digest is still an unaccepted candidate until its acceptance step passes.
+The build reuses the existing pinned Gemini/telemetry base, omits embedded MiniLM
+and model dependencies, and records runtime/source/bundle labels and inventory.
+Existing base image and package lock limitations still apply: provenance records
+resolved inputs; it is not a claim of byte-reproducible rebuilds or a security scan.
+
+The new image sets `PAPER_AGENT_AWS_PRODUCTION=1` with serving-only/ui mode and
+scheduler/MiniLM/telemetry disabled. `PAPER_AGENT_DEFAULT_SOURCES` is an explicit
+operator input preserving production source selection. Gemini enablement remains
+an explicit integration flag; runtime acceptance uses no provider or production
+key. Only this AWS-selected path bypasses the synthetic-state requirement. It
+requires pre-existing DB/profile/topics/industry/summary files and approved schema,
+validates in read-only mode, and never initializes missing state or migrates it.
+The narrowly conditional shared-runtime changes do not alter Mini/nonproduction
+startup rules. Existing feedback UI writes remain supported after validation.
+
+`scripts/aws_image_acceptance.py` pulls the exact published digest, checks Linux
+AMD64/runtime/revision/bundle, and creates UUID-scoped synthetic Docker volumes.
+The temporary fixture is initialized only by the acceptance seed step, never by
+production startup. The container runs as UID10001 with no external network or
+published host ports. Acceptance checks Docker healthy/no OOM/restarts, `/ready`,
+`/health`, `/runtime`, UI pages, exact signed read-only probes, feedback persistence
+and restart over the same volumes, absence of embedded Torch and absence of a
+synthetic nonproduction marker. It also executes the deployment controller's
+read-only copied-state validator in the image. It deletes only its own UUID
+container/volumes; no pruning or live mount is used.
+
+On success `.aws-build-evidence/acceptance.json` retains digest, revision, bundle,
+checks and `production_approved=false` as a sanitized 14-day GitHub artifact. No
+fixture DB, HMAC value or customer data is uploaded. Review attached registry
+provenance/SBOM, exact artifact and compatibility/resource evidence before entering
+those three values in the separate protected deployment workflow. This image
+acceptance is synthetic and does not qualify actual production state, mount/secret
+identity, provider access, small-host capacity, write-fence enforcement or rollback.
+Those release gates remain unchanged. A canceled hosted job can leave ephemeral
+runner resources until runner disposal; production resources are never attached.
