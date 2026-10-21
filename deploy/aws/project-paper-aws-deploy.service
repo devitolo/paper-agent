@@ -1,0 +1,19 @@
+[Unit]
+Description=Project Paper guarded AWS deployment and recovery
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/local/sbin/project-paper-aws-deploy run
+ExecStopPost=/usr/local/sbin/project-paper-aws-deploy recover
+TimeoutStartSec=25min
+TimeoutStopSec=20min
+KillMode=control-group
+# Do not invent MemoryMax/CPU limits: dockerd is outside this service cgroup.
+# Enable at boot only after durable fence/recovery rehearsal is approved.
+
+[Install]
+WantedBy=multi-user.target
