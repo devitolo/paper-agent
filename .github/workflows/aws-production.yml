@@ -1,0 +1,84 @@
+name: AWS Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Approved GitHub-hosted build image (ghcr.io/devitolo/paper-agent@sha256 digest)
+        required: true
+        type: string
+      revision:
+        description: Approved image source commit (40 lowercase hex characters)
+        required: true
+        type: string
+      bundle:
+        description: Approved image source archive SHA256 (64 lowercase hex characters)
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: project-paper-aws-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    # Only the dedicated protected release branch may submit deployments.
+    if: github.ref == 'refs/heads/aws-production'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      image: ${{ steps.release.outputs.image }}
+      revision: ${{ steps.release.outputs.revision }}
+      bundle: ${{ steps.release.outputs.bundle }}
+    steps:
+      - name: Validate approved immutable release identity
+        id: release
+        env:
+          IMAGE: ${{ inputs.image }}
+          REVISION: ${{ inputs.revision }}
+          BUNDLE: ${{ inputs.bundle }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          [[ "$IMAGE" =~ ^ghcr\.io/devitolo/paper-agent@sha256:[0-9a-f]{64}$ ]] || { echo "Invalid immutable image" >&2; exit 64; }
+          [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid source revision" >&2; exit 64; }
+          [[ "$BUNDLE" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid source bundle" >&2; exit 64; }
+          printf 'image=%s\nrevision=%s\nbundle=%s\n' "$IMAGE" "$REVISION" "$BUNDLE" >> "$GITHUB_OUTPUT"
+          printf 'Approved image: `%s`\n\nSource: `%s`\n\nBundle: `%s`\n' "$IMAGE" "$REVISION" "$BUNDLE" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: validate
+    if: github.ref == 'refs/heads/aws-production'
+    environment: aws-production
+    runs-on: [self-hosted, linux, x64, project-paper-aws-deploy]
+    timeout-minutes: 35
+    permissions: {}
+    steps:
+      # No repository code or Docker access on the runner. The independently
+      # installed service verifies host approvals, resource limits and image labels.
+      - name: Submit approved release to host-owned service
+        env:
+          IMAGE: ${{ needs.validate.outputs.image }}
+          REVISION: ${{ needs.validate.outputs.revision }}
+          BUNDLE: ${{ needs.validate.outputs.bundle }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          sudo -n /usr/local/sbin/project-paper-aws-deploy submit "$IMAGE" "$REVISION" "$BUNDLE" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+      - name: Observe sanitized transaction status
+        env:
+          IMAGE: ${{ needs.validate.outputs.image }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          for attempt in {1..180}; do
+            result=0
+            sudo -n /usr/local/sbin/project-paper-aws-deploy status "$IMAGE" || result=$?
+            case "$result" in
+              0) exit 0 ;;
+              3) sleep 10 ;;
+              *) exit 1 ;;
+            esac
+          done
+          echo 'Observation timed out; the host service owns recovery. Inspect its transaction status.'
+          exit 1

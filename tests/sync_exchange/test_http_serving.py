@@ -59,6 +59,44 @@ class ServingHTTPTests(unittest.TestCase):
                 self.assertEqual(json.load(response)["revision"], "r")
             build.assert_called_once()
 
+    def test_signed_deploy_probes_never_export_or_apply(self):
+        before = self.db.read_bytes()
+        with patch.object(web, "build_input_snapshot", side_effect=AssertionError("snapshot mutation")), patch.object(web, "receive_result_batch", side_effect=AssertionError("result mutation")):
+            for path, method, body in (("/sync/input", "GET", None), ("/sync/pipeline-results", "POST", b"{}")):
+                with self.assertRaises(urllib.error.HTTPError) as failure:
+                    self.request(path, method, body, extra={"X-Paper-Sync-Probe":"1"})
+                self.assertEqual(failure.exception.code, 401)
+                failure.exception.close()
+                with self.request(path, method, body, signed=True, extra={"X-Paper-Sync-Probe":"1"}) as response:
+                    self.assertEqual(json.load(response), {"schema":1,"status":"ready","route":path,"read_only":True})
+        self.assertEqual(before, self.db.read_bytes())
+
+    def test_installed_controller_probe_runs_against_actual_http_handler(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('probe_controller',Path(__file__).resolve().parents[2]/'scripts/aws_deploy.py')
+        controller=importlib.util.module_from_spec(spec);spec.loader.exec_module(controller)
+        before=self.db.read_bytes()
+        with patch.object(web,"build_input_snapshot",side_effect=AssertionError("snapshot mutation")), patch.object(web,"receive_result_batch",side_effect=AssertionError("result mutation")):
+            code=controller.SYNC_HEALTH_PROBE.replace('http://127.0.0.1:8000',self.url)
+            exec(compile(code,'<container-health-probe>','exec'),{})
+        self.assertEqual(before,self.db.read_bytes())
+
+    def test_probe_addition_does_not_enable_a_new_results_writer(self):
+        before=self.db.read_bytes()
+        with patch.object(web,"receive_result_batch",side_effect=AssertionError("new writer enabled")):
+            with self.assertRaises(urllib.error.HTTPError) as failure:
+                self.request("/sync/pipeline-results","POST",b"{}",signed=True)
+            self.assertEqual(failure.exception.code,404)
+            failure.exception.close()
+        self.assertEqual(before,self.db.read_bytes())
+
+    def test_pipeline_probe_rejects_nonempty_payload(self):
+        with patch.object(web, "receive_result_batch", side_effect=AssertionError("result mutation")):
+            with self.assertRaises(urllib.error.HTTPError) as failure:
+                self.request("/sync/pipeline-results", "POST", b'{"results":[]}', signed=True, extra={"X-Paper-Sync-Probe":"1"})
+            self.assertEqual(failure.exception.code, 400)
+            failure.exception.close()
+
     def test_model_routes_disabled_and_ready_is_model_independent(self):
         with patch.object(web, "manual_scout_snapshot", side_effect=AssertionError("model invoked")):
             with self.request("/ready") as response:
