@@ -63,11 +63,11 @@ TOPIC_ALLOWANCE_MARKER = '-- Versioned Topic Agent allowance state; part of the 
 TOPIC_ALLOWANCE_SQL = TRUSTED_SCHEMA.read_text().split(TOPIC_ALLOWANCE_MARKER, 1)[1].split('-- Cloud/isolated-worker exchange;', 1)[0]
 
 
-def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False, include_sync=True):
+def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False, include_sync=True, include_topic_allowance=True):
     from .db import migrate_structured_feedback_score_to_real, migrate_summary_field_quality_signals_to_three_state
     if include_sync and SYNC_SCHEMA_MARKER not in sql:
         sql += '\n' + SYNC_SCHEMA_SQL
-    if 'topic_agent_allowance' not in sql:
+    if include_topic_allowance and 'topic_agent_allowance' not in sql:
         sync_boundary = '\n-- Cloud/isolated-worker exchange;'
         if sync_boundary in sql:
             sql = sql.replace(sync_boundary, TOPIC_ALLOWANCE_SQL + sync_boundary, 1)
@@ -166,6 +166,13 @@ def pre_sync_schemas():
     sql = TRUSTED_SCHEMA.read_text().split(SYNC_SCHEMA_MARKER, 1)[0]
     return _schema_variants(sql, include_sync=False)
 
+def pre_topic_allowance_schemas():
+    """Accepted Mini schema before the additive Topic Agent allowance table."""
+    trusted = TRUSTED_SCHEMA.read_text()
+    boundary = '\n-- Cloud/isolated-worker exchange;'
+    sql = trusted.split(TOPIC_ALLOWANCE_MARKER, 1)[0] + boundary + trusted.split(boundary, 1)[1]
+    return _schema_variants(sql, include_topic_allowance=False)
+
 
 def pre_three_state_summary_signal_schemas():
     """Accepted production schema before three-state section feedback signals."""
@@ -203,6 +210,8 @@ def apply_approved_post_import_schema_deltas(root):
             delta_sql = ARXIV_PROGRESS_SCHEMA_SQL
         elif actual_schema in pre_summary_quality_signals_schemas():
             delta_sql = SUMMARY_QUALITY_SIGNALS_SCHEMA_SQL
+        elif actual_schema in pre_topic_allowance_schemas():
+            delta_sql = TOPIC_ALLOWANCE_SQL
         elif actual_schema in pre_sync_schemas():
             delta_sql = SYNC_SCHEMA_SQL
         elif actual_schema in pre_semantic_progress_schemas():
@@ -390,8 +399,10 @@ def initialize(root, manifest_path):
             # Legitimate application writes and approved post-import schema deltas need not match
             # the original snapshot once the manifest-bound receipt exists.
         else:
-            legacy_sync_schema = approved['schema_sha256'] in {digest(value) for value in pre_sync_schemas()}
-            if legacy_sync_schema:
+            legacy_schema = approved['schema_sha256'] in {
+                digest(value) for values in (pre_sync_schemas(), pre_topic_allowance_schemas()) for value in values
+            }
+            if legacy_schema:
                 require(current['files'] == approved['files'], 'Imported state differs from manifest')
                 require(all(current['tables'].get(name) == value for name, value in approved['tables'].items()),
                         'Imported state differs from manifest')
