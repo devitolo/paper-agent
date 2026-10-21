@@ -85,7 +85,20 @@ longer the active Project Paper web/model supervisor on the Mini.
 
 The Python workflow owns orchestration between deterministic steps and model-backed judgment steps. It should remain explicit and debuggable before any larger agent framework is considered. A future Go port is plausible, but should wait until workflow and schema boundaries stabilize; preserve SQLite compatibility first, then phase the port through web UI/server, operational CLI/runbooks, scheduled orchestration, and source adapters/agent logic where useful.
 
-The production Curator uses two local models with separate responsibilities. MiniLM ranks topical interest from titles and abstracts. Qwen3 4B assesses research type and evidence quality before recommendations are selected; its structured assessment actively adjusts Curator scoring. Qwen 2.5 1.5B remains the extraction model for the Problem, Why it matters, and Approach fields. If the Qwen3 assessment is unavailable or invalid, Curator retains its deterministic score so provider or model failure cannot demote a paper.
+The production Curator uses three local inference responsibilities. A standalone,
+internal MiniLM service ranks topical interest from titles and abstracts; the app
+calls it over a private Docker network and does not carry the MiniLM model or
+inference runtime. The service uses the pinned
+`cross-encoder/ms-marco-MiniLM-L6-v2` revision
+`233902d25c440f23af6f7d6e94d2946bac0bee0a` with the existing tokenizer and
+ONNX runtime settings. Qwen3 4B assesses research type and evidence quality
+before recommendations are selected; its structured assessment actively adjusts
+Curator scoring. Qwen 2.5 1.5B remains the extraction model for the Problem,
+Why it matters, and Approach fields. If Qwen3 is unavailable or invalid,
+Curator retains its deterministic score. If the MiniLM HTTP service is
+unavailable, Curator records unavailable interest fit with no fabricated score
+and continues its remaining evaluation; it does not silently switch back to an
+embedded scorer.
 
 Scheduled production jobs share one nonblocking job lease. If a source, profile, or backup job starts while another job owns the lease, the new job exits successfully without running and appends a `skipped_busy` event to the persistent job event log. Health displays recent job events and warns when the latest event for a job is an overlap skip.
 

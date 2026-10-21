@@ -13,6 +13,11 @@ def packaged() -> bool:
     return os.environ.get("PAPER_AGENT_PACKAGED", "0") == "1"
 
 
+def serving_only() -> bool:
+    """Explicit model-free review UI; production defaults remain unchanged."""
+    return os.environ.get("PAPER_AGENT_SERVING_ONLY", "0") == "1"
+
+
 def default_sources() -> list[str]:
     settings = migration_settings()
     if settings is not None:
@@ -31,8 +36,18 @@ def gemini_enabled() -> bool:
 def migration_settings() -> dict | None:
     """Explicit opt-in parity settings; never infer native configuration."""
     mode = os.environ.get("PAPER_AGENT_STARTUP_MODE", "fresh")
-    if mode not in {"fresh", "imported"}:
+    if mode not in {"fresh", "imported", "serving", "serving-snapshot"}:
         raise ValueError("Invalid PAPER_AGENT_STARTUP_MODE")
+    if mode in {"serving", "serving-snapshot"}:
+        if not packaged() or not serving_only() or os.environ.get("PAPER_NON_PRODUCTION") != "1":
+            raise ValueError("Serving bootstrap requires explicit packaged non-production mode")
+        for flag in ("PAPER_AGENT_SCHEDULER_ENABLED", "PAPER_AGENT_GEMINI_ENABLED",
+                     "PAPER_AGENT_TELEMETRY", "PAPER_AGENT_MINILM_ENABLED"):
+            if os.environ.get(flag) != "0":
+                raise ValueError("Synthetic serving bootstrap requires disabled " + flag)
+        if os.environ.get("PAPER_AGENT_SYNC_SHARED_SECRET"):
+            raise ValueError("Synthetic bootstrap forbids sync credentials")
+        return None
     if mode == "fresh":
         return None
     if not packaged():

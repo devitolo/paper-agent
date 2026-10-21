@@ -85,6 +85,29 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.projectpaper.runtime="mini-production"
 USER paper
 
+# Explicit standalone-MiniLM app target. Legacy embedded target above is unchanged.
+FROM migration-gemini AS mini-production-http
+USER root
+ARG BUILD_DATE=unknown
+ARG PYTHON_BASE_IMAGE
+ARG SOURCE_BUNDLE_SHA256=
+ARG VCS_REF=unknown
+ARG VERSION=dev
+COPY LICENSE NOTICE ./
+COPY paper_agents ./paper_agents
+COPY scripts ./scripts
+COPY sql ./sql
+COPY deploy/templates ./paper_agents/package_templates
+COPY deploy/mini-nonprod/compose.ingress.yml ./deploy/mini-nonprod/compose.ingress.yml
+RUN python scripts/image_runtime_inventory.py "${PYTHON_BASE_IMAGE}" /app/image-runtime-inputs.json "${SOURCE_BUNDLE_SHA256}" "${VCS_REF}"
+ENV PAPER_AGENT_MINILM_BACKEND=http
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.projectpaper.source-bundle-sha256="${SOURCE_BUNDLE_SHA256}" \
+      org.projectpaper.runtime="mini-production-http"
+USER paper
+
 FROM base AS runtime
 USER root
 ARG BUILD_DATE=unknown

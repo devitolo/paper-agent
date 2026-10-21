@@ -1,0 +1,90 @@
+name: Mini Standalone MiniLM Release
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'mini-minilm-release-*'
+permissions:
+  contents: read
+concurrency:
+  group: mini-minilm-release
+  cancel-in-progress: false
+jobs:
+  build-publish:
+    if: github.repository == 'devitolo/paper-agent' && (github.event_name == 'push' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PYTHON_BASE: docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d
+      NODE_BASE: docker.io/library/node@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify exact release source and tests
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            test "$GITHUB_REF" = refs/heads/main
+          else
+            test "$GITHUB_REF_NAME" = "mini-minilm-release-$GITHUB_SHA"
+          fi
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m unittest discover -s tests/minilm_service -v
+          PYTHONPATH=tests python3 -W ignore::ResourceWarning -m unittest test_curator_interest test_curator_v2 test_curator_v3 test_minilm_eval test_minilm_shadow test_mini_release_pipeline test_package_runtime -q
+          git diff --check
+      - name: Record source bundle
+        id: source
+        run: echo "bundle=$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish AMD64 HTTP app
+        id: app
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          target: mini-production-http
+          platforms: linux/amd64
+          provenance: false
+          push: true
+          tags: ghcr.io/devitolo/paper-agent:mini-http-${{ github.sha }}
+          build-args: |
+            PYTHON_BASE_IMAGE=${{ env.PYTHON_BASE }}
+            NODE_BASE_IMAGE=${{ env.NODE_BASE }}
+            VCS_REF=${{ github.sha }}
+            VERSION=mini-http-${{ github.sha }}
+            SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.bundle }}
+      - name: Publish AMD64 MiniLM service
+        id: service
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          file: deploy/minilm/Dockerfile
+          platforms: linux/amd64
+          provenance: false
+          push: true
+          tags: ghcr.io/devitolo/paper-agent-minilm:mini-http-${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/devitolo/paper-agent
+          build-args: |
+            MINILM_BASE_IMAGE=${{ env.PYTHON_BASE }}
+            VCS_REF=${{ github.sha }}
+            SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.bundle }}
+      - name: Qualify exact published images and emit release evidence
+        env:
+          APP_IMAGE: ghcr.io/devitolo/paper-agent@${{ steps.app.outputs.digest }}
+          SERVICE_IMAGE: ghcr.io/devitolo/paper-agent-minilm@${{ steps.service.outputs.digest }}
+          SOURCE_BUNDLE: ${{ steps.source.outputs.bundle }}
+        run: python3 scripts/qualify_minilm_release.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mini-minilm-release-${{ github.sha }}
+          path: release-evidence.json
+          if-no-files-found: error
+          retention-days: 30

@@ -81,6 +81,19 @@ class MiniLMScorer:
         return max(self.score_pair(title, abstract, interest) for interest in INTERESTS)
 
 
+def default_eval_scorer():
+    """Keep legacy eval/shadow raw-pair preparation and fixed-interest max."""
+    backend = os.environ.get("PAPER_AGENT_MINILM_BACKEND", "embedded")
+    if backend == "embedded":
+        return MiniLMScorer()
+    if backend != "http":
+        raise ValueError("MiniLM backend must be embedded or http")
+    from .minilm_http import HTTPMiniLMScorer
+    client = HTTPMiniLMScorer(os.environ.get("PAPER_AGENT_MINILM_URL", ""),
+                            float(os.environ.get("PAPER_AGENT_MINILM_TIMEOUT", "10")), raw_pairs=True)
+    return lambda title, abstract: max(client.score_pair(title, abstract, interest) for interest in INTERESTS)
+
+
 def file_sha256(path: Path) -> str:
     sha = hashlib.sha256()
     try:
@@ -116,7 +129,7 @@ def create_minilm_eval(
             raise ValueError("Scout run is missing or incomplete")
         candidates = load_eval_candidates(connection, source_run_id, db_path)
 
-    scorer = scorer or MiniLMScorer()
+    scorer = scorer or default_eval_scorer()
     scored = []
     for candidate in candidates:
         score = None

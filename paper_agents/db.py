@@ -28,6 +28,11 @@ WORKFLOW_STATES = {
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH, schema_path: Path = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
+    from paper_agents.runtime_config import serving_only
+    if serving_only():
+        from paper_agents.mini_nonprod_state import validate
+        state = validate(db_path.absolute().parent.parent, full=False)
+        return {"db_path": str(db_path), "schema_path": str(schema_path), "tables": state["tables"]}
     if not schema_path.exists():
         raise RuntimeError(f"Schema file does not exist: {schema_path}")
 
