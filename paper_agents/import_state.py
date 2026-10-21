@@ -382,9 +382,15 @@ def initialize(root, manifest_path):
             # Legitimate application writes and approved post-import schema deltas need not match
             # the original snapshot once the manifest-bound receipt exists.
         else:
-            require(current['schema_sha256'] == approved['schema_sha256'], 'Import schema differs from manifest')
-            require(current == {k:approved[k] for k in ('files','schema_sha256','tables')},
-                    'Imported state differs from manifest')
+            legacy_sync_schema = approved['schema_sha256'] in {digest(value) for value in pre_sync_schemas()}
+            if legacy_sync_schema:
+                require(current['files'] == approved['files'], 'Imported state differs from manifest')
+                require(all(current['tables'].get(name) == value for name, value in approved['tables'].items()),
+                        'Imported state differs from manifest')
+            else:
+                require(current['schema_sha256'] == approved['schema_sha256'], 'Import schema differs from manifest')
+                require(current == {k:approved[k] for k in ('files','schema_sha256','tables')},
+                        'Imported state differs from manifest')
 
     exists = os.path.lexists(temporary)
     if exists:

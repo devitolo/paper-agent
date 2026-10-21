@@ -9,7 +9,7 @@ class SyncSchemaMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); (root / 'data').mkdir(); (root / 'config').mkdir()
             (root / 'data/profile.json').write_text('{"interests":[],"positive_signals":[],"negative_signals":[],"feedback_history":[]}')
-            (root / 'config/topics.yaml').write_text('topics: []\n')
+            (root / 'config/topics.yaml').write_text('topics:\n  - id: test\n    label: Test\n    query: test\n    sources: [arxiv]\n')
             baseline = Path('sql/schema.sql').read_text().split(import_state.SYNC_SCHEMA_MARKER, 1)[0]
             with sqlite3.connect(root / 'data/paper_agent.db') as connection:
                 connection.executescript(baseline)
