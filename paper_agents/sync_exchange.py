@@ -171,6 +171,8 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
     if producer!=allowed or environment!=expected or type(seq)!=int or seq<1:raise ValueError('producer/environment/sequence rejected')
     results=payload.get('results')
     if not isinstance(results,list) or len(results)>100:raise ValueError('results must be bounded recommendations')
+    delta=payload.get('pipeline_delta',{})
+    if not isinstance(delta,dict) or any(k not in {'workflow_cycles','scout_runs','curator_runs','curator_evaluations','recommendations','artifacts'} for k in delta):raise ValueError('invalid pipeline delta')
     root=Path(root);content_hash=_digest(body)
     with connect_db(db_path) as c:
         _setup(c);c.commit();c.execute('BEGIN IMMEDIATE')
@@ -182,7 +184,7 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
         last=c.execute('SELECT sequence FROM sync_producers WHERE producer=? AND environment=?',(producer,environment)).fetchone()
         if last and seq<=last[0]:raise ValueError('stale result sequence')
         c.execute('INSERT INTO sync_result_batches(batch_key,input_revision,payload_hash,payload_json,status) VALUES(?,?,?,?,?)',(key,payload['input_revision'],content_hash,body.decode(),'received'))
-        cycle=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','sync',?)",(encoded({'batch_key':key,'input_revision':payload['input_revision'],'producer_id':producer,'run_sequence':seq}).decode(),)).lastrowid
+        cycle=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','sync',?)",(encoded({'batch_key':key,'input_revision':payload['input_revision'],'producer_id':producer,'run_sequence':seq,'pipeline_delta_counts':{k:len(v) for k,v in delta.items()}}).decode(),)).lastrowid
         run=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycle,encoded({'imported':True}).decode())).lastrowid
         seen=set()
         for index,item in enumerate(results):
