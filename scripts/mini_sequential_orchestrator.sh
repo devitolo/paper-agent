@@ -33,7 +33,13 @@ run_hook() {
   fi
   printf '[%s] completed %s\n' "$(date -u +%FT%TZ)" "$name" | tee -a "$log_file"
 }
-if ! run_hook sync_snapshot "${PAPER_AGENT_SYNC_PRE_RUN_COMMAND:-}"; then exit 1; fi
+pre_sync_command="${PAPER_AGENT_SYNC_PRE_RUN_COMMAND:-}"
+post_sync_command="${PAPER_AGENT_SYNC_POST_RUN_COMMAND:-}"
+if [[ "${PAPER_AGENT_SYNC_ENABLED:-0}" == 1 ]]; then
+  pre_sync_command="${pre_sync_command:-$repo/scripts/mini_sync_exchange.sh pull}"
+  post_sync_command="${post_sync_command:-$repo/scripts/mini_sync_exchange.sh push}"
+fi
+if ! run_hook sync_snapshot "$pre_sync_command"; then exit 1; fi
 run_stage() {
   local stage="$1"
   write_status "$stage" running
@@ -50,5 +56,5 @@ run_stage() {
 for stage in openalex arxiv semantic core profile; do
   if ! run_stage "$stage"; then exit 1; fi
 done
-if ! run_hook sync_pipeline_results "${PAPER_AGENT_SYNC_POST_RUN_COMMAND:-}"; then exit 1; fi
+if ! run_hook sync_pipeline_results "$post_sync_command"; then exit 1; fi
 write_status complete completed
