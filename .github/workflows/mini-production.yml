@@ -31,7 +31,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
@@ -65,7 +65,7 @@ jobs:
       source_bundle_sha256: ${{ steps.source.outputs.source_bundle_sha256 }}
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Compute source bundle hash
         id: source
@@ -74,10 +74,10 @@ jobs:
           git archive --format=tar HEAD | sha256sum | awk '{ print "source_bundle_sha256=" $1 }' >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -85,7 +85,7 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -94,7 +94,7 @@ jobs:
 
       - name: Build and publish amd64 Mini production image
         id: build
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
           context: .
           target: ${{ env.MINI_TARGET }}
@@ -128,7 +128,7 @@ jobs:
   deploy:
     name: Deploy to Mini
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/mini-production'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/mini-production') || github.event_name == 'workflow_dispatch'
     runs-on:
       - self-hosted
       - project-paper-mini
@@ -142,7 +142,7 @@ jobs:
       name: mini-production
     steps:
       - name: Checkout trusted deployment branch
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -156,7 +156,7 @@ jobs:
           docker compose version
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -171,4 +171,5 @@ jobs:
           PAPER_MINI_ARXIV_PROGRESS: "1"
           PAPER_MINI_OPENALEX_CURSOR: "1"
           PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS: "1"
+          PAPER_MINI_CORE_SOURCE: "1"
         run: bash scripts/mini_production_update.sh

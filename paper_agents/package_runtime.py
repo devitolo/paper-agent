@@ -23,6 +23,11 @@ def initialize(root: Path = Path("."), templates: Path = TEMPLATES) -> None:
     """Seed missing files only; reject broken existing state without reseeding."""
     from paper_agents.runtime_config import migration_settings
     settings = migration_settings()
+    from paper_agents.runtime_config import aws_production_serving
+    if aws_production_serving():
+        from paper_agents.aws_serving import validate
+        validate(root)
+        return
     if os.environ.get("PAPER_AGENT_STARTUP_MODE") in {"serving", "serving-snapshot"}:
         from paper_agents.mini_nonprod_state import validate
         validate(root)

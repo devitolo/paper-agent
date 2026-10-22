@@ -16,6 +16,7 @@ def create(destination, repo=None):
         raise ValueError('new unaliased destination required')
     destination.mkdir(mode=0o700)
     (destination / 'data').mkdir()
+    (destination / 'data/extractions').mkdir()
     (destination / 'config').mkdir()
     db = sqlite3.connect(destination / 'data/paper_agent.db')
     try:
@@ -24,11 +25,27 @@ def create(destination, repo=None):
             db.row_factory = None
             db.execute("INSERT INTO papers(canonical_key,title) VALUES (?,?)",
                        ('mini-nonprod-synthetic', 'SYNTHETIC Mini non-production example'))
+            db.execute("INSERT INTO paper_sources(paper_id,source,source_id,url,metadata_json) VALUES (1,'synthetic','mini-nonprod-synthetic','https://example.invalid/mini-nonprod',?)",
+                       (json.dumps({'original_title': 'SYNTHETIC Mini non-production example'}),))
+            db.execute("INSERT INTO workflow_cycles(id,state,mode,metadata_json) VALUES (1,'recommendations_ready','synthetic',?)",
+                       (json.dumps({'environment': 'mini-nonprod'}),))
+            db.execute("INSERT INTO curator_runs(id,workflow_cycle_id,model,metadata_json) VALUES (1,1,'synthetic',?)",
+                       (json.dumps({'environment': 'mini-nonprod'}),))
+            db.execute("INSERT INTO curator_evaluations(curator_run_id,paper_id,score,rationale,matched_signals_json,quality_threshold_met) VALUES (1,1,92,'Synthetic fixture recommendation',?,1)",
+                       (json.dumps(['synthetic']),))
+            db.execute("INSERT INTO recommendations(id,curator_run_id,paper_id,recommendation_order,rationale) VALUES (1,1,1,1,'Synthetic fixture recommendation')")
+            db.execute("INSERT INTO artifacts(paper_id,artifact_type,path,model,metadata_json) VALUES (1,'triage_summary','data/extractions/mini-nonprod.json','synthetic',?)",
+                       (json.dumps({'environment': 'mini-nonprod'}),))
             db.execute("INSERT INTO feedback(paper_id,status,notes) VALUES (1,'keep','Synthetic fixture')")
         assert db.execute('PRAGMA integrity_check').fetchall() == [('ok',)]
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
     finally:
         db.close()
+    (destination / 'data/extractions/mini-nonprod.json').write_text(json.dumps({
+        'summary': 'Synthetic non-production paper for UI and lifecycle verification.',
+        'why_it_matters': 'Confirms the isolated review queue has visible fixture content.',
+        'approach': 'Generated locally without production or external service access.'
+    }) + '\n')
     (destination / 'data/profile.json').write_text(json.dumps(dict(
         interests=[], positive_signals=[], negative_signals=[], feedback_history=[])))
     (destination / 'config/topics.yaml').write_text('topics: []\n')

@@ -23,13 +23,18 @@ class LegacySchemaTests(unittest.TestCase):
             con=sqlite3.connect(path); con.execute('CREATE TABLE unexpected(value TEXT)'); con.close()
             with self.assertRaisesRegex(RuntimeError,'schema incompatible'): import_state.manifest(root)
 
-    def test_only_known_table_rendering_differs(self):
+    def test_schema_rendering_differences_are_normalized(self):
         fresh=import_state.trusted_schemas()[0]
         matching=[]
         for legacy in import_state.trusted_schemas()[1:]:
             differences=[(a,b) for a,b in zip(fresh,legacy) if a!=b]
             if len(fresh)==len(legacy) and len(differences)==1:
                 matching.append(differences[0][0][:3])
-        self.assertIn(('table','structured_feedback','structured_feedback'), matching)
+        self.assertEqual(matching, [])
+
+    def test_whole_cycle_schema_is_an_approved_additive_delta(self):
+        current = import_state.pre_whole_cycle_schemas()[0]
+        self.assertNotIn(('table', 'sync_input_row_map', 'sync_input_row_map', None), current)
+        self.assertTrue(import_state.WHOLE_CYCLE_SCHEMA_SQL.strip())
 
 if __name__=='__main__': unittest.main()

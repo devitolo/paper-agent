@@ -99,6 +99,7 @@ def suggest_topic_proposal(
     *,
     conversation: list[dict[str, str]] | None = None,
     provider: TopicProvider | None = None,
+    provider_name: str | None = None,
     model: str | None = None,
     ollama_url: str | None = None,
     timeout: int | None = None,
@@ -114,10 +115,13 @@ def suggest_topic_proposal(
     selected_url = ollama_url or topic_ollama_url()
     selected_timeout = timeout or topic_timeout_seconds()
     topic_provider = provider or call_ollama_topic_json
+    # Keep the historical default for existing callers; remote integrations
+    # must pass an explicit provider_name so attribution remains truthful.
+    selected_provider = provider_name or "ollama"
     prompt = build_topic_prompt(user_request, existing_topics, conversation=conversation)
     try:
         raw = topic_provider(selected_url, selected_model, prompt, selected_timeout)
-        proposal = validate_topic_proposal(raw, existing_topics, provider="ollama", model=selected_model)
+        proposal = validate_topic_proposal(raw, existing_topics, provider=selected_provider, model=selected_model)
         return redirect_duplicate_create_to_update(proposal, existing_topics)
     except Exception as error:
         return fallback_topic_proposal(user_request, existing_topics, model=selected_model, error=error)

@@ -3026,6 +3026,25 @@ class BackendV2Tests(unittest.TestCase):
         self.assertEqual(proposal.provider, "ollama")
         self.assertEqual(proposal.model, "test-qwen")
 
+    def test_topic_agent_explicit_provider_name_is_preserved(self):
+        proposal = suggest_topic_proposal(
+            "datalake reliability",
+            [],
+            provider=lambda *_: {
+                "action": "create_new",
+                "label": "Datalake reliability",
+                "query": "datalake reliability observability production engineering",
+                "sources": ["arxiv"],
+                "cadence": "daily",
+                "priority": "normal",
+                "enabled": True,
+            },
+            provider_name="gemini",
+            model="gemini-3.1-flash-lite",
+        )
+        self.assertEqual(proposal.provider, "gemini")
+        self.assertEqual(proposal.model, "gemini-3.1-flash-lite")
+
     def test_topic_agent_prompt_includes_conversation_turns(self):
         def provider(url, model, prompt, timeout):
             self.assertIn("data lake or lakehouse", prompt)
