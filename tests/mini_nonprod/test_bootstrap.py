@@ -46,6 +46,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(c['name'],'paper-mini-nonprod')
         self.assertEqual(set(c['services']),{'app'})
         self.assertEqual(a['ports'],['127.0.0.1:18080:8000'])
+        self.assertEqual(a['expose'],['8000'])
         self.assertEqual(e['PAPER_AGENT_LIFECYCLE_DIR'],'/runtime-control')
         self.assertIn('control:/runtime-control',a['volumes'])
         self.assertEqual(e['PAPER_AGENT_SCHEDULER_ENABLED'],'0')
