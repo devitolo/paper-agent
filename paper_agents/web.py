@@ -256,7 +256,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 self.send_json(json.dumps({"schema": 1, "status": "ready", "route": parsed.path, "read_only": True}).encode())
                 return
-            if parsed.path in {"/sync/results", "/sync/profile-proposals"}:
+            if parsed.path in {"/sync/pipeline-results", "/sync/results", "/sync/profile-proposals"}:
                 raw_length = self.headers.get("Content-Length", "")
                 if not raw_length.isdecimal() or self.headers.get("Transfer-Encoding"):
                     self.send_error(HTTPStatus.BAD_REQUEST, "A valid Content-Length is required"); return

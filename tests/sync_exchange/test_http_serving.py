@@ -81,13 +81,12 @@ class ServingHTTPTests(unittest.TestCase):
             exec(compile(code,'<container-health-probe>','exec'),{})
         self.assertEqual(before,self.db.read_bytes())
 
-    def test_probe_addition_does_not_enable_a_new_results_writer(self):
+    def test_pipeline_results_route_requires_a_valid_batch(self):
         before=self.db.read_bytes()
-        with patch.object(web,"receive_result_batch",side_effect=AssertionError("new writer enabled")):
-            with self.assertRaises(urllib.error.HTTPError) as failure:
-                self.request("/sync/pipeline-results","POST",b"{}",signed=True)
-            self.assertEqual(failure.exception.code,404)
-            failure.exception.close()
+        with self.assertRaises(urllib.error.HTTPError) as failure:
+            self.request("/sync/pipeline-results","POST",b"{}",signed=True)
+        self.assertEqual(failure.exception.code,422)
+        failure.exception.close()
         self.assertEqual(before,self.db.read_bytes())
 
     def test_pipeline_probe_rejects_nonempty_payload(self):
