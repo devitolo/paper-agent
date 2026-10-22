@@ -84,7 +84,11 @@ jobs:
             -e PAPER_AGENT_PACKAGED=1 -e PAPER_AGENT_SERVING_ONLY=1 \
             -e PAPER_AGENT_STARTUP_MODE=serving -e PAPER_NON_PRODUCTION=1 \
             -e PAPER_AGENT_SCHEDULER_ENABLED=0 -e PAPER_AGENT_LIFECYCLE_DIR=/app/control \
-            -v "$RUNNER_TEMP/mini-nonprod-fixture:/app:ro" \
+            -v "$RUNNER_TEMP/mini-nonprod-fixture/data:/app/data:ro" \
+            -v "$RUNNER_TEMP/mini-nonprod-fixture/config:/app/config:ro" \
+            -v "$RUNNER_TEMP/mini-nonprod-fixture/control:/app/control:ro" \
+            -v "$RUNNER_TEMP/mini-nonprod-fixture/generated:/app/generated:ro" \
+            -v "$RUNNER_TEMP/mini-nonprod-fixture/logs:/app/logs:ro" \
             "$image" check-state
           echo "image=$image" >> "$GITHUB_OUTPUT"
           {
