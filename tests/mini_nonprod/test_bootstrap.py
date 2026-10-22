@@ -36,6 +36,9 @@ class BootstrapTests(unittest.TestCase):
             with sqlite3.connect(root/'data/paper_agent.db') as db:
                 self.assertEqual(db.execute('SELECT notes FROM feedback').fetchone()[0],
                                  'persistent synthetic feedback')
+                self.assertEqual(db.execute('SELECT count(*) FROM recommendations').fetchone()[0], 1)
+            from paper_agents import web
+            self.assertIn('SYNTHETIC Mini non-production example', web.render_review_queue(root/'data/paper_agent.db'))
             with self.assertRaises(ValueError): fixture.create(root)
 
     def test_compose_has_all_runtime_mounts_and_no_shared_services(self):
