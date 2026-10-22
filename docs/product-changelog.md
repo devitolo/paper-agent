@@ -4,15 +4,34 @@ Durable product and process decisions for Project Paper. Keep entries chronologi
 
 ## 2026-10-20
 
+### Consolidated Mini and AWS release roles
+
+Status: Completed and consolidated into `main` at `f082112`.
+
+- Mini production now runs the pipeline-only app role with staggered host cron;
+  AWS serves the UI and receives source-by-source pipeline results.
+- Mini non-production is isolated with copied production content and a visible
+  `MINI NON-PROD -- DATA COPY` label; scheduling, sync, Gemini, telemetry, and
+  MiniLM remain disabled there.
+- Release branches are `mini-production`, `mini-nonprod`, `aws-production`, and
+  `release/0.1.x`; temporary development branches are not deployment lines.
+- The exchange client now uses `/sync/backup`, schema compatibility is
+  normalized with useful mismatch details, and the authenticated AWS results
+  route has passed synthetic exchange validation.
+- Earlier MiniLM service qualification work removed during final cleanup is
+  historical and not a current production requirement.
+
 ### Standalone MiniLM production service
 
-Status: Released from `main` commit
+Status: Historical qualification record. The design was released from `main` commit
 `5970bcdbb6bde52c852df57fc32b41fd92a1a4cf`; main release workflow
 `39507617042` completed and the Mini production cutover was verified.
 
-Decision: Move active Curator MiniLM interest fit from the app image into a
-private, standalone service while preserving exact scoring behavior and keeping
-production data ownership unchanged.
+Decision at the time: move active Curator MiniLM interest fit from the app image
+into a private, standalone service while preserving exact scoring behavior and
+keeping production data ownership unchanged. Final branch cleanup removed this
+shared-service qualification from the current deployment; it remains deferred,
+not an active production dependency.
 
 Completed behavior:
 

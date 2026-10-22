@@ -1,5 +1,18 @@
 # AWS production release candidate
 
+## Current consolidated state
+
+The AWS serving work is now represented on the consolidated `main` line and
+the preserved `aws-production` deployment rail. The authenticated
+`/sync/pipeline-results` route has passed synthetic Mini-to-AWS exchange
+validation, including current-input revision checks, batch application, and
+receipt creation. The serving UI is tailnet-only at
+`https://paper-prod.tail5fc461.ts.net`. This runbook's earlier candidate prose
+below is retained as the detailed protection and host-contract checklist; it is
+not a claim that every host-install rehearsal step is active. The controller/
+orchestration path remains paused and the inert host-install rehearsal is
+deferred.
+
 This production-only review series starts from main commit
 `2f84763ce94dd762cd691b20f6cf894e4a84f9be`. It does not import the divergent AWS
 preparation branch. It does not create the proposed `aws-production` release

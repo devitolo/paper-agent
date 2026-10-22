@@ -23,15 +23,15 @@ restoring a stale DB or rewriting cron. AWS and sync are outside this operation.
 The snapshot and HTTP examples below describe the earlier combined UI/pipeline
 runtime. They remain applicable only when explicitly rolling back to that role.
 
-This runbook records the production state established on 2026-09-24. It is for
-the Project Paper Mini operator, not the public first-user package.
+This runbook records the current production role split and staggered schedule.
+It is for the Project Paper Mini operator, not the public first-user package.
 
 ## Current runtime
 
 | Component | Production state |
 |---|---|
-| App | `paper-mini-production-app-1`, `ghcr.io/devitolo/paper-agent@sha256:bbbe83615264947497b9dea0a5099e1c98cec07710c3fb083dc64347134d6204`, healthy, published as `127.0.0.1:8000->8000/tcp` |
-| MiniLM | `paper-minilm-production-minilm-1`, `ghcr.io/devitolo/paper-agent-minilm@sha256:6015647271e23c9e667c8f7c50440d2330a36ef780578990b4c4f932fd08ff1b`, healthy, private internal API only |
+| App | `paper-mini-production-app-1`, pipeline-only role, no web listener or published port |
+| MiniLM | No separate shared MiniLM service is part of the current production deployment; HTTP service qualification is deferred |
 | Ollama | `paper-mini-production-ollama-1`, image `sha256:0ab10b9b9dc5f50d30dc61aec25e3316822ca22cf0f27d4e98d74cc7dedd7c80`, running |
 | Web systemd unit | Native `project-paper-web.service` inactive |
 | Ollama systemd unit | Native `ollama.service` inactive |
@@ -49,14 +49,14 @@ Use the live host crontab as the schedule source of truth during the soak:
 crontab -l
 ```
 
-Confirm the app, standalone MiniLM service, and Ollama containers, plus loopback
-publication:
+Confirm the pipeline app and Ollama containers. A separate MiniLM service is not
+part of the current production deployment:
 
 ```sh
 docker ps --filter name=paper-mini-production
 docker inspect --format '{{.Name}} {{.Image}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' \
-  paper-mini-production-app-1 paper-minilm-production-minilm-1 paper-mini-production-ollama-1
-curl --fail --silent --show-error http://127.0.0.1:8000/ >/dev/null
+  paper-mini-production-app-1 paper-mini-production-ollama-1
+python3 -m paper_agents.package_runtime check-pipeline
 ```
 
 Check that the native services remain inactive rather than starting a second
@@ -77,12 +77,12 @@ calls one of these launcher jobs:
 
 | Job | Launcher argument | Schedule |
 |---|---|---|
+| CORE pipeline | `core` | daily 03:00 |
 | OpenAlex pipeline | `openalex` | daily 04:00 |
 | arXiv pipeline | `arxiv` | daily 05:00 |
 | Semantic Scholar pipeline | `semantic` | daily 06:00 |
-| CORE pipeline | `core` | daily trial source run; see live crontab |
+| Profile rebuild | `profile` | Monday 02:00 |
 | ZenML industry discovery | `zenml` | Sunday 23:30 America/Los_Angeles |
-| Gemini profile comparison | `profile` | biweekly cadence checked by the Monday 02:00 wrapper; dry-run only |
 | SQLite backup | `backup` | Sunday 01:00 |
 
 The launcher executes the corresponding wrapper inside the app container and

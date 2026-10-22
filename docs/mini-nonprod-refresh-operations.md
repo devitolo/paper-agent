@@ -4,6 +4,11 @@ SDLC is the sole Mini deployment/refresh operator. Developer owns source and
 GitHub Actions; Tester verifies sequentially after SDLC ends its operations.
 This procedure never deploys to AWS or production and never installs a schedule.
 
+At qualification time the copied database contained 1,523 papers and 321
+recommendations, with 263 recommendations visible in the UI. The UI is labeled
+`MINI NON-PROD -- DATA COPY`. Scheduling, sync, Gemini, telemetry, and MiniLM
+remain disabled; production is not modified by refresh.
+
 ## Scope and prerequisites
 
 The user approved replacing nonprod test data with a snapshot of authoritative

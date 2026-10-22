@@ -1,9 +1,11 @@
 # Architecture
 
 This document describes the target Project Paper architecture and the current
-SQLite-backed implementation. The production Mini was migrated to a
-containerized app and Ollama runtime on 2026-09-24; host cron remains the
-scheduling authority.
+SQLite-backed implementation. The production Mini uses a containerized app and
+Ollama runtime; host cron remains the scheduling authority. The current
+production app is pipeline-only with no web listener or published port. AWS
+serves the UI and receives synchronized pipeline results. See
+[Current SDLC state](current-sdlc-state.md) for current release roles.
 
 ## Runtime Host
 
@@ -77,28 +79,30 @@ SQLite history and guidance
 
 ## Component Responsibilities
 
-The production scheduler is the host crontab. Each managed entry calls
+The production scheduler is the host crontab. Each staggered source entry calls
 `scripts/mini_container_job.sh`, which executes the existing workflow wrapper
-inside the app container while participating in the runtime lifecycle lock. The
-container runtime owns the long-lived web and Ollama processes; systemd is no
-longer the active Project Paper web/model supervisor on the Mini.
+inside the pipeline-only app container while participating in the runtime
+lifecycle lock. The container runtime owns Ollama; the Mini production app does
+not serve the web UI. AWS is the serving surface for synchronized results.
 
 The Python workflow owns orchestration between deterministic steps and model-backed judgment steps. It should remain explicit and debuggable before any larger agent framework is considered. A future Go port is plausible, but should wait until workflow and schema boundaries stabilize; preserve SQLite compatibility first, then phase the port through web UI/server, operational CLI/runbooks, scheduled orchestration, and source adapters/agent logic where useful.
 
-The production Curator uses three local inference responsibilities. A standalone,
-internal MiniLM service ranks topical interest from titles and abstracts; the app
-calls it over a private Docker network and does not carry the MiniLM model or
-inference runtime. The service uses the pinned
+The production Curator uses three local inference responsibilities. The MiniLM
+standalone-service design remains an explicit opt-in target, but its shared
+service qualification was removed from the final current deployment; do not
+assume a separate MiniLM service is active. The default app path retains the
+embedded scorer unless a separately qualified release selects HTTP. The former
+service design used the pinned
 `cross-encoder/ms-marco-MiniLM-L6-v2` revision
 `233902d25c440f23af6f7d6e94d2946bac0bee0a` with the existing tokenizer and
 ONNX runtime settings. Qwen3 4B assesses research type and evidence quality
 before recommendations are selected; its structured assessment actively adjusts
 Curator scoring. Qwen 2.5 1.5B remains the extraction model for the Problem,
 Why it matters, and Approach fields. If Qwen3 is unavailable or invalid,
-Curator retains its deterministic score. If the MiniLM HTTP service is
-unavailable, Curator records unavailable interest fit with no fabricated score
-and continues its remaining evaluation; it does not silently switch back to an
-embedded scorer.
+Curator retains its deterministic score. If a future HTTP-qualified MiniLM
+target is selected and unavailable, Curator records unavailable interest fit
+with no fabricated score; it must not silently switch back to an embedded
+scorer.
 
 Scheduled production jobs share one nonblocking job lease. If a source, profile, or backup job starts while another job owns the lease, the new job exits successfully without running and appends a `skipped_busy` event to the persistent job event log. Health displays recent job events and warns when the latest event for a job is an overlap skip.
 

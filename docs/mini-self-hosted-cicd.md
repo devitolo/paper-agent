@@ -25,10 +25,13 @@ The official branches are:
 - `main`: canonical accepted project history and integration branch.
 - `mini-production`: current Mac mini deployment rail. Pushing here triggers
   production deployment.
+- `mini-nonprod`: isolated Mini validation rail with copied/synthetic data.
+- `aws-production`: AWS serving deployment rail.
 - `release/0.1.x`: maintenance branch for the old 0.1.x line only.
 
-Normal work happens on temporary branches, usually `codex/<short-feature-name>`,
-then merges into `main` first. Validating on `main` must not deploy to the Mini.
+Normal work happens on temporary branches, then merges into `main` first.
+Obsolete `codex/*` branches are removed after review; they are not release
+lines. Validating on `main` must not deploy to the Mini.
 When the user explicitly says to release, promote, or push to production, promote
 `main` to `mini-production`. Pushes to `mini-production` build and publish a
 `linux/amd64` `mini-production` image, then deploy that exact immutable digest on

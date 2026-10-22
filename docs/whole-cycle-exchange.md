@@ -1,9 +1,8 @@
-# Daily Mini exchange (implementation awaiting production review)
+# Daily Mini exchange
 
-The default remains off. No cron installation or deployment is part of this change.
-The host wrapper runs `mini_sync_exchange.sh pull`, the existing OpenAlex, arXiv,
-Semantic Scholar, CORE and profile jobs, then `mini_sync_exchange.sh push` when
-both explicit activation flags are provisioned. The helper uses the same Compose
+The exchange is source-by-source and remains explicitly operator-controlled.
+The host wrapper pulls current AWS input, runs one selected source job, then
+pushes that source's results with `mini_sync_exchange.sh`. The helper uses the same Compose
 files and `exec -T app` as `mini_container_job.sh`. Python runs in the app image
 against `/app/data/paper_agent.db`, `/app/config`, and `/app/data/sync-state`.
 The HMAC secret must be provisioned privately in the app environment through the
@@ -15,11 +14,13 @@ exchange operation takes the existing runtime and exclusive scheduled-job lease.
 
 ## Restore ownership
 
-`GET /sync/snapshot` with `Accept: application/gzip` streams the existing consistent
+`GET /sync/backup` with `Accept: application/gzip` streams the existing consistent
 SQLite backup package, including the complete serving database, topics, industry
 configuration, active profile and summary files. TLS and timestamped HMAC protect
 the transfer; the existing bounded extraction and checksum/SQLite/FK checks apply.
-The logical JSON endpoint remains for old isolated workers.
+The old `/sync/snapshot` path is historical and should not be used by the
+current whole-cycle client. The logical JSON endpoint remains for old isolated
+workers.
 
 AWS owns the restored serving tables, configuration and profile. Before replacing
 the working DB, Mini saves a consistent `mini-before-<batch>.db` for rollback.
@@ -71,7 +72,8 @@ It verifies grouping, unscored discoveries, updates, summaries, scores,
 recommendations, feedback added after pull, failed SQL rollback, lost-response
 replay, pending-pull refusal, cursor preservation and activation guards.
 
-These tests do not run a real Docker daemon or production images. SRE must qualify
-the image, volume permissions, runtime health/import-manifest behavior, credentials,
-resource use and retention before production activation. No production runner,
-cron, AWS data or Mini database was accessed by the regression harness.
+These tests do not run a real Docker daemon or production images. The focused
+schema and whole-cycle suites passed, and a synthetic Mini-to-AWS exchange
+validated revision checks, batch application, and receipt creation. Production
+deployment evidence must still record the exact image, readiness, receipt, and
+rollback state; no regression harness access to production data is implied.

@@ -1,5 +1,10 @@
 # Mini UI and pipeline roles
 
+Current deployed state: production uses the pipeline role; non-production has
+separate UI and pipeline containers. The role split was consolidated into
+`main` at `f082112`. The non-prod copy is isolated and labeled
+`MINI NON-PROD -- DATA COPY`; it is not an AWS mirror.
+
 The shared `mini-production-http` image supports explicit
 `PAPER_AGENT_RUNTIME_ROLE=ui` or `pipeline`. The default remains `ui` for existing
 installations. Pipeline startup does not import or start the web server. It keeps
@@ -63,6 +68,6 @@ data; never restore a stale database merely to reverse an image change.
 
 Do not use `mini_production_update.sh` for this release: that legacy path expects
 HTTP readiness and rewrites cron. The parked opt-in scheduler is not activated;
-host cron remains authoritative. AWS is untouched. Data exchange/sync is deferred,
-so AWS feedback/topic changes do not reach the Mini pipeline, and no ad hoc state
-copy is performed to conceal this gap.
+host cron remains authoritative. The source-by-source Mini-to-AWS result
+exchange is implemented separately; it transfers pipeline results only and does
+not copy AWS feedback, topics, profiles, or secrets into the Mini pipeline.
