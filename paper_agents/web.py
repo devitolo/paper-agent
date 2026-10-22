@@ -119,6 +119,9 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
             if parsed.path in {"/sync/snapshot", "/sync/input"} and self.headers.get("Accept") != "application/gzip":
                 if not verify_request(self.headers, b"", "GET", parsed.path):
                     self.send_error(HTTPStatus.UNAUTHORIZED); return
+                if self.headers.get("X-Paper-Sync-Probe") == "1":
+                    self.send_json(json.dumps({"schema": 1, "status": "ready", "route": parsed.path, "read_only": True}).encode())
+                    return
                 self.send_json(json.dumps(build_input_snapshot(db_path, sync_root), sort_keys=True).encode())
                 return
             if parsed.path == "/sync/backup" or (parsed.path == "/sync/snapshot" and self.headers.get("Accept") == "application/gzip"):
@@ -241,6 +244,20 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/sync/pipeline-results" and self.headers.get("X-Paper-Sync-Probe") == "1":
+                raw_length = self.headers.get("Content-Length", "")
+                if raw_length != "2" or self.headers.get("Transfer-Encoding"):
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Probe requires empty object")
+                    return
+                body = self.rfile.read(2)
+                if not verify_request(self.headers, body, "POST", parsed.path):
+                    self.send_error(HTTPStatus.UNAUTHORIZED)
+                    return
+                if body != b"{}":
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Probe requires empty object")
+                    return
+                self.send_json(json.dumps({"schema": 1, "status": "ready", "route": parsed.path, "read_only": True}).encode())
+                return
             if parsed.path in {"/sync/pipeline-results", "/sync/results", "/sync/profile-proposals"}:
                 raw_length = self.headers.get("Content-Length", "")
                 if not raw_length.isdecimal() or self.headers.get("Transfer-Encoding"):

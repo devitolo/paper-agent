@@ -1,0 +1,102 @@
+name: AWS Production Image Build
+
+on:
+  push:
+    branches:
+      - aws-production
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: project-paper-aws-image-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/aws-production'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.accept.outputs.image }}
+      revision: ${{ github.sha }}
+      bundle: ${{ steps.source.outputs.bundle }}
+    steps:
+      - name: Checkout exact protected release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate AWS build and deployment contracts
+        run: |
+          python3 -m unittest discover -s tests/aws_build -v
+          python3 -m unittest discover -s tests/aws_deploy -v
+          python3 -m unittest tests.sync_exchange.test_http_serving -v
+      - name: Record exact source bundle
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "bundle=$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish AMD64 serving candidate with attestations
+        id: image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          target: cloud-production
+          platforms: linux/amd64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ghcr.io/devitolo/paper-agent:aws-candidate-${{ github.sha }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            SOURCE_BUNDLE_SHA256=${{ steps.source.outputs.bundle }}
+            VERSION=aws-${{ github.sha }}
+      - name: Accept exact immutable candidate on hosted Docker
+        id: accept
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+          BUNDLE: ${{ steps.source.outputs.bundle }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 64
+          image="ghcr.io/devitolo/paper-agent@$DIGEST"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          python3 scripts/aws_image_acceptance.py --image "$image" --revision "$GITHUB_SHA" --bundle "$BUNDLE" --output .aws-build-evidence/acceptance.json
+          printf 'Synthetic-accepted image: `%s`\n\nRevision: `%s`\n\nBundle: `%s`\n\nNo deployment or production approval.\n' "$image" "$GITHUB_SHA" "$BUNDLE" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain sanitized image identity and acceptance evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: aws-serving-image-${{ github.sha }}
+          path: .aws-build-evidence/acceptance.json
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    needs: build
+    if: needs.build.result == 'success' && github.ref == 'refs/heads/aws-production'
+    environment: aws-production
+    runs-on: [self-hosted, linux, x64, project-paper-aws-deploy]
+    timeout-minutes: 35
+    permissions: {}
+    steps:
+      - name: Checkout exact qualified release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Deploy qualified digest to existing AWS Compose service
+        env:
+          AWS_APP_IMAGE: ${{ needs.build.outputs.image }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          sudo -n /usr/bin/bash "$GITHUB_WORKSPACE/scripts/aws_production_update.sh" "$AWS_APP_IMAGE"
