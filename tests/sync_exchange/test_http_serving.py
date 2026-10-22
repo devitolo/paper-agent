@@ -52,10 +52,10 @@ class ServingHTTPTests(unittest.TestCase):
     def test_input_auth_uses_request_body_and_rejects_before_snapshot(self):
         with patch.object(web, "build_input_snapshot", return_value={"schema": 1, "revision": "r"}) as build:
             with self.assertRaises(urllib.error.HTTPError) as failure:
-                self.request("/sync/input")
+                self.request("/sync/snapshot")
             self.assertEqual(failure.exception.code, 401)
             build.assert_not_called()
-            with self.request("/sync/input", signed=True) as response:
+            with self.request("/sync/snapshot", signed=True) as response:
                 self.assertEqual(json.load(response)["revision"], "r")
             build.assert_called_once()
 
@@ -71,7 +71,7 @@ class ServingHTTPTests(unittest.TestCase):
     def test_oversized_and_malformed_lengths_rejected_before_body_read(self):
         for length, expected in ((str(MAX_BODY_BYTES + 1), 413), ("-1", 400), ("nope", 400)):
             with self.assertRaises(urllib.error.HTTPError) as failure:
-                self.request("/sync/results", "POST", b"", extra={"Content-Length": length})
+                self.request("/sync/pipeline-results", "POST", b"", extra={"Content-Length": length})
             self.assertEqual(failure.exception.code, expected)
 
     def test_profile_route_is_authenticated_and_reachable(self):

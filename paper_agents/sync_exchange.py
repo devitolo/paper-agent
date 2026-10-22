@@ -1,6 +1,7 @@
 """Versioned, bounded exchange; never execute SQL supplied by a peer."""
 from __future__ import annotations
 import hashlib, hmac, json, math, os, time, sqlite3
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from email.message import Message
 from pathlib import Path
@@ -83,10 +84,20 @@ def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.')):
         c.execute('INSERT OR IGNORE INTO sync_snapshot_revisions VALUES(?,?)',(payload['revision'],encoded(payload).decode()));c.commit()
     return payload
 
+def register_backup_snapshot(db_path, backup):
+    manifest=(Path(backup)/'manifest.json').read_bytes()
+    revision=_digest(manifest)
+    with connect_db(db_path) as c:
+        _setup(c)
+        c.execute('INSERT OR IGNORE INTO sync_snapshot_revisions VALUES(?,?)',(revision,encoded({'backup':True}).decode()))
+    return revision
+
 def _paper(c,item):
     key=item.get('canonical_key');title=item.get('title')
     if not isinstance(key,str) or not key or len(key)>500 or not isinstance(title,str) or not title:raise ValueError('paper identity/title required')
-    c.execute('INSERT INTO papers(canonical_key,title,abstract,published,doi,arxiv_id) VALUES(?,?,?,?,?,?) ON CONFLICT(canonical_key) DO UPDATE SET title=excluded.title,abstract=excluded.abstract,published=excluded.published,doi=excluded.doi,arxiv_id=excluded.arxiv_id',(key,title,item.get('abstract'),item.get('published'),item.get('doi'),item.get('arxiv_id')))
+    now=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    fields=(key,title,item.get('abstract'),item.get('published'),item.get('updated'),item.get('doi'),item.get('arxiv_id'),item.get('authors_json','[]'),item.get('categories_json','[]'),item.get('first_discovered_at') or now,item.get('last_discovered_at') or now)
+    c.execute('INSERT INTO papers(canonical_key,title,abstract,published,updated,doi,arxiv_id,authors_json,categories_json,first_discovered_at,last_discovered_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(canonical_key) DO UPDATE SET title=excluded.title,abstract=excluded.abstract,published=excluded.published,updated=excluded.updated,doi=excluded.doi,arxiv_id=excluded.arxiv_id,authors_json=excluded.authors_json,categories_json=excluded.categories_json,last_discovered_at=excluded.last_discovered_at',(fields))
     return c.execute('SELECT id FROM papers WHERE canonical_key=?',(key,)).fetchone()[0]
 def _source(c,pid,item):
     source=item.get('source');sid=item.get('source_id')
@@ -95,6 +106,92 @@ def _source(c,pid,item):
     if old and old[0]!=pid:raise ValueError('source alias belongs to a different paper')
     metadata=item.get('metadata_json',encoded(item.get('metadata',{})).decode())
     c.execute('INSERT INTO paper_sources(paper_id,source,source_id,url,pdf_url,metadata_json) VALUES(?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET url=excluded.url,pdf_url=excluded.pdf_url,metadata_json=excluded.metadata_json',(pid,source,sid,item.get('url'),item.get('pdf_url'),metadata))
+
+def validate_normalized(value):
+    sections={'papers','paper_sources','artifacts','evaluations','recommendations'}
+    if not isinstance(value,dict) or set(value)!=sections or any(not isinstance(v,list) or len(v)>50000 for v in value.values()):
+        raise ValueError('invalid normalized sections')
+    def string(row,key,empty=False):
+        v=row.get(key)
+        if not isinstance(v,str) or (not v and not empty): raise ValueError('invalid '+key)
+        return v
+    def json_field(row,key,kind):
+        try: v=json.loads(row.get(key,'[]' if kind is list else '{}'))
+        except (TypeError,ValueError): raise ValueError('invalid '+key) from None
+        if not isinstance(v,kind): raise ValueError('invalid '+key)
+    papers=set()
+    for r in value['papers']:
+        if not isinstance(r,dict): raise ValueError('invalid paper')
+        k=string(r,'canonical_key'); string(r,'title')
+        if k in papers: raise ValueError('duplicate paper')
+        papers.add(k)
+        for name in ('abstract','published','updated','doi','arxiv_id','first_discovered_at','last_discovered_at'):
+            if r.get(name) is not None and not isinstance(r[name],str): raise ValueError('invalid paper '+name)
+        json_field(r,'authors_json',list); json_field(r,'categories_json',list)
+    seen=set()
+    for section in ('paper_sources','artifacts','evaluations','recommendations'):
+        for r in value[section]:
+            if not isinstance(r,dict) or r.get('canonical_key') not in papers: raise ValueError('missing paper dependency')
+            if section=='paper_sources':
+                if r.get('source') not in SOURCES: raise ValueError('invalid source')
+                identity=('source',r['source'],string(r,'source_id')); json_field(r,'metadata_json',dict)
+                for field in ('url','pdf_url','discovered_at'):
+                    if r.get(field) is not None and not isinstance(r[field],str): raise ValueError('invalid source '+field)
+            elif section=='artifacts':
+                if r.get('artifact_type')!='triage_summary' or not isinstance(r.get('content'),dict): raise ValueError('invalid summary content')
+                json_field(r,'metadata_json',dict)
+                if r.get('model') is not None and not isinstance(r['model'],str): raise ValueError('invalid summary model')
+                digest=_digest(encoded(r['content']))
+                if r.get('summary_hash',digest)!=digest: raise ValueError('summary hash mismatch')
+                identity=('artifact',r['canonical_key'],digest)
+            else:
+                string(r,'cycle_key'); run=string(r,'run_key'); string(r,'rationale',empty=True)
+                identity=(section,run,r['canonical_key'])
+                if section=='evaluations':
+                    if isinstance(r.get('score'),bool) or not isinstance(r.get('score'),(int,float)) or not math.isfinite(r['score']): raise ValueError('invalid score')
+                    if type(r.get('quality_threshold_met',0)) is not int or r.get('quality_threshold_met',0) not in (0,1): raise ValueError('invalid threshold')
+                    json_field(r,'matched_signals_json',list)
+                else:
+                    order=r.get('recommendation_order')
+                    if type(order) is not int or not 1<=order<=3: raise ValueError('invalid recommendation order')
+                    slot=('order',run,order)
+                    if slot in seen: raise ValueError('conflicting recommendation order')
+                    seen.add(slot)
+            if identity in seen: raise ValueError('duplicate normalized row')
+            seen.add(identity)
+    runs={}
+    evaluations={(r['run_key'],r['canonical_key']) for r in value['evaluations']}
+    for r in value['evaluations']+value['recommendations']:
+        if runs.setdefault(r['run_key'],r['cycle_key'])!=r['cycle_key']: raise ValueError('conflicting run identity')
+    if any((r['run_key'],r['canonical_key']) not in evaluations for r in value['recommendations']):
+        raise ValueError('recommendation missing evaluation')
+
+
+def _apply_normalized(c, normalized, root=Path('.')):
+    papers={r['canonical_key']:_paper(c,r) for r in normalized['papers']}
+    for r in normalized['paper_sources']: _source(c,papers[r['canonical_key']],r)
+    cycles={}; runs={}
+    for r in normalized['evaluations']:
+        key=r['cycle_key']; run=r['run_key']
+        if key not in cycles:
+            cycles[key]=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','imported',?)",(encoded({'sync_cycle_key':key}).decode(),)).lastrowid
+        if run not in runs:
+            runs[run]=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycles[key],encoded({'sync_run_key':run}).decode())).lastrowid
+        c.execute('INSERT INTO curator_evaluations(curator_run_id,paper_id,score,rationale,matched_signals_json,quality_threshold_met) VALUES(?,?,?,?,?,?)',(runs[run],papers[r['canonical_key']],r['score'],r['rationale'],r.get('matched_signals_json','[]'),r.get('quality_threshold_met',0)))
+    for r in normalized['recommendations']:
+        c.execute('INSERT INTO recommendations(curator_run_id,paper_id,recommendation_order,rationale) VALUES(?,?,?,?)',(runs[r['run_key']],papers[r['canonical_key']],r['recommendation_order'],r['rationale']))
+    for r in normalized['artifacts']:
+        digest=_digest(encoded(r['content'])); path=Path('data/sync-summaries')/(digest+'.json')
+        target=Path(root)/path
+        if any(p.is_symlink() for p in (target,*target.parents)): raise ValueError('aliased summary destination')
+        target.parent.mkdir(parents=True,exist_ok=True)
+        if target.exists() and target.read_bytes()!=encoded(r['content']): raise ValueError('summary hash collision')
+        if not target.exists():
+            import tempfile
+            with tempfile.NamedTemporaryFile(dir=target.parent,delete=False) as f:
+                f.write(encoded(r['content'])); temporary=Path(f.name)
+            temporary.replace(target)
+        c.execute('INSERT INTO artifacts(paper_id,artifact_type,path,model,metadata_json) VALUES(?,?,?,?,?) ON CONFLICT(paper_id,artifact_type,path) DO UPDATE SET model=excluded.model,metadata_json=excluded.metadata_json',(papers[r['canonical_key']],'triage_summary',str(path),r.get('model'),r.get('metadata_json','{}')))
 
 def apply_input_snapshot(db_path,snapshot,root):
     """Mirror AWS-owned history into isolated Mini DB, remapping every foreign key."""
@@ -171,6 +268,10 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
     if producer!=allowed or environment!=expected or type(seq)!=int or seq<1:raise ValueError('producer/environment/sequence rejected')
     results=payload.get('results')
     if not isinstance(results,list) or len(results)>100:raise ValueError('results must be bounded recommendations')
+    if 'pipeline_delta' in payload: raise ValueError('unsupported raw pipeline delta')
+    normalized=payload.get('normalized',{'papers':[],'paper_sources':[],'artifacts':[],'evaluations':[],'recommendations':[]})
+    if not isinstance(normalized,dict) or set(normalized)!={'papers','paper_sources','artifacts','evaluations','recommendations'} or any(not isinstance(normalized[k],list) for k in normalized):raise ValueError('invalid normalized sections')
+    validate_normalized(normalized)
     root=Path(root);content_hash=_digest(body)
     with connect_db(db_path) as c:
         _setup(c);c.commit();c.execute('BEGIN IMMEDIATE')
@@ -182,8 +283,11 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
         last=c.execute('SELECT sequence FROM sync_producers WHERE producer=? AND environment=?',(producer,environment)).fetchone()
         if last and seq<=last[0]:raise ValueError('stale result sequence')
         c.execute('INSERT INTO sync_result_batches(batch_key,input_revision,payload_hash,payload_json,status) VALUES(?,?,?,?,?)',(key,payload['input_revision'],content_hash,body.decode(),'received'))
-        cycle=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','sync',?)",(encoded({'batch_key':key,'input_revision':payload['input_revision'],'producer_id':producer,'run_sequence':seq}).decode(),)).lastrowid
-        run=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycle,encoded({'imported':True}).decode())).lastrowid
+        _apply_normalized(c, normalized, root)
+        cycle=None; run=None
+        if results:
+            cycle=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','sync',?)",(encoded({'batch_key':key,'input_revision':payload['input_revision'],'producer_id':producer,'run_sequence':seq}).decode(),)).lastrowid
+            run=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycle,encoded({'imported':True}).decode())).lastrowid
         seen=set()
         for index,item in enumerate(results):
             order=index%3+1

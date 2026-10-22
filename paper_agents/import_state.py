@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import stat
 
@@ -35,8 +36,34 @@ def require(condition, message):
 
 
 def schema(connection):
-    # Exact schema contract: unknown/older layouts need a separately reviewed migration.
-    return connection.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
+    # Compare structure, not harmless rendering differences in sqlite_master.
+    rows = connection.execute(
+        "SELECT type,name,tbl_name,sql FROM sqlite_master "
+        "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+    ).fetchall()
+    normalized = []
+    for object_type, name, table_name, sql in rows:
+        if sql is not None:
+            sql = re.sub(r'\s+', ' ', sql).strip()
+            sql = re.sub(r'\bIF NOT EXISTS\b\s*', '', sql, flags=re.IGNORECASE)
+            sql = sql.replace('"', '')
+            sql = re.sub(r'\s*([(),])\s*', r'\1', sql)
+            sql = re.sub(r'\bDEFAULT\s*\(', 'DEFAULT(', sql, flags=re.IGNORECASE)
+        normalized.append((object_type, name, table_name, sql))
+    return normalized
+
+
+def schema_mismatch_details(actual, expected_schemas):
+    actual_by_key = {(row[0], row[1], row[2]): row[3] for row in actual}
+    best = min(expected_schemas, key=lambda candidate: len(
+        set(actual_by_key) ^ {(row[0], row[1], row[2]) for row in candidate}
+    ))
+    expected_by_key = {(row[0], row[1], row[2]): row[3] for row in best}
+    missing = sorted(set(expected_by_key) - set(actual_by_key))
+    extra = sorted(set(actual_by_key) - set(expected_by_key))
+    changed = sorted(key for key in set(actual_by_key) & set(expected_by_key)
+                     if actual_by_key[key] != expected_by_key[key])
+    return f'missing={missing[:20]} extra={extra[:20]} changed={changed[:20]}'
 
 
 OPENALEX_SCHEMA_MARKER = '-- Versioned OpenAlex traversal state; enabled only by the cursor retrieval path.'
@@ -59,12 +86,22 @@ REVIEW_COLLECTIONS_SCHEMA_MARKER = '-- Personal review collections; isolated fro
 REVIEW_COLLECTIONS_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(REVIEW_COLLECTIONS_SCHEMA_MARKER, 1)[1]
 SYNC_SCHEMA_MARKER = '-- Versioned sync route state; enabled only by the approved serving exchange migration.'
 SYNC_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SYNC_SCHEMA_MARKER, 1)[1]
+TOPIC_ALLOWANCE_MARKER = '-- Versioned Topic Agent allowance state; part of the current Mini serving baseline.'
+TOPIC_ALLOWANCE_SQL = TRUSTED_SCHEMA.read_text().split(TOPIC_ALLOWANCE_MARKER, 1)[1].split('-- Cloud/isolated-worker exchange;', 1)[0]
+WHOLE_CYCLE_SCHEMA_MARKER = '-- Whole-cycle exchange identity and receipt state; additive after the sync route state.'
+WHOLE_CYCLE_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(WHOLE_CYCLE_SCHEMA_MARKER, 1)[1]
 
 
-def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False, include_sync=True):
+def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False, include_sync=True, include_topic_allowance=True):
     from .db import migrate_structured_feedback_score_to_real, migrate_summary_field_quality_signals_to_three_state
     if include_sync and SYNC_SCHEMA_MARKER not in sql:
         sql += '\n' + SYNC_SCHEMA_SQL
+    if include_topic_allowance and 'topic_agent_allowance' not in sql:
+        sync_boundary = '\n-- Cloud/isolated-worker exchange;'
+        if sync_boundary in sql:
+            sql = sql.replace(sync_boundary, TOPIC_ALLOWANCE_SQL + sync_boundary, 1)
+        else:
+            sql += TOPIC_ALLOWANCE_SQL
     require(sql.count('score REAL,') == 1, 'Trusted score schema changed; review compatibility')
     variants = []
     for migrated in (False, True):
@@ -158,6 +195,31 @@ def pre_sync_schemas():
     sql = TRUSTED_SCHEMA.read_text().split(SYNC_SCHEMA_MARKER, 1)[0]
     return _schema_variants(sql, include_sync=False)
 
+def pre_topic_allowance_schemas():
+    """Accepted Mini schema before the additive Topic Agent allowance table."""
+    trusted = TRUSTED_SCHEMA.read_text()
+    boundary = '\n-- Cloud/isolated-worker exchange;'
+    sql = trusted.split(TOPIC_ALLOWANCE_MARKER, 1)[0] + boundary + trusted.split(boundary, 1)[1]
+    return _schema_variants(sql, include_topic_allowance=False)
+
+def pre_whole_cycle_schemas():
+    """Accepted Mini schema before whole-cycle identity/receipt tables."""
+    sql = TRUSTED_SCHEMA.read_text().split(WHOLE_CYCLE_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql)
+
+def is_pre_topic_allowance_schema(actual_schema):
+    """Match the real Mini baseline with only the allowance table absent."""
+    allowance_free = lambda value: [row for row in value if row[1] != 'topic_agent_allowance']
+    return any(allowance_free(actual_schema) == allowance_free(value) and len(actual_schema) == len(value) - 1
+               for value in trusted_schemas())
+
+def read_schema(root):
+    connection = sqlite3.connect(f"file:{(Path(root) / 'data/paper_agent.db').resolve()}?mode=ro", uri=True)
+    try:
+        return schema(connection)
+    finally:
+        connection.close()
+
 
 def pre_three_state_summary_signal_schemas():
     """Accepted production schema before three-state section feedback signals."""
@@ -195,6 +257,10 @@ def apply_approved_post_import_schema_deltas(root):
             delta_sql = ARXIV_PROGRESS_SCHEMA_SQL
         elif actual_schema in pre_summary_quality_signals_schemas():
             delta_sql = SUMMARY_QUALITY_SIGNALS_SCHEMA_SQL
+        elif actual_schema in pre_topic_allowance_schemas() or is_pre_topic_allowance_schema(actual_schema):
+            delta_sql = TOPIC_ALLOWANCE_SQL
+        elif actual_schema in pre_whole_cycle_schemas():
+            delta_sql = WHOLE_CYCLE_SCHEMA_SQL
         elif actual_schema in pre_sync_schemas():
             delta_sql = SYNC_SCHEMA_SQL
         elif actual_schema in pre_semantic_progress_schemas():
@@ -290,7 +356,9 @@ def inspect(root, *, staging=None):
         require(connection.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'Imported SQLite integrity failed')
         require(not connection.execute('PRAGMA foreign_key_check').fetchall(), 'Imported foreign keys invalid')
         actual_schema = schema(connection)
-        require(actual_schema in expected_schemas, 'Imported schema incompatible; no schema deltas approved')
+        require(actual_schema in expected_schemas,
+                'Imported schema incompatible; no schema deltas approved; '
+                + schema_mismatch_details(actual_schema, expected_schemas))
         validate_artifact_paths(root, connection, files=files)
         tables = logical_rows(connection)
     finally:
@@ -382,8 +450,10 @@ def initialize(root, manifest_path):
             # Legitimate application writes and approved post-import schema deltas need not match
             # the original snapshot once the manifest-bound receipt exists.
         else:
-            legacy_sync_schema = approved['schema_sha256'] in {digest(value) for value in pre_sync_schemas()}
-            if legacy_sync_schema:
+            legacy_schema = approved['schema_sha256'] in {
+                digest(value) for values in (pre_sync_schemas(), pre_topic_allowance_schemas()) for value in values
+            } or is_pre_topic_allowance_schema(read_schema(root))
+            if legacy_schema:
                 require(current['files'] == approved['files'], 'Imported state differs from manifest')
                 require(all(current['tables'].get(name) == value for name, value in approved['tables'].items()),
                         'Imported state differs from manifest')

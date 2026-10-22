@@ -112,23 +112,25 @@ def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEF
         server.server_close()
 
 
-def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
+def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTPRequestHandler]:
     class ReviewHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
-            if parsed.path == "/sync/input":
+            if parsed.path in {"/sync/snapshot", "/sync/input"} and self.headers.get("Accept") != "application/gzip":
                 if not verify_request(self.headers, b"", "GET", parsed.path):
                     self.send_error(HTTPStatus.UNAUTHORIZED); return
-                self.send_json(json.dumps(build_input_snapshot(db_path), sort_keys=True).encode())
+                self.send_json(json.dumps(build_input_snapshot(db_path, sync_root), sort_keys=True).encode())
                 return
-            if parsed.path == "/sync/backup":
+            if parsed.path == "/sync/backup" or (parsed.path == "/sync/snapshot" and self.headers.get("Accept") == "application/gzip"):
                 if not verify_request(self.headers, b"", "GET", parsed.path):
                     self.send_error(HTTPStatus.UNAUTHORIZED); return
                 import tempfile, tarfile
                 from paper_agents.sync_backup import create_backup, MAX_ARCHIVE_BYTES
                 try:
                     with tempfile.TemporaryDirectory(prefix="paper-recovery-") as directory:
-                        staging = Path(directory); backup = create_backup(db_path, Path("config"), staging, root=Path(".")); archive = staging / "state.tar.gz"
+                        staging = Path(directory); backup = create_backup(db_path, sync_root / "config", staging, root=sync_root); archive = staging / "state.tar.gz"
+                        from paper_agents.sync_exchange import register_backup_snapshot
+                        register_backup_snapshot(db_path, backup)
                         with tarfile.open(archive, "w:gz", compresslevel=9) as output:
                             for source in sorted(backup.rglob("*")):
                                 if source.is_file(): output.add(source, arcname=source.relative_to(backup).as_posix(), recursive=False)
@@ -239,7 +241,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
-            if parsed.path in {"/sync/results", "/sync/profile-proposals"}:
+            if parsed.path in {"/sync/pipeline-results", "/sync/results", "/sync/profile-proposals"}:
                 raw_length = self.headers.get("Content-Length", "")
                 if not raw_length.isdecimal() or self.headers.get("Transfer-Encoding"):
                     self.send_error(HTTPStatus.BAD_REQUEST, "A valid Content-Length is required"); return
@@ -252,7 +254,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                     if parsed.path == "/sync/profile-proposals":
                         from paper_agents.sync_exchange import receive_profile_proposal
                         result = receive_profile_proposal(db_path, body, self.headers)
-                    else: result = receive_result_batch(db_path, body, self.headers)
+                    else: result = receive_result_batch(db_path, body, self.headers, sync_root)
                 except ValueError as error:
                     self.send_error(HTTPStatus.UNPROCESSABLE_ENTITY, str(error)); return
                 self.send_json(json.dumps(result, sort_keys=True).encode()); return

@@ -481,33 +481,76 @@ CREATE TABLE IF NOT EXISTS excluded_papers (
 CREATE INDEX IF NOT EXISTS idx_excluded_papers_created_at
 ON excluded_papers (created_at DESC);
 
+-- Versioned Topic Agent allowance state; part of the current Mini serving baseline.
+CREATE TABLE IF NOT EXISTS topic_agent_allowance (
+    allowance_day TEXT PRIMARY KEY,
+    limit_count INTEGER NOT NULL,
+    reserved_count INTEGER NOT NULL DEFAULT 0,
+    consumed_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Cloud/isolated-worker exchange; additive after the serving schema baseline.
 -- Versioned sync route state; enabled only by the approved serving exchange migration.
 CREATE TABLE IF NOT EXISTS sync_result_batches (
-    id INTEGER PRIMARY KEY,
-    batch_key TEXT NOT NULL UNIQUE,
-    input_revision TEXT NOT NULL,
-    payload_hash TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
+    id INTEGER PRIMARY KEY, batch_key TEXT NOT NULL UNIQUE, input_revision TEXT NOT NULL,
+    payload_hash TEXT NOT NULL, payload_json TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('received','applied','rejected','failed')),
-    error TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    applied_at TEXT
+    error TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), applied_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sync_result_batches_status ON sync_result_batches(status, created_at);
-
 CREATE TABLE IF NOT EXISTS sync_summary_versions (
-    id INTEGER PRIMARY KEY,
-    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
-    summary_hash TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    content_json TEXT NOT NULL,
-    provenance_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    id INTEGER PRIMARY KEY, paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    summary_hash TEXT NOT NULL, version INTEGER NOT NULL, content_json TEXT NOT NULL,
+    provenance_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (paper_id, summary_hash)
 );
 CREATE TABLE IF NOT EXISTS sync_profile_proposals (
- id INTEGER PRIMARY KEY, proposal_id TEXT NOT NULL UNIQUE, base_profile_version INTEGER NOT NULL,
- input_revision TEXT NOT NULL, consumed_feedback_keys_json TEXT NOT NULL, proposed_profile_json TEXT NOT NULL,
- change_summary TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('accepted','rejected')), created_at TEXT NOT NULL DEFAULT(datetime('now'))
+    id INTEGER PRIMARY KEY, proposal_id TEXT NOT NULL UNIQUE, base_profile_version INTEGER NOT NULL,
+    input_revision TEXT NOT NULL, consumed_feedback_keys_json TEXT NOT NULL, proposed_profile_json TEXT NOT NULL,
+    change_summary TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('accepted','rejected')),
+    created_at TEXT NOT NULL DEFAULT(datetime('now'))
 );
+
+-- Whole-cycle exchange identity and receipt state; additive after the sync route state.
+-- Versioned whole-cycle exchange identity and receipt state.
+CREATE TABLE IF NOT EXISTS sync_input_row_map (
+    table_name TEXT,
+    external_id INTEGER,
+    local_id INTEGER,
+    PRIMARY KEY(table_name, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_producers (
+    producer TEXT,
+    environment TEXT,
+    sequence INTEGER NOT NULL,
+    PRIMARY KEY(producer, environment)
+);
+
+CREATE TABLE IF NOT EXISTS sync_profile_receipts (
+    proposal_id TEXT PRIMARY KEY,
+    payload_hash TEXT NOT NULL,
+    response_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_snapshot_revisions (
+    revision TEXT PRIMARY KEY,
+    content_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS topic_agent_requests (
+    request_id TEXT PRIMARY KEY,
+    payload_hash TEXT NOT NULL,
+    base_topics_hash TEXT NOT NULL,
+    request_text TEXT NOT NULL,
+    conversation_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL,
+    proposal_json TEXT,
+    error_category TEXT,
+    created_at TEXT NOT NULL DEFAULT(datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT(datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_topic_agent_requests_status
+ON topic_agent_requests(status, created_at);

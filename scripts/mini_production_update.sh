@@ -21,6 +21,7 @@ Optional:
   PAPER_MINI_ARXIV_PROGRESS=0|1   # optional persistent production flag update
   PAPER_MINI_OPENALEX_CURSOR=0|1   # optional persistent production flag update
   PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS=0|1   # optional persistent production flag update
+  PAPER_MINI_CORE_SOURCE=0|1                # optional persistent production flag update
 EOF
 }
 
@@ -40,6 +41,7 @@ DEPLOY_BRANCH=${PAPER_MINI_DEPLOY_BRANCH:-mini-production}
 ARXIV_PROGRESS=${PAPER_MINI_ARXIV_PROGRESS:-}
 OPENALEX_CURSOR=${PAPER_MINI_OPENALEX_CURSOR:-}
 SEMANTIC_SCHOLAR_PROGRESS=${PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS:-}
+CORE_SOURCE=${PAPER_MINI_CORE_SOURCE:-}
 DEPLOY_CHECK=${PAPER_DEPLOY_CHECK:-light}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 RELEASE_DIR=$MINI_ROOT/production-releases/$STAMP
@@ -76,6 +78,7 @@ phase_end() {
 [[ -z "$ARXIV_PROGRESS" || "$ARXIV_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_ARXIV_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$OPENALEX_CURSOR" || "$OPENALEX_CURSOR" =~ ^[01]$ ]] || { echo "PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$SEMANTIC_SCHOLAR_PROGRESS" || "$SEMANTIC_SCHOLAR_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
+[[ -z "$CORE_SOURCE" || "$CORE_SOURCE" =~ ^[01]$ ]] || { echo "PAPER_MINI_CORE_SOURCE must be 0 or 1 when set" >&2; exit 64; }
 [[ "$DEPLOY_CHECK" == light || "$DEPLOY_CHECK" == full ]] || { echo "PAPER_DEPLOY_CHECK must be light or full" >&2; exit 64; }
 
 # Credentials in the private production env file are authoritative. Docker Compose
@@ -116,6 +119,15 @@ mkdir -p "$CANDIDATE_DIR/scripts"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-migration.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-rehearsal.yml" "$CANDIDATE_DIR/docker-compose.mini-rehearsal.yml"
 install -m 0755 "$SOURCE_DIR/scripts/mini_container_job.sh" "$CANDIDATE_DIR/scripts/mini_container_job.sh"
+# Cron runs these from the host candidate tree, outside the application image.
+# Installation does not alter cron, private configuration, or activation flags.
+bash -n "$SOURCE_DIR/scripts/mini_sequential_orchestrator.sh" "$SOURCE_DIR/scripts/mini_sync_exchange.sh"
+install -m 0755 "$SOURCE_DIR/scripts/mini_sequential_orchestrator.sh" "$CANDIDATE_DIR/scripts/mini_sequential_orchestrator.sh"
+install -m 0755 "$SOURCE_DIR/scripts/mini_sync_exchange.sh" "$CANDIDATE_DIR/scripts/mini_sync_exchange.sh"
+for host_wrapper in mini_sequential_orchestrator.sh mini_sync_exchange.sh; do
+  cmp "$SOURCE_DIR/scripts/$host_wrapper" "$CANDIDATE_DIR/scripts/$host_wrapper"
+  sha256sum "$CANDIDATE_DIR/scripts/$host_wrapper" >> "$RELEASE_DIR/host-wrappers.sha256"
+done
 install -m 0755 "$SOURCE_DIR/scripts/minilm_eval_after_pipeline.sh" "$CANDIDATE_DIR/scripts/minilm_eval_after_pipeline.sh"
 install -m 0755 "$SOURCE_DIR/scripts/minilm_shadow_after_pipeline.sh" "$CANDIDATE_DIR/scripts/minilm_shadow_after_pipeline.sh"
 install -m 0755 "$SOURCE_DIR/scripts/mini_production_update.sh" "$CANDIDATE_DIR/scripts/mini_production_update.sh"
@@ -309,7 +321,7 @@ fi
 printf 'next_ollama_image=%s\n' "$ollama_image" >> "$RELEASE_DIR/update.env"
 
 tmp_env=$RELEASE_DIR/production.env.next
-python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" "$ARXIV_PROGRESS" "$OPENALEX_CURSOR" "$SEMANTIC_SCHOLAR_PROGRESS" <<'PY'
+python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" "$ARXIV_PROGRESS" "$OPENALEX_CURSOR" "$SEMANTIC_SCHOLAR_PROGRESS" "$CORE_SOURCE" <<'PY'
 from __future__ import annotations
 
 import sys
@@ -322,12 +334,14 @@ ollama_image = sys.argv[4]
 arxiv_progress = sys.argv[5]
 openalex_cursor = sys.argv[6]
 semantic_scholar_progress = sys.argv[7]
+core_source = sys.argv[8]
 lines = source.read_text(encoding="utf-8").splitlines()
 found = False
 found_ollama = False
 found_arxiv_progress = False
 found_openalex_cursor = False
 found_semantic_scholar_progress = False
+found_core_source = False
 out: list[str] = []
 drop_prefixes = ("PAPER_REHEARSAL_SOURCE_SHA256=", "PAPER_REHEARSAL_IDENTITY_FILE=")
 for line in lines:
@@ -348,6 +362,9 @@ for line in lines:
     elif line.startswith("PAPER_SEMANTIC_SCHOLAR_PROGRESS=") and semantic_scholar_progress:
         out.append(f"PAPER_SEMANTIC_SCHOLAR_PROGRESS={semantic_scholar_progress}")
         found_semantic_scholar_progress = True
+    elif line.startswith("PAPER_CORE_SOURCE=") and core_source:
+        out.append(f"PAPER_CORE_SOURCE={core_source}")
+        found_core_source = True
     else:
         out.append(line)
 if not found:
@@ -360,6 +377,8 @@ if openalex_cursor and not found_openalex_cursor:
     out.append(f"PAPER_OPENALEX_CURSOR={openalex_cursor}")
 if semantic_scholar_progress and not found_semantic_scholar_progress:
     out.append(f"PAPER_SEMANTIC_SCHOLAR_PROGRESS={semantic_scholar_progress}")
+if core_source and not found_core_source:
+    out.append(f"PAPER_CORE_SOURCE={core_source}")
 destination.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 
@@ -516,7 +535,10 @@ phase_end
 
 phase_start "readiness"
 deadline=$((SECONDS + 120))
-until "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-app >/dev/null 2>&1; do
+runtime_role=$("${compose[@]}" exec -T app printenv PAPER_AGENT_RUNTIME_ROLE 2>/dev/null || true)
+readiness_check=check-app
+[[ "$runtime_role" == pipeline ]] && readiness_check=check-pipeline
+until "${compose[@]}" exec -T app python -m paper_agents.package_runtime "$readiness_check" >/dev/null 2>&1; do
   [[ "$SECONDS" -lt "$deadline" ]] || {
     "${compose[@]}" logs --no-color --tail=200 app > "$RELEASE_DIR/app-readiness-failure.log" 2>&1 || true
     echo "App readiness failed. Evidence: $RELEASE_DIR" >&2
@@ -527,9 +549,14 @@ done
 phase_end
 
 phase_start "post deploy checks"
-curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.html"
-"${compose[@]}" exec -T app python -m paper_agents.package_runtime check-model \
-  > "$RELEASE_DIR/qwen-check.json"
+if [[ "$runtime_role" == pipeline ]]; then
+  "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-pipeline \
+    > "$RELEASE_DIR/pipeline-check.json"
+else
+  curl --fail --silent --show-error http://127.0.0.1:8000/ > "$RELEASE_DIR/home.html"
+  "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-model \
+    > "$RELEASE_DIR/qwen-check.json"
+fi
 "${compose[@]}" exec -T app python - <<'PY' > "$RELEASE_DIR/minilm-check.json"
 import json
 from paper_agents.curator_interest import default_interest_scorer, score_interest_fit

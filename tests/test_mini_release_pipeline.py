@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+import os
+import tempfile
 import unittest
 
 
@@ -9,6 +11,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MiniReleasePipelineTests(unittest.TestCase):
+    def test_release_preparation_installs_current_host_exchange_wrappers(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text()
+        start = script.index('mkdir -p "$CANDIDATE_DIR/scripts"')
+        end = script.index("\n{\n  printf 'started_at=", start)
+        preparation = script[start:end]
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "candidate with spaces"
+            release = Path(directory) / "release"
+            (candidate / "scripts").mkdir(parents=True)
+            release.mkdir()
+            (candidate / "scripts/mini_sequential_orchestrator.sh").write_text("# stale wrapper\n")
+            result = subprocess.run(["bash", "-eu", "-c", preparation],
+                env={**os.environ,"SOURCE_DIR":str(ROOT),"CANDIDATE_DIR":str(candidate),"RELEASE_DIR":str(release)},
+                capture_output=True,text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in ("mini_sequential_orchestrator.sh", "mini_sync_exchange.sh"):
+                installed = candidate / "scripts" / name
+                self.assertEqual(installed.read_bytes(), (ROOT / "scripts" / name).read_bytes())
+                self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+            self.assertEqual(len((release / "host-wrappers.sha256").read_text().splitlines()), 2)
+            # The deployed helper stays inert until explicitly enabled by SRE.
+            env = {k:v for k,v in os.environ.items() if not k.startswith("PAPER_AGENT_SYNC_")}
+            disabled = subprocess.run(["bash",str(candidate / "scripts/mini_sync_exchange.sh"),"pull"],
+                env=env,capture_output=True,text=True)
+            self.assertEqual(disabled.returncode, 0, disabled.stderr)
+            self.assertIn("sync disabled", disabled.stdout)
+
     def test_docker_workflow_builds_and_accepts_mini_target(self):
         workflow = (ROOT / ".github/workflows/docker.yml").read_text(encoding="utf-8")
         self.assertIn("MINI_TARGET: mini-production", workflow)
@@ -95,9 +124,9 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("PAPER_MIGRATION_ENV_FILE=", template)
         self.assertIn("PAPER_MIGRATION_EXTRA_COMPOSE_FILES=$HOME/paper-mini-rehearsal/production-cutover/docker-compose.production.yml", template)
         self.assertNotIn("docker-compose.mini-rehearsal.yml", template)
-        self.assertIn("scripts/mini_container_job.sh openalex", template)
-        self.assertIn("scripts/mini_container_job.sh arxiv", template)
-        self.assertIn("scripts/mini_container_job.sh semantic", template)
+        for source, hour in (("core", "0 3"), ("openalex", "0 4"), ("arxiv", "0 5"), ("semantic", "0 6")):
+            self.assertIn(f"{hour} * * * cd", template)
+            self.assertIn(f"scripts/mini_container_job.sh {source}", template)
         self.assertIn("30 23 * * 0", template)
         self.assertIn("scripts/mini_container_job.sh zenml", template)
         self.assertIn("scripts/mini_container_job.sh backup", template)
@@ -162,6 +191,11 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('scripts/backup_db.sh /app/data/paper_agent.db /backups', script)
         self.assertNotIn('\u201d', script)
 
+    def test_production_update_copies_whole_cycle_host_scripts(self):
+        script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
+        self.assertIn('install -m 0755 "$SOURCE_DIR/scripts/mini_sequential_orchestrator.sh"', script)
+        self.assertIn('install -m 0755 "$SOURCE_DIR/scripts/mini_sync_exchange.sh"', script)
+
     def test_production_update_preflights_persisted_state_before_app_replacement(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         preflight = script.index('phase_start "preflight persisted state"')
@@ -180,6 +214,8 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set', script)
         self.assertIn('ARXIV_PROGRESS=${PAPER_MINI_ARXIV_PROGRESS:-}', script)
         self.assertIn('PAPER_MINI_ARXIV_PROGRESS must be 0 or 1 when set', script)
+        self.assertIn('CORE_SOURCE=${PAPER_MINI_CORE_SOURCE:-}', script)
+        self.assertIn('PAPER_MINI_CORE_SOURCE must be 0 or 1 when set', script)
         self.assertIn('arxiv_progress = sys.argv[5]', script)
         self.assertIn('PAPER_ARXIV_PROGRESS={arxiv_progress}', script)
         self.assertIn('openalex_cursor = sys.argv[6]', script)

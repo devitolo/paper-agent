@@ -92,7 +92,7 @@ def propose_profile(db_path,state,root,snapshot,send,provider_fn=None):
     receipt=send('/sync/profile-proposals',encoded(payload),payload['proposal_id'])
     if receipt.get('status')!='accepted' or receipt.get('proposal_id')!=payload['proposal_id']:raise ValueError('profile not accepted')
     atomic_json(state/('profile-receipt-'+payload['proposal_id']+'.json'),receipt);out.unlink()
-    snapshot=send('/sync/input',method='GET');apply_input_snapshot(db_path,snapshot,root);atomic_json(state/'input-snapshot.json',snapshot)
+    snapshot=send('/sync/snapshot',method='GET');apply_input_snapshot(db_path,snapshot,root);atomic_json(state/'input-snapshot.json',snapshot)
     return snapshot
 
 @contextlib.contextmanager
@@ -102,8 +102,9 @@ def lock(state):
         fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
         yield
 
-def work(*,db_path,state_dir,root,aws_url,producer_id='mini-nonprod',environment='nonprod',source='arxiv',run=False,publish=False,backup_path=None,backup_dir=None,propose=False,transport=request,runner=pipeline_adapter,profile_provider=None):
-    if environment!='nonprod':raise ValueError('only isolated nonprod execution enabled')
+def work(*,db_path,state_dir,root,aws_url,producer_id='mini-nonprod',environment='nonprod',source='arxiv',run=False,publish=False,backup_path=None,backup_dir=None,propose=False,allow_production=False,transport=request,runner=pipeline_adapter,profile_provider=None):
+    if environment!='nonprod' and not (environment=='production' and allow_production and os.environ.get('PAPER_AGENT_SYNC_EXPLICIT_PRODUCTION')=='1'):
+        raise ValueError('production sync requires explicit guarded enablement')
     if source not in SOURCES:raise ValueError('source runner not enabled')
     state=pathlib.Path(state_dir);root=pathlib.Path(root)
     if pathlib.Path(db_path).resolve()==pathlib.Path('data/paper_agent.db').resolve():raise ValueError('default production DB prohibited')
@@ -114,7 +115,7 @@ def work(*,db_path,state_dir,root,aws_url,producer_id='mini-nonprod',environment
         if pending:
             if not publish:raise ValueError('pending results; publish before another inference run')
             for file in pending:
-                payload=json.loads(file.read_text());key=payload['batch_id'];receipt=send('/sync/results',encoded(payload),key)
+                payload=json.loads(file.read_text());key=payload['batch_id'];receipt=send('/sync/pipeline-results',encoded(payload),key)
                 if receipt.get('status')!='applied' or receipt.get('batch_key')!=key:raise ValueError('invalid publish receipt')
                 atomic_json(state/('receipt-'+key+'.json'),receipt)
                 file.rename(state/('published-'+key+'.json'))
@@ -129,7 +130,7 @@ def work(*,db_path,state_dir,root,aws_url,producer_id='mini-nonprod',environment
         if run and (not backup_path or not validate_backup(pathlib.Path(backup_path))):
             atomic_json(state/'backup-warning.json',{'status':'failed-or-missing','message':'backup must be checked separately; continuing only after input sync succeeds'})
         existing_job=state/'active-job.json'
-        snapshot=json.loads((state/'input-snapshot.json').read_text()) if existing_job.exists() else send('/sync/input',method='GET')
+        snapshot=json.loads((state/'input-snapshot.json').read_text()) if existing_job.exists() else send('/sync/snapshot',method='GET')
         apply_input_snapshot(db_path,snapshot,root)
         atomic_json(state/'input-snapshot.json',snapshot)
         if propose and not existing_job.exists():snapshot=propose_profile(db_path,state,root,snapshot,send,profile_provider)
@@ -155,7 +156,7 @@ def work(*,db_path,state_dir,root,aws_url,producer_id='mini-nonprod',environment
         atomic_json(state/('outbox-'+job['batch_id']+'.json'),payload);jobfile.unlink()
         if publish:
             key = job['batch_id']
-            receipt = send('/sync/results', encoded(payload), key)
+            receipt = send('/sync/pipeline-results', encoded(payload), key)
             if receipt.get('status') != 'applied' or receipt.get('batch_key') != key:
                 raise ValueError('invalid publish receipt')
             atomic_json(state / ('receipt-' + key + '.json'), receipt)
@@ -164,6 +165,6 @@ def work(*,db_path,state_dir,root,aws_url,producer_id='mini-nonprod',environment
         return {'status':'outbox-ready','batch_id':job['batch_id']}
 
 def main(argv=None):
-    p=argparse.ArgumentParser();p.add_argument('--db-path',type=pathlib.Path,required=True);p.add_argument('--state-dir',type=pathlib.Path,required=True);p.add_argument('--root',type=pathlib.Path,required=True);p.add_argument('--aws-url',required=True);p.add_argument('--producer-id',default='mini-nonprod');p.add_argument('--environment',default='nonprod');p.add_argument('--source',choices=SOURCES,default='arxiv');p.add_argument('--backup-path',type=pathlib.Path);p.add_argument('--backup-dir',type=pathlib.Path);p.add_argument('--run',action='store_true');p.add_argument('--publish',action='store_true');p.add_argument('--propose',action='store_true')
+    p=argparse.ArgumentParser();p.add_argument('--db-path',type=pathlib.Path,required=True);p.add_argument('--state-dir',type=pathlib.Path,required=True);p.add_argument('--root',type=pathlib.Path,required=True);p.add_argument('--aws-url',required=True);p.add_argument('--producer-id',default='mini-nonprod');p.add_argument('--environment',default='nonprod');p.add_argument('--source',choices=SOURCES,default='arxiv');p.add_argument('--backup-path',type=pathlib.Path);p.add_argument('--backup-dir',type=pathlib.Path);p.add_argument('--run',action='store_true');p.add_argument('--publish',action='store_true');p.add_argument('--propose',action='store_true');p.add_argument('--allow-production',action='store_true')
     args=vars(p.parse_args(argv));print(json.dumps(work(**args)));return 0
 if __name__=='__main__':raise SystemExit(main())
