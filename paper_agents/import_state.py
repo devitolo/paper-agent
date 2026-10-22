@@ -47,8 +47,23 @@ def schema(connection):
             sql = re.sub(r'\s+', ' ', sql).strip()
             sql = re.sub(r'\bIF NOT EXISTS\b\s*', '', sql, flags=re.IGNORECASE)
             sql = sql.replace('"', '')
+            sql = re.sub(r'\s*([(),])\s*', r'\1', sql)
+            sql = re.sub(r'\bDEFAULT\s*\(', 'DEFAULT(', sql, flags=re.IGNORECASE)
         normalized.append((object_type, name, table_name, sql))
     return normalized
+
+
+def schema_mismatch_details(actual, expected_schemas):
+    actual_by_key = {(row[0], row[1], row[2]): row[3] for row in actual}
+    best = min(expected_schemas, key=lambda candidate: len(
+        set(actual_by_key) ^ {(row[0], row[1], row[2]) for row in candidate}
+    ))
+    expected_by_key = {(row[0], row[1], row[2]): row[3] for row in best}
+    missing = sorted(set(expected_by_key) - set(actual_by_key))
+    extra = sorted(set(actual_by_key) - set(expected_by_key))
+    changed = sorted(key for key in set(actual_by_key) & set(expected_by_key)
+                     if actual_by_key[key] != expected_by_key[key])
+    return f'missing={missing[:20]} extra={extra[:20]} changed={changed[:20]}'
 
 
 OPENALEX_SCHEMA_MARKER = '-- Versioned OpenAlex traversal state; enabled only by the cursor retrieval path.'
@@ -341,7 +356,9 @@ def inspect(root, *, staging=None):
         require(connection.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'Imported SQLite integrity failed')
         require(not connection.execute('PRAGMA foreign_key_check').fetchall(), 'Imported foreign keys invalid')
         actual_schema = schema(connection)
-        require(actual_schema in expected_schemas, 'Imported schema incompatible; no schema deltas approved')
+        require(actual_schema in expected_schemas,
+                'Imported schema incompatible; no schema deltas approved; '
+                + schema_mismatch_details(actual_schema, expected_schemas))
         validate_artifact_paths(root, connection, files=files)
         tables = logical_rows(connection)
     finally:
