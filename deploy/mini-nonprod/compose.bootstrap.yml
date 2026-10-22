@@ -17,7 +17,7 @@ services:
     stop_grace_period: 20s
     labels:
       org.projectpaper.environment: mini-nonproduction
-      org.projectpaper.state: synthetic-only
+      org.projectpaper.state: isolated-data-copy
     environment:
       PAPER_APP_IMAGE: ${PAPER_MINI_NONPROD_IMAGE:?Supply approved immutable AMD64 registry digest}
       PAPER_AGENT_PACKAGED: "1"
@@ -28,7 +28,7 @@ services:
       PAPER_GENERATED_OUTPUT_DIR: /app/generated
       PAPER_DEPLOYMENT_ENV: non-production
       PAPER_NON_PRODUCTION: "1"
-      PAPER_UI_ENV_LABEL: MINI NON-PROD — SYNTHETIC
+      PAPER_UI_ENV_LABEL: MINI NON-PROD — DATA COPY
       PAPER_AGENT_GEMINI_ENABLED: "0"
       PAPER_AGENT_TELEMETRY: "0"
       PAPER_AGENT_MINILM_ENABLED: "0"
