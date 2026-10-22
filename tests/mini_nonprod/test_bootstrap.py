@@ -51,7 +51,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn('control:/runtime-control',a['volumes'])
         self.assertEqual(e['PAPER_AGENT_SCHEDULER_ENABLED'],'0')
         self.assertEqual(e['PAPER_AGENT_SYNC_SHARED_SECRET'],'')
-        self.assertTrue(c['networks']['isolated']['internal'])
+        self.assertFalse(c['networks']['isolated']['internal'])
         self.assertEqual(set(c['volumes']),{'data','config','logs','control','generated'})
         self.assertTrue(all(v['external'] for v in c['volumes'].values()))
         self.assertFalse({'secrets','extra_hosts','build'} & a.keys())

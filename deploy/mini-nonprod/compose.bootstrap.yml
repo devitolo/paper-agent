@@ -64,7 +64,9 @@ services:
 networks:
   isolated:
     name: paper-mini-nonprod-internal
-    internal: true
+    # Keep this network dedicated to non-prod; Docker cannot publish a host
+    # port from an `internal` network on the Mini's Docker runtime.
+    internal: false
     labels:
       org.projectpaper.environment: mini-nonproduction
 volumes:
