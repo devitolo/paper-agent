@@ -43,8 +43,10 @@ docker compose --project-name paper-mini-nonprod --env-file "$ENV_FILE" -f "$COM
 
 for ((i=0; i<TIMEOUT; i++)); do
   status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' "$CONTAINER" 2>/dev/null || true)
-  if [[ "$status" == healthy ]] && curl --fail --silent --show-error --max-time 5 http://127.0.0.1:18080/ready >/dev/null \
-      && curl --fail --silent --show-error --max-time 5 http://127.0.0.1:18080/ | grep -q 'NON-PROD'; then
+  if [[ "$status" == healthy ]] && docker exec "$CONTAINER" python -c \
+      'import urllib.request; assert urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=5).read()' \
+      && docker exec "$CONTAINER" python -c \
+      'import urllib.request; assert b"NON-PROD" in urllib.request.urlopen("http://127.0.0.1:8000/", timeout=5).read()'; then
     printf 'image=%s\nhealth=healthy\nnonprod_badge=present\nrollback=not-needed\n' "$PAPER_MINI_NONPROD_IMAGE" > "$release/result"
     trap - ERR; exit 0
   fi
