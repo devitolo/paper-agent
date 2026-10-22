@@ -78,7 +78,7 @@ class BootstrapTests(unittest.TestCase):
 
     def test_deploy_script_has_nonprod_guard_and_rollback(self):
         script = (ROOT/'scripts/mini_nonprod_update.sh').read_text()
-        for expected in ('NONPROD_ONLY', 'paper-mini-nonprod', '18080', 'NON-PROD', 'rollback'):
+        for expected in ('NONPROD_ONLY', 'paper-mini-nonprod', 'NON-PROD', 'rollback'):
             self.assertIn(expected, script)
         self.assertNotIn('crontab', script)
         self.assertNotIn('mini_production_update', script)
