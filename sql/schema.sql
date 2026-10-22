@@ -512,7 +512,8 @@ CREATE TABLE IF NOT EXISTS sync_profile_proposals (
     created_at TEXT NOT NULL DEFAULT(datetime('now'))
 );
 
--- Whole-cycle exchange identity and receipt state.
+-- Whole-cycle exchange identity and receipt state; additive after the sync route state.
+-- Versioned whole-cycle exchange identity and receipt state.
 CREATE TABLE IF NOT EXISTS sync_input_row_map (
     table_name TEXT,
     external_id INTEGER,

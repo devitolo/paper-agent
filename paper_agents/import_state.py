@@ -73,6 +73,8 @@ SYNC_SCHEMA_MARKER = '-- Versioned sync route state; enabled only by the approve
 SYNC_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(SYNC_SCHEMA_MARKER, 1)[1]
 TOPIC_ALLOWANCE_MARKER = '-- Versioned Topic Agent allowance state; part of the current Mini serving baseline.'
 TOPIC_ALLOWANCE_SQL = TRUSTED_SCHEMA.read_text().split(TOPIC_ALLOWANCE_MARKER, 1)[1].split('-- Cloud/isolated-worker exchange;', 1)[0]
+WHOLE_CYCLE_SCHEMA_MARKER = '-- Whole-cycle exchange identity and receipt state; additive after the sync route state.'
+WHOLE_CYCLE_SCHEMA_SQL = TRUSTED_SCHEMA.read_text().split(WHOLE_CYCLE_SCHEMA_MARKER, 1)[1]
 
 
 def _schema_variants(sql, *, migrate_summary_quality=True, include_summary_quality_migration_rendering=False, include_sync=True, include_topic_allowance=True):
@@ -185,6 +187,11 @@ def pre_topic_allowance_schemas():
     sql = trusted.split(TOPIC_ALLOWANCE_MARKER, 1)[0] + boundary + trusted.split(boundary, 1)[1]
     return _schema_variants(sql, include_topic_allowance=False)
 
+def pre_whole_cycle_schemas():
+    """Accepted Mini schema before whole-cycle identity/receipt tables."""
+    sql = TRUSTED_SCHEMA.read_text().split(WHOLE_CYCLE_SCHEMA_MARKER, 1)[0]
+    return _schema_variants(sql)
+
 def is_pre_topic_allowance_schema(actual_schema):
     """Match the real Mini baseline with only the allowance table absent."""
     allowance_free = lambda value: [row for row in value if row[1] != 'topic_agent_allowance']
@@ -237,6 +244,8 @@ def apply_approved_post_import_schema_deltas(root):
             delta_sql = SUMMARY_QUALITY_SIGNALS_SCHEMA_SQL
         elif actual_schema in pre_topic_allowance_schemas() or is_pre_topic_allowance_schema(actual_schema):
             delta_sql = TOPIC_ALLOWANCE_SQL
+        elif actual_schema in pre_whole_cycle_schemas():
+            delta_sql = WHOLE_CYCLE_SCHEMA_SQL
         elif actual_schema in pre_sync_schemas():
             delta_sql = SYNC_SCHEMA_SQL
         elif actual_schema in pre_semantic_progress_schemas():

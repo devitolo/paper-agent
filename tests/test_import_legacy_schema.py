@@ -32,4 +32,9 @@ class LegacySchemaTests(unittest.TestCase):
                 matching.append(differences[0][0][:3])
         self.assertEqual(matching, [])
 
+    def test_whole_cycle_schema_is_an_approved_additive_delta(self):
+        current = import_state.pre_whole_cycle_schemas()[0]
+        self.assertNotIn(('table', 'sync_input_row_map', 'sync_input_row_map', None), current)
+        self.assertTrue(import_state.WHOLE_CYCLE_SCHEMA_SQL.strip())
+
 if __name__=='__main__': unittest.main()
