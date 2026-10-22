@@ -124,7 +124,9 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("PAPER_MIGRATION_ENV_FILE=", template)
         self.assertIn("PAPER_MIGRATION_EXTRA_COMPOSE_FILES=$HOME/paper-mini-rehearsal/production-cutover/docker-compose.production.yml", template)
         self.assertNotIn("docker-compose.mini-rehearsal.yml", template)
-        self.assertIn("scripts/mini_sequential_orchestrator.sh", template)
+        for source, hour in (("core", "0 3"), ("openalex", "0 4"), ("arxiv", "0 5"), ("semantic", "0 6")):
+            self.assertIn(f"{hour} * * * cd", template)
+            self.assertIn(f"scripts/mini_container_job.sh {source}", template)
         self.assertIn("30 23 * * 0", template)
         self.assertIn("scripts/mini_container_job.sh zenml", template)
         self.assertIn("scripts/mini_container_job.sh backup", template)
