@@ -34,6 +34,7 @@ from paper_agents.topic_agent import (
 )
 from paper_agents.scout import SCOUT_SOURCES
 from paper_agents.runtime_config import default_sources, gemini_enabled, packaged, serving_only
+from paper_agents.sync_exchange import MAX_BODY_BYTES, build_input_snapshot, receive_result_batch, verify_request
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,
@@ -115,6 +116,28 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
     class ReviewHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/sync/input":
+                if not verify_request(self.headers, b"", "GET", parsed.path):
+                    self.send_error(HTTPStatus.UNAUTHORIZED); return
+                self.send_json(json.dumps(build_input_snapshot(db_path), sort_keys=True).encode())
+                return
+            if parsed.path == "/sync/backup":
+                if not verify_request(self.headers, b"", "GET", parsed.path):
+                    self.send_error(HTTPStatus.UNAUTHORIZED); return
+                import tempfile, tarfile
+                from paper_agents.sync_backup import create_backup, MAX_ARCHIVE_BYTES
+                try:
+                    with tempfile.TemporaryDirectory(prefix="paper-recovery-") as directory:
+                        staging = Path(directory); backup = create_backup(db_path, Path("config"), staging, root=Path(".")); archive = staging / "state.tar.gz"
+                        with tarfile.open(archive, "w:gz", compresslevel=9) as output:
+                            for source in sorted(backup.rglob("*")):
+                                if source.is_file(): output.add(source, arcname=source.relative_to(backup).as_posix(), recursive=False)
+                        if archive.stat().st_size > MAX_ARCHIVE_BYTES: raise ValueError("Backup exceeds transfer limit")
+                        self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "application/gzip"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(archive.stat().st_size)); self.end_headers()
+                        with archive.open("rb") as source:
+                            while chunk := source.read(65536): self.wfile.write(chunk)
+                except (OSError, ValueError, sqlite3.Error): self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Recovery backup unavailable")
+                return
             if parsed.path == "/scout/status":
                 if not packaged() or serving_only():
                     self.send_error(HTTPStatus.NOT_FOUND)
@@ -216,6 +239,23 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path in {"/sync/results", "/sync/profile-proposals"}:
+                raw_length = self.headers.get("Content-Length", "")
+                if not raw_length.isdecimal() or self.headers.get("Transfer-Encoding"):
+                    self.send_error(HTTPStatus.BAD_REQUEST, "A valid Content-Length is required"); return
+                length = int(raw_length)
+                if length > MAX_BODY_BYTES: self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE); return
+                body = self.rfile.read(length)
+                if len(body) != length or not verify_request(self.headers, body, "POST", parsed.path):
+                    self.send_error(HTTPStatus.BAD_REQUEST if len(body) != length else HTTPStatus.UNAUTHORIZED); return
+                try:
+                    if parsed.path == "/sync/profile-proposals":
+                        from paper_agents.sync_exchange import receive_profile_proposal
+                        result = receive_profile_proposal(db_path, body, self.headers)
+                    else: result = receive_result_batch(db_path, body, self.headers)
+                except ValueError as error:
+                    self.send_error(HTTPStatus.UNPROCESSABLE_ENTITY, str(error)); return
+                self.send_json(json.dumps(result, sort_keys=True).encode()); return
             if parsed.path == "/scout/run":
                 if not packaged() or serving_only():
                     self.send_error(HTTPStatus.NOT_FOUND)
@@ -455,6 +495,14 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             with asset_path.open("rb") as handle:
                 self.wfile.write(handle.read())
+
+        def send_json(self, payload: bytes) -> None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
 
         def respond_html(self, content: str) -> None:
             data = content.encode("utf-8")

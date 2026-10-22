@@ -480,3 +480,34 @@ CREATE TABLE IF NOT EXISTS excluded_papers (
 
 CREATE INDEX IF NOT EXISTS idx_excluded_papers_created_at
 ON excluded_papers (created_at DESC);
+
+-- Cloud/isolated-worker exchange; additive after the serving schema baseline.
+-- Versioned sync route state; enabled only by the approved serving exchange migration.
+CREATE TABLE IF NOT EXISTS sync_result_batches (
+    id INTEGER PRIMARY KEY,
+    batch_key TEXT NOT NULL UNIQUE,
+    input_revision TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('received','applied','rejected','failed')),
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    applied_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sync_result_batches_status ON sync_result_batches(status, created_at);
+
+CREATE TABLE IF NOT EXISTS sync_summary_versions (
+    id INTEGER PRIMARY KEY,
+    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    summary_hash TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    content_json TEXT NOT NULL,
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (paper_id, summary_hash)
+);
+CREATE TABLE IF NOT EXISTS sync_profile_proposals (
+ id INTEGER PRIMARY KEY, proposal_id TEXT NOT NULL UNIQUE, base_profile_version INTEGER NOT NULL,
+ input_revision TEXT NOT NULL, consumed_feedback_keys_json TEXT NOT NULL, proposed_profile_json TEXT NOT NULL,
+ change_summary TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('accepted','rejected')), created_at TEXT NOT NULL DEFAULT(datetime('now'))
+);
