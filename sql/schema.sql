@@ -511,3 +511,45 @@ CREATE TABLE IF NOT EXISTS sync_profile_proposals (
     change_summary TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('accepted','rejected')),
     created_at TEXT NOT NULL DEFAULT(datetime('now'))
 );
+
+-- Whole-cycle exchange identity and receipt state.
+CREATE TABLE IF NOT EXISTS sync_input_row_map (
+    table_name TEXT,
+    external_id INTEGER,
+    local_id INTEGER,
+    PRIMARY KEY(table_name, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_producers (
+    producer TEXT,
+    environment TEXT,
+    sequence INTEGER NOT NULL,
+    PRIMARY KEY(producer, environment)
+);
+
+CREATE TABLE IF NOT EXISTS sync_profile_receipts (
+    proposal_id TEXT PRIMARY KEY,
+    payload_hash TEXT NOT NULL,
+    response_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_snapshot_revisions (
+    revision TEXT PRIMARY KEY,
+    content_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS topic_agent_requests (
+    request_id TEXT PRIMARY KEY,
+    payload_hash TEXT NOT NULL,
+    base_topics_hash TEXT NOT NULL,
+    request_text TEXT NOT NULL,
+    conversation_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL,
+    proposal_json TEXT,
+    error_category TEXT,
+    created_at TEXT NOT NULL DEFAULT(datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT(datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_topic_agent_requests_status
+ON topic_agent_requests(status, created_at);

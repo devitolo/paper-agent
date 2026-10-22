@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import stat
 
@@ -35,8 +36,19 @@ def require(condition, message):
 
 
 def schema(connection):
-    # Exact schema contract: unknown/older layouts need a separately reviewed migration.
-    return connection.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
+    # Compare structure, not harmless rendering differences in sqlite_master.
+    rows = connection.execute(
+        "SELECT type,name,tbl_name,sql FROM sqlite_master "
+        "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+    ).fetchall()
+    normalized = []
+    for object_type, name, table_name, sql in rows:
+        if sql is not None:
+            sql = re.sub(r'\s+', ' ', sql).strip()
+            sql = re.sub(r'\bIF NOT EXISTS\b\s*', '', sql, flags=re.IGNORECASE)
+            sql = sql.replace('"', '')
+        normalized.append((object_type, name, table_name, sql))
+    return normalized
 
 
 OPENALEX_SCHEMA_MARKER = '-- Versioned OpenAlex traversal state; enabled only by the cursor retrieval path.'
