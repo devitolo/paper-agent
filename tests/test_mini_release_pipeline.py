@@ -122,7 +122,9 @@ class MiniReleasePipelineTests(unittest.TestCase):
     def test_cron_template_uses_container_launcher_only(self):
         template = (ROOT / "deploy/project-paper.crontab").read_text(encoding="utf-8")
         self.assertIn("PAPER_MIGRATION_ENV_FILE=", template)
-        self.assertIn("PAPER_MIGRATION_EXTRA_COMPOSE_FILES=$HOME/paper-mini-rehearsal/production-cutover/docker-compose.production.yml", template)
+        self.assertIn("PAPER_MIGRATION_ENV_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/final-20260924-230636/production.env", template)
+        self.assertIn("PAPER_MIGRATION_EXTRA_COMPOSE_FILES=/home/devitolo/paper-mini-rehearsal/production-cutover/docker-compose.production.yml", template)
+        self.assertIn("PAPER_MIGRATION_DEPLOY_LOCK_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock", template)
         self.assertNotIn("docker-compose.mini-rehearsal.yml", template)
         for source, hour in (("core", "0 3"), ("openalex", "0 4"), ("arxiv", "0 5"), ("semantic", "0 6")):
             self.assertIn(f"{hour} * * * cd", template)
