@@ -12,8 +12,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tests:
+    name: Tests
+    if: github.ref == 'refs/heads/aws-production'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact protected release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate AWS build and deployment contracts
+        run: |
+          python3 -m unittest discover -s tests/aws_build -v
+          python3 -m unittest discover -s tests/aws_deploy -v
+          python3 -m unittest tests.sync_exchange.test_http_serving -v
+
   build:
     if: github.ref == 'refs/heads/aws-production'
+    needs: tests
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     permissions:
@@ -28,11 +47,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Validate AWS build and deployment contracts
-        run: |
-          python3 -m unittest discover -s tests/aws_build -v
-          python3 -m unittest discover -s tests/aws_deploy -v
-          python3 -m unittest tests.sync_exchange.test_http_serving -v
       - name: Record exact source bundle
         id: source
         shell: bash
