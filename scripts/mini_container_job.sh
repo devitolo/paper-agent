@@ -37,10 +37,11 @@ if [[ -n "${PAPER_MIGRATION_EXTRA_COMPOSE_FILES:-}" ]]; then
   done
 fi
 if [[ "$sync_source" == 1 ]]; then
+  sync_job_name="$1"
   sync_recover() {
     local status=$?
     if [[ "$status" -ne 0 ]]; then
-      echo "[sync] source $1 failed; finalizing interrupted cycle for retry" >&2
+      echo "[sync] source $sync_job_name failed; finalizing interrupted cycle for retry" >&2
       bash "$repo/scripts/mini_sync_exchange.sh" recover || echo '[sync] recovery could not run; inspect sync status' >&2
     fi
     return "$status"

@@ -11,13 +11,14 @@ import tempfile
 import threading
 import unittest
 import inspect
+from urllib.error import HTTPError
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 
 from paper_agents.db import init_db
 from paper_agents.sync_exchange import connect_db, encoded, receive_result_batch
 from paper_agents.web import make_handler
-from paper_agents.whole_cycle_exchange import export_delta, push, recover
+from paper_agents.whole_cycle_exchange import export_delta, push, recover, quarantine_stale_outbox
 import paper_agents.whole_cycle_exchange as whole_cycle_exchange
 
 REPO=Path(__file__).resolve().parents[2]
@@ -220,7 +221,6 @@ sys.exit(subprocess.call(args))
 
     def test_pending_outbox_recovery_keeps_retryable_payload(self):
         self.shell('pull'); self.stages(['openalex'])
-        from paper_agents.sync_worker import request
         with self.assertRaises(Exception):
             push(self.mdb, self.mini, self.state, self.url, transport=lambda *args: (_ for _ in ()).throw(OSError('offline')))
         pending = (self.state/'pipeline-outbox.json').read_bytes()
@@ -228,5 +228,18 @@ sys.exit(subprocess.call(args))
         self.assertTrue(result['outbox_pending'])
         self.assertEqual((self.state/'pipeline-outbox.json').read_bytes(), pending)
         self.assertFalse((self.state/'active-cycle.json').exists())
+
+    def test_stale_outbox_is_quarantined_without_data_loss(self):
+        self.shell('pull'); self.stages(['semantic'])
+        from paper_agents.sync_worker import request
+        with self.assertRaises(Exception):
+            push(self.mdb, self.mini, self.state, self.url, transport=lambda *args: (_ for _ in ()).throw(OSError('offline')))
+        pending = json.loads((self.state/'pipeline-outbox.json').read_text())
+        error = HTTPError(self.url + '/sync/pipeline-results', 422, 'unknown input revision', {}, None)
+        result = quarantine_stale_outbox(self.state, error)
+        self.assertEqual(result['status'], 'stale-outbox-quarantined')
+        self.assertFalse((self.state/'pipeline-outbox.json').exists())
+        self.assertEqual(json.loads((self.state/result['outbox_file']).read_text()), pending)
+        self.assertEqual(json.loads((self.state/'recovery-status.json').read_text())['input_revision'], pending['input_revision'])
 
 if __name__=='__main__':unittest.main()

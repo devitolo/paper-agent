@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import tempfile
 import uuid
+from urllib.error import HTTPError
 
 from .sync_backup import download_backup, validate_backup
 from .sync_exchange import encoded, connect_db
@@ -162,6 +163,40 @@ def recover(state, reason='source failure'):
     return result
 
 
+def quarantine_stale_outbox(state, error):
+    """Preserve an outbox rejected for an input revision AWS no longer knows.
+
+    A snapshot replacement can legitimately retire the revision that an
+    interrupted batch used.  Keep the exact payload for audit/reconciliation,
+    but remove it from the blocking retry slot so the next source can pull a
+    fresh snapshot.  This is limited to the server's 422 response.
+    """
+    state = Path(state)
+    outbox = state / 'pipeline-outbox.json'
+    if not outbox.exists() or getattr(error, 'code', None) != 422:
+        return None
+    detail = str(getattr(error, 'reason', ''))
+    try:
+        detail += ' ' + error.read().decode('utf-8', 'replace')
+    except (AttributeError, OSError):
+        pass
+    if 'unknown input revision' not in detail.lower():
+        return None
+    payload = json.loads(outbox.read_text())
+    key = str(payload.get('batch_id', uuid.uuid4().hex))
+    target = state / f'rejected-outbox-{key}.json'
+    outbox.replace(target)
+    result = {
+        'status': 'stale-outbox-quarantined',
+        'outbox_file': target.name,
+        'batch_id': key,
+        'input_revision': payload.get('input_revision', 'unknown'),
+        'reason': 'AWS rejected the batch input revision (HTTP 422); payload preserved for reconciliation',
+    }
+    atomic_json(state / 'recovery-status.json', result)
+    return result
+
+
 def main(argv=None):
     p=argparse.ArgumentParser()
     p.add_argument('command',choices=('pull','push','retry','recover'))
@@ -178,7 +213,15 @@ def main(argv=None):
         if a.command=='recover':
             result=recover(a.state_dir, 'scheduled source failure')
         elif a.command=='retry':
-            result={'status':'no-pending-outbox'} if not (a.state_dir/'pipeline-outbox.json').exists() else push(a.db_path,a.root,a.state_dir,a.aws_url)
+            if not (a.state_dir/'pipeline-outbox.json').exists():
+                result={'status':'no-pending-outbox'}
+            else:
+                try:
+                    result=push(a.db_path,a.root,a.state_dir,a.aws_url)
+                except HTTPError as error:
+                    result=quarantine_stale_outbox(a.state_dir,error)
+                    if result is None:
+                        raise
         elif a.command=='pull':
             if (a.state_dir/'pipeline-outbox.json').exists() or (a.state_dir/'active-cycle.json').exists():
                 raise ValueError('unfinished cycle blocks pull; recover/publish first')
