@@ -85,8 +85,9 @@ def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.')):
     return payload
 
 def register_backup_snapshot(db_path, backup):
-    manifest=(Path(backup)/'manifest.json').read_bytes()
-    revision=_digest(manifest)
+    manifest_path=Path(backup)/'manifest.json'
+    manifest=json.loads(manifest_path.read_text())
+    revision=manifest.get('snapshot_revision') or _digest(manifest_path.read_bytes())
     with connect_db(db_path) as c:
         _setup(c)
         c.execute('INSERT OR IGNORE INTO sync_snapshot_revisions VALUES(?,?)',(revision,encoded({'backup':True}).decode()))

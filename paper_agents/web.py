@@ -128,7 +128,7 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
                 from paper_agents.sync_backup import create_backup, MAX_ARCHIVE_BYTES
                 try:
                     with tempfile.TemporaryDirectory(prefix="paper-recovery-") as directory:
-                        staging = Path(directory); backup = create_backup(db_path, sync_root / "config", staging, root=sync_root); archive = staging / "state.tar.gz"
+                        staging = Path(directory); snapshot = build_input_snapshot(db_path, sync_root); backup = create_backup(db_path, sync_root / "config", staging, root=sync_root, snapshot_revision=snapshot['revision']); archive = staging / "state.tar.gz"
                         from paper_agents.sync_exchange import register_backup_snapshot
                         register_backup_snapshot(db_path, backup)
                         with tarfile.open(archive, "w:gz", compresslevel=9) as output:

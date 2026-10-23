@@ -167,6 +167,9 @@ sys.exit(subprocess.call(args))
         self.assertEqual((self.root/'order').read_text().splitlines(),['openalex','arxiv','semantic','core','profile'])
         self.assertEqual(json.loads((self.root/'status.json').read_text())['overall_result'],'completed')
         self.assertEqual(len(list(self.state.glob('published-*.json'))),1)
+        published=json.loads(next(self.state.glob('published-*.json')).read_text())
+        with connect_db(self.db) as c:
+            self.assertTrue(c.execute('SELECT 1 FROM sync_snapshot_revisions WHERE revision=?',(published['input_revision'],)).fetchone())
         with connect_db(self.db) as c:
             self.assertEqual(c.execute('SELECT COUNT(*) FROM papers').fetchone()[0],12)
             self.assertEqual(c.execute('SELECT COUNT(*) FROM curator_evaluations').fetchone()[0],8)
