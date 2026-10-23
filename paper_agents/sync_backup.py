@@ -34,7 +34,7 @@ def _check_db(path: Path) -> None:
         if conn.execute('PRAGMA foreign_key_check').fetchone() is not None:
             raise ValueError('Database foreign keys failed')
 
-def create_backup(db_path: Path, config_dir: Path, destination: Path, root: Path | None = None) -> Path:
+def create_backup(db_path: Path, config_dir: Path, destination: Path, root: Path | None = None, snapshot_revision: str | None = None) -> Path:
     db_path, config_dir, destination = map(Path, (db_path, config_dir, destination))
     root = Path(root) if root is not None else config_dir.parent
     _check_db(db_path)
@@ -70,7 +70,12 @@ def create_backup(db_path: Path, config_dir: Path, destination: Path, root: Path
             shutil.copy2(source, target)
         if before!={name:(config_dir/name).read_bytes() for name in before}:raise ValueError('configuration changed during backup')
         files = {p.relative_to(staging).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in staging.rglob('*') if p.is_file()}
-        (staging / 'manifest.json').write_text(json.dumps({'schema': 1, 'files': files, 'app_revision': os.environ.get('PAPER_AGENT_IMAGE_REVISION','unversioned-local')}, sort_keys=True), encoding='utf-8')
+        manifest = {'schema': 1, 'files': files, 'app_revision': os.environ.get('PAPER_AGENT_IMAGE_REVISION','unversioned-local')}
+        if snapshot_revision is not None:
+            if not isinstance(snapshot_revision, str) or len(snapshot_revision) != 64:
+                raise ValueError('invalid snapshot revision')
+            manifest['snapshot_revision'] = snapshot_revision
+        (staging / 'manifest.json').write_text(json.dumps(manifest, sort_keys=True), encoding='utf-8')
         if not validate_backup(staging):
             raise ValueError('Backup validation failed')
         final = destination / ('backup-' + str(time.time_ns()))
@@ -85,6 +90,8 @@ def validate_backup(path: Path) -> bool:
     try:
         manifest = json.loads((path / 'manifest.json').read_text(encoding='utf-8'))
         if not isinstance(manifest, dict) or manifest.get('schema') != 1 or not isinstance(manifest.get('files'), dict):
+            return False
+        if 'snapshot_revision' in manifest and (not isinstance(manifest['snapshot_revision'], str) or len(manifest['snapshot_revision']) != 64):
             return False
         files = manifest['files']
         if not _REQUIRED.issubset(files):

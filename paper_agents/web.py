@@ -112,7 +112,7 @@ def run_review_ui(host: str = "127.0.0.1", port: int = 8000, db_path: Path = DEF
         server.server_close()
 
 
-def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
+def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTPRequestHandler]:
     class ReviewHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
@@ -122,7 +122,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 if self.headers.get("X-Paper-Sync-Probe") == "1":
                     self.send_json(json.dumps({"schema": 1, "status": "ready", "route": parsed.path, "read_only": True}).encode())
                     return
-                self.send_json(json.dumps(build_input_snapshot(db_path), sort_keys=True).encode())
+                self.send_json(json.dumps(build_input_snapshot(db_path, sync_root), sort_keys=True).encode())
                 return
             if parsed.path == "/sync/backup":
                 if not verify_request(self.headers, b"", "GET", parsed.path):
@@ -131,7 +131,7 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                 from paper_agents.sync_backup import create_backup, MAX_ARCHIVE_BYTES
                 try:
                     with tempfile.TemporaryDirectory(prefix="paper-recovery-") as directory:
-                        staging = Path(directory); backup = create_backup(db_path, Path("config"), staging, root=Path(".")); archive = staging / "state.tar.gz"
+                        staging = Path(directory); snapshot = build_input_snapshot(db_path, sync_root); backup = create_backup(db_path, sync_root / "config", staging, root=sync_root, snapshot_revision=snapshot['revision']); archive = staging / "state.tar.gz"
                         with tarfile.open(archive, "w:gz", compresslevel=9) as output:
                             for source in sorted(backup.rglob("*")):
                                 if source.is_file(): output.add(source, arcname=source.relative_to(backup).as_posix(), recursive=False)

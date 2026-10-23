@@ -30,7 +30,7 @@ class ServingHTTPTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {"PAPER_AGENT_SERVING_ONLY": "1", "PAPER_AGENT_SYNC_SHARED_SECRET": "s" * 32})
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(self.db))
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(self.db, sync_root=self.root))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.addCleanup(self.close)
@@ -129,14 +129,37 @@ class ServingHTTPTests(unittest.TestCase):
     def test_backup_stream_download_and_restore(self):
         from paper_agents import sync_backup
         original = sync_backup.create_backup
-        def create(db_path, config_dir, destination, root=None):
-            return original(self.db, self.root / "config", destination, root=self.root)
+        def create(db_path, config_dir, destination, root=None, snapshot_revision=None):
+            return original(self.db, self.root / "config", destination, root=self.root, snapshot_revision=snapshot_revision)
         with patch.object(sync_backup, "create_backup", side_effect=create):
             downloaded = sync_backup.download_backup(self.url, self.root / "received", allow_http_loopback=True)
         self.assertTrue(sync_backup.validate_backup(downloaded))
         restored = sync_backup.restore_backup(downloaded, self.root / "restored")
         self.assertTrue(sync_backup.validate_backup(restored))
         self.assertEqual((restored / "config/topics.yaml").read_text(), "topics: []")
+
+    def test_backup_serves_registered_revision_and_accepts_mini_batch(self):
+        from paper_agents import sync_backup
+        from paper_agents.sync_exchange import connect_db, encoded
+        downloaded = sync_backup.download_backup(self.url, self.root / "received", allow_http_loopback=True)
+        manifest = json.loads((downloaded / "manifest.json").read_text())
+        revision = manifest.get("snapshot_revision")
+        self.assertRegex(revision or "", r"^[0-9a-f]{64}$")
+        with connect_db(self.db) as connection:
+            self.assertIsNotNone(connection.execute("SELECT 1 FROM sync_snapshot_revisions WHERE revision=?", (revision,)).fetchone())
+        payload = encoded({"schema": 1, "input_revision": revision, "producer_id": "mini-production", "environment": "production", "run_sequence": 1, "results": []})
+        with patch.dict(os.environ, {"PAPER_AGENT_SYNC_PRODUCER": "mini-production", "PAPER_AGENT_SYNC_ENVIRONMENT": "production"}):
+            with self.request("/sync/pipeline-results", "POST", payload, signed=True, extra={"X-Paper-Sync-Idempotency": "backup-regression"}) as response:
+                self.assertEqual(json.load(response)["status"], "applied")
+
+    def test_backup_does_not_fallback_to_legacy_artifact(self):
+        legacy = self.root / "backups/manual-bootstrap/manifest.json"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(json.dumps({"legacy": True}))
+        with patch.object(web, "build_input_snapshot", side_effect=ValueError("canonical snapshot unavailable")):
+            with self.assertRaises(urllib.error.HTTPError) as failure:
+                self.request("/sync/backup", signed=True)
+            self.assertEqual(failure.exception.code, 503)
 
 
 if __name__ == "__main__":
