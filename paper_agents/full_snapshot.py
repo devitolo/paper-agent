@@ -47,7 +47,9 @@ openalex_page_dispositions summary_field_feedback minilm_eval_runs minilm_eval_q
 minilm_eval_decisions semantic_scholar_search_state semantic_scholar_page_dispositions
 summary_field_quality_signals arxiv_search_state arxiv_page_dispositions core_search_state
 core_page_dispositions minilm_shadow_runs minilm_shadow_path_results minilm_shadow_outputs
-minilm_shadow_decisions saved_papers excluded_papers'''.split())
+minilm_shadow_decisions saved_papers excluded_papers sync_input_row_map sync_producers
+sync_profile_proposals sync_profile_receipts sync_result_batches sync_snapshot_revisions
+sync_summary_versions topic_agent_allowance topic_agent_requests'''.split())
 PROFILE_KEYS = {'interests', 'positive_signals', 'negative_signals', 'notes', 'feedback_history'}
 INDUSTRY_KEYS = {'enabled', 'include_signals', 'exclude_signals', 'max_items_per_run', 'schedule'}
 SENSITIVE = re.compile(r'password|passwd|secret|credential|privatekey|apikey|accesstoken|refreshtoken|authorization|cookie', re.I)
