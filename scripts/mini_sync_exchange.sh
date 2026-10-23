@@ -3,7 +3,7 @@
 set -euo pipefail
 [[ "${PAPER_AGENT_SYNC_ENABLED:-0}" == 1 ]] || { echo 'Mini AWS sync disabled'; exit 0; }
 [[ "${PAPER_AGENT_SYNC_EXPLICIT_PRODUCTION:-0}" == 1 ]] || { echo 'Explicit sync activation required' >&2; exit 64; }
-case "${1:-}" in pull|push) ;; *) echo 'Usage: mini_sync_exchange.sh pull|push' >&2; exit 64 ;; esac
+case "${1:-}" in pull|push|retry|recover) ;; *) echo 'Usage: mini_sync_exchange.sh pull|push|retry|recover' >&2; exit 64 ;; esac
 : "${PAPER_MIGRATION_ENV_FILE:?Set private migration env-file path}"
 : "${PAPER_AGENT_SYNC_AWS_URL:?Set HTTPS AWS origin}"
 case "$PAPER_MIGRATION_ENV_FILE" in /*) ;; *) exit 64 ;; esac

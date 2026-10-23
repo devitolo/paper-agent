@@ -37,6 +37,17 @@ if [[ -n "${PAPER_MIGRATION_EXTRA_COMPOSE_FILES:-}" ]]; then
   done
 fi
 if [[ "$sync_source" == 1 ]]; then
+  sync_recover() {
+    local status=$?
+    if [[ "$status" -ne 0 ]]; then
+      echo "[sync] source $1 failed; finalizing interrupted cycle for retry" >&2
+      bash "$repo/scripts/mini_sync_exchange.sh" recover || echo '[sync] recovery could not run; inspect sync status' >&2
+    fi
+    return "$status"
+  }
+  trap sync_recover EXIT
+  bash "$repo/scripts/mini_sync_exchange.sh" recover
+  bash "$repo/scripts/mini_sync_exchange.sh" retry
   echo "[sync] pulling AWS input before $1"
   bash "$repo/scripts/mini_sync_exchange.sh" pull
 fi
@@ -55,6 +66,7 @@ fi
 if [[ "$sync_source" == 1 ]]; then
   echo "[sync] publishing $1 results to AWS"
   bash "$repo/scripts/mini_sync_exchange.sh" push
+  trap - EXIT
 fi
 
 if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" || "${PAPER_MINILM_SHADOW_ENABLED:-0}" == "1" ]]; then

@@ -17,7 +17,7 @@ from unittest.mock import patch
 from paper_agents.db import init_db
 from paper_agents.sync_exchange import connect_db, encoded, receive_result_batch
 from paper_agents.web import make_handler
-from paper_agents.whole_cycle_exchange import export_delta, push
+from paper_agents.whole_cycle_exchange import export_delta, push, recover
 import paper_agents.whole_cycle_exchange as whole_cycle_exchange
 
 REPO=Path(__file__).resolve().parents[2]
@@ -209,5 +209,24 @@ sys.exit(subprocess.call(args))
             self.assertEqual(c.execute('SELECT COUNT(*) FROM curator_runs').fetchone()[0],0)
             self.assertEqual(c.execute('SELECT COUNT(*) FROM sync_result_batches').fetchone()[0],0)
         self.assertFalse((self.aws/'data/sync-summaries').exists())
+
+    def test_failed_cycle_recovery_preserves_outbox_and_is_idempotent(self):
+        self.shell('pull')
+        result = recover(self.state, 'synthetic source failure')
+        self.assertEqual(result['status'], 'recovered')
+        self.assertFalse((self.state/'active-cycle.json').exists())
+        self.assertTrue((self.state/'recovery-status.json').is_file())
+        self.assertEqual(recover(self.state)['status'], 'no-op')
+
+    def test_pending_outbox_recovery_keeps_retryable_payload(self):
+        self.shell('pull'); self.stages(['openalex'])
+        from paper_agents.sync_worker import request
+        with self.assertRaises(Exception):
+            push(self.mdb, self.mini, self.state, self.url, transport=lambda *args: (_ for _ in ()).throw(OSError('offline')))
+        pending = (self.state/'pipeline-outbox.json').read_bytes()
+        result = recover(self.state, 'push failure')
+        self.assertTrue(result['outbox_pending'])
+        self.assertEqual((self.state/'pipeline-outbox.json').read_bytes(), pending)
+        self.assertFalse((self.state/'active-cycle.json').exists())
 
 if __name__=='__main__':unittest.main()

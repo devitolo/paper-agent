@@ -145,9 +145,26 @@ def push(db_path, root, state, url, *, transport=request):
     return receipt
 
 
+def recover(state, reason='source failure'):
+    """Finalize an interrupted source cycle without deleting a pending outbox."""
+    state = Path(state)
+    marker = state / 'active-cycle.json'
+    if not marker.exists():
+        atomic_json(state / 'recovery-status.json', {'status': 'no-op', 'reason': reason})
+        return {'status': 'no-op'}
+    cycle = json.loads(marker.read_text())
+    batch = cycle.get('batch_id', uuid.uuid4().hex)
+    suffix = 'pending-outbox' if (state / 'pipeline-outbox.json').exists() else 'abandoned'
+    target = state / f'cycle-{suffix}-{batch}.json'
+    marker.replace(target)
+    result = {'status': 'recovered', 'cycle_file': target.name, 'outbox_pending': suffix == 'pending-outbox', 'reason': reason}
+    atomic_json(state / 'recovery-status.json', result)
+    return result
+
+
 def main(argv=None):
     p=argparse.ArgumentParser()
-    p.add_argument('command',choices=('pull','push'))
+    p.add_argument('command',choices=('pull','push','retry','recover'))
     p.add_argument('--db-path',required=True,type=Path); p.add_argument('--root',required=True,type=Path)
     p.add_argument('--state-dir',required=True,type=Path); p.add_argument('--aws-url',required=True)
     a=p.parse_args(argv)
@@ -158,7 +175,11 @@ def main(argv=None):
     from .migration_lifecycle import lease
     lifecycle=Path(os.environ.get('PAPER_AGENT_LIFECYCLE_DIR','/runtime-control'))
     with lock(a.state_dir), lease(lifecycle), lease(lifecycle,exclusive=True,name='.scheduled-job.lock'):
-        if a.command=='pull':
+        if a.command=='recover':
+            result=recover(a.state_dir, 'scheduled source failure')
+        elif a.command=='retry':
+            result={'status':'no-pending-outbox'} if not (a.state_dir/'pipeline-outbox.json').exists() else push(a.db_path,a.root,a.state_dir,a.aws_url)
+        elif a.command=='pull':
             if (a.state_dir/'pipeline-outbox.json').exists() or (a.state_dir/'active-cycle.json').exists():
                 raise ValueError('unfinished cycle blocks pull; recover/publish first')
             backup=download_backup(a.aws_url,a.state_dir/'snapshots',endpoint='/sync/backup')
