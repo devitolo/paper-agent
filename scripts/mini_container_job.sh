@@ -9,6 +9,14 @@ if [[ $# -ne 1 ]]; then echo 'Exactly one job name required' >&2; exit 64; fi
 : "${PAPER_MIGRATION_ENV_FILE:?Set absolute private migration env-file path}"
 case "$PAPER_MIGRATION_ENV_FILE" in /*) ;; *) echo 'Absolute env-file path required' >&2; exit 64 ;; esac
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+sync_source=0
+case "$1" in
+  arxiv|openalex|semantic|core|zenml)
+    if [[ "${PAPER_AGENT_SYNC_ENABLED:-0}" == "1" && "${PAPER_AGENT_SYNC_EXPLICIT_PRODUCTION:-0}" == "1" ]]; then
+      sync_source=1
+    fi
+    ;;
+esac
 deploy_lock_file="${PAPER_MIGRATION_DEPLOY_LOCK_FILE:-}"
 if [[ -n "$deploy_lock_file" ]]; then
   case "$deploy_lock_file" in /*) ;; *) echo 'Deploy lock file must be absolute' >&2; exit 64 ;; esac
@@ -28,6 +36,10 @@ if [[ -n "${PAPER_MIGRATION_EXTRA_COMPOSE_FILES:-}" ]]; then
     compose+=(-f "$compose_file")
   done
 fi
+if [[ "$sync_source" == 1 ]]; then
+  echo "[sync] pulling AWS input before $1"
+  bash "$repo/scripts/mini_sync_exchange.sh" pull
+fi
 # Never source an env file or interpolate its values as shell commands.
 job_core_source="${PAPER_CORE_SOURCE:-0}"
 if [[ "$1" == core ]]; then
@@ -39,6 +51,11 @@ fi
   PAPER_AGENT_PROFILE_REBUILD_ANCHOR=2026-09-07 TZ=America/Los_Angeles \
   PAPER_CORE_SOURCE="$job_core_source" \
   python -m paper_agents.migration_job "$1"
+
+if [[ "$sync_source" == 1 ]]; then
+  echo "[sync] publishing $1 results to AWS"
+  bash "$repo/scripts/mini_sync_exchange.sh" push
+fi
 
 if [[ "${PAPER_MINILM_EVAL_ENABLED:-0}" == "1" || "${PAPER_MINILM_SHADOW_ENABLED:-0}" == "1" ]]; then
   case "$1" in

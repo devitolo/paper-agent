@@ -50,7 +50,9 @@ run_stage() {
   write_status "$stage" running
   local log_file="$log_dir/${run_id}-${stage}.log"
   printf '[%s] start %s\n' "$(date -u +%FT%TZ)" "$stage" | tee -a "$log_file"
-  if ! bash "$repo/scripts/mini_container_job.sh" "$stage" >> "$log_file" 2>&1; then
+  # The sequential wrapper owns one complete pull/push cycle. Disable the
+  # per-source exchange hook while its stages run to avoid nested pulls.
+  if ! PAPER_AGENT_SYNC_ENABLED=0 bash "$repo/scripts/mini_container_job.sh" "$stage" >> "$log_file" 2>&1; then
     printf '[%s] failed %s\n' "$(date -u +%FT%TZ)" "$stage" | tee -a "$log_file"
     write_status "$stage" failed 'stage failed; later stages were not run'
     return 1

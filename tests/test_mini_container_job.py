@@ -168,6 +168,14 @@ class HostCronTests(unittest.TestCase):
                                     env=env, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 64)
 
+    def test_sync_is_source_scoped_and_profile_is_never_published(self):
+        script = (ROOT / 'scripts/mini_container_job.sh').read_text()
+        self.assertIn('arxiv|openalex|semantic|core|zenml', script)
+        self.assertIn('bash "$repo/scripts/mini_sync_exchange.sh" pull', script)
+        self.assertIn('bash "$repo/scripts/mini_sync_exchange.sh" push', script)
+        sync_case = script.split('case "$1" in', 1)[1].split('esac', 1)[0]
+        self.assertNotIn('profile', sync_case)
+
     def test_deploy_lock_skips_job_before_container_exec(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
