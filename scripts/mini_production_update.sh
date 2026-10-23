@@ -387,7 +387,7 @@ cp "$tmp_env" "$ENV_FILE"
 DEPLOYMENT_MUTATED=1
 
 if crontab -l > "$RELEASE_DIR/crontab.current" 2>/dev/null; then
-  python3 - "$RELEASE_DIR/crontab.current" "$RELEASE_DIR/crontab.next" "$OVERLAY" <<'PY'
+  python3 - "$RELEASE_DIR/crontab.current" "$RELEASE_DIR/crontab.next" "$OVERLAY" "$ENV_FILE" "$DEPLOY_LOCK_FILE" <<'PY'
 from __future__ import annotations
 
 import sys
@@ -396,6 +396,8 @@ from pathlib import Path
 source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
 overlay = sys.argv[3]
+env_file = sys.argv[4]
+deploy_lock_file = sys.argv[5]
 out: list[str] = []
 found = False
 found_minilm_eval = False
@@ -404,9 +406,13 @@ found_zenml = False
 for line in source.read_text(encoding="utf-8").splitlines():
     if "scripts/mini_container_job.sh zenml" in line and not line.lstrip().startswith("#"):
         found_zenml = True
-    if line.startswith("PAPER_MIGRATION_EXTRA_COMPOSE_FILES="):
+    if line.startswith("PAPER_MIGRATION_ENV_FILE="):
+        out.append(f"PAPER_MIGRATION_ENV_FILE={env_file}")
+    elif line.startswith("PAPER_MIGRATION_EXTRA_COMPOSE_FILES="):
         out.append(f"PAPER_MIGRATION_EXTRA_COMPOSE_FILES={overlay}")
         found = True
+    elif line.startswith("PAPER_MIGRATION_DEPLOY_LOCK_FILE="):
+        out.append(f"PAPER_MIGRATION_DEPLOY_LOCK_FILE={deploy_lock_file}")
     elif line.startswith("PAPER_MINILM_EVAL_ENABLED="):
         out.append("PAPER_MINILM_EVAL_ENABLED=0")
         found_minilm_eval = True
