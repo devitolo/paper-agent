@@ -73,6 +73,7 @@ phase_end() {
 
 [[ -d "$CANDIDATE_DIR" ]] || { echo "Missing candidate dir: $CANDIDATE_DIR" >&2; exit 1; }
 [[ -f "$ENV_FILE" ]] || { echo "Missing production env file: $ENV_FILE" >&2; exit 1; }
+grep -Eq "^PAPER_AGENT_SYNC_SHARED_SECRET=.{32,}$" "$ENV_FILE" || { echo "Missing or invalid PAPER_AGENT_SYNC_SHARED_SECRET in production env file: $ENV_FILE" >&2; exit 1; }
 [[ -f "$OVERLAY" ]] || { echo "Missing production overlay: $OVERLAY" >&2; exit 1; }
 [[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ && "$DRAIN_TIMEOUT" -gt 0 ]] || { echo "PAPER_MINI_DRAIN_TIMEOUT must be a positive integer" >&2; exit 64; }
 [[ -z "$ARXIV_PROGRESS" || "$ARXIV_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_ARXIV_PROGRESS must be 0 or 1 when set" >&2; exit 64; }

@@ -6,6 +6,11 @@ PAPER_MIGRATION_EXTRA_COMPOSE_FILES=/home/devitolo/paper-mini-rehearsal/producti
 PAPER_MIGRATION_DEPLOY_LOCK_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock
 PAPER_MINILM_EVAL_ENABLED=0
 PAPER_MINILM_SHADOW_ENABLED=0
+PAPER_AGENT_SYNC_ENABLED=1
+PAPER_AGENT_SYNC_EXPLICIT_PRODUCTION=1
+PAPER_AGENT_SYNC_AWS_URL=https://paper-prod.tail5fc461.ts.net
+PAPER_AGENT_SYNC_PRODUCER=mini-production
+PAPER_AGENT_SYNC_ENVIRONMENT=production
 
 # Installed by scripts/install_project_paper_cron.sh.
 
