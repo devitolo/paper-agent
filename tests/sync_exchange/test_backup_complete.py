@@ -65,12 +65,11 @@ class BackupCompleteTests(unittest.TestCase):
         backup = self.backup()
         self.assertEqual(json.loads((backup / 'data/profile.json').read_text()), {'interests': []})
 
-    def test_snapshot_revision_is_carried_in_backup_manifest(self):
-        revision = 'a' * 64
-        backup = create_backup(self.db, self.config, self.root / 'backups', snapshot_revision=revision)
-        self.assertEqual(json.loads((backup / 'manifest.json').read_text())['snapshot_revision'], revision)
-        self.assertTrue(validate_backup(backup))
+    def test_snapshot_revision_is_derived_from_frozen_backup(self):
+        backup = create_backup(self.db, self.config, self.root / 'backups')
         manifest = json.loads((backup / 'manifest.json').read_text())
+        self.assertRegex(manifest['snapshot_revision'], r'^[0-9a-f]{64}$')
+        self.assertTrue(validate_backup(backup))
         manifest['snapshot_revision'] = 'short'
         (backup / 'manifest.json').write_text(json.dumps(manifest))
         self.assertFalse(validate_backup(backup))
