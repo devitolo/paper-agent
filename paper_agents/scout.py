@@ -66,11 +66,6 @@ DEFAULT_ARXIV_REQUEST_DELAY = 3.0
 DEFAULT_ARXIV_RETRIES = 3
 DEFAULT_ARXIV_TIMEOUT = 60
 SCOUT_SOURCES = ("arxiv", "semantic_scholar", "openalex", "core")
-SEMANTIC_SCHOLAR_KEY1_ENV = "SEMANTIC_SCHOLAR_API_KEY1"
-SEMANTIC_SCHOLAR_KEY2_ENV = "SEMANTIC_SCHOLAR_API_KEY2"
-SEMANTIC_SCHOLAR_LEGACY_KEY_ENV = "SEMANTIC_SCHOLAR_API_KEY"
-SEMANTIC_SCHOLAR_429_WINDOW_SECONDS = 10 * 60
-SEMANTIC_SCHOLAR_KEY1_429_THRESHOLD = 2
 
 
 def _final_curl_headers(raw: bytes):
@@ -388,7 +383,6 @@ class SemanticScholarSource:
         timeout: int = DEFAULT_ARXIV_TIMEOUT,
         verbose: bool = True,
         api_key: str | None = None,
-        api_keys: tuple[str, str] | None = None,
     ):
         self.request_delay = request_delay
         self.retries = retries
@@ -396,89 +390,7 @@ class SemanticScholarSource:
         self.verbose = verbose
         self.cooldown_active = False
         self.last_diagnostics: dict[str, Any] = {}
-        self.last_request_attempts = 0
-        if api_keys is not None:
-            if (not isinstance(api_keys, (tuple, list)) or len(api_keys) != 2
-                    or any(not isinstance(value, str) or not value.strip() for value in api_keys)
-                    or api_keys[0].strip() == api_keys[1].strip()):
-                raise ValueError("Semantic Scholar requires two distinct API keys")
-            self.api_keys = tuple(value.strip() for value in api_keys)
-        elif api_key is not None:
-            # Single-key construction remains available to isolated unit tests and
-            # local non-production callers; packaged production uses both env keys.
-            self.api_keys = (api_key,)
-        else:
-            key1 = os.getenv(SEMANTIC_SCHOLAR_KEY1_ENV, "").strip()
-            key2 = os.getenv(SEMANTIC_SCHOLAR_KEY2_ENV, "").strip()
-            if key1 or key2:
-                if not key1 or not key2 or key1 == key2:
-                    raise ValueError("Semantic Scholar requires two distinct API keys")
-                self.api_keys = (key1, key2)
-            else:
-                legacy = os.getenv(SEMANTIC_SCHOLAR_LEGACY_KEY_ENV, "").strip()
-                self.api_keys = (legacy,) if legacy else ()
-        if os.getenv("PAPER_AGENT_PACKAGED") == "1" and len(self.api_keys) != 2:
-            raise ValueError("Packaged Semantic Scholar runs require API key1 and key2")
-        self.key_slot = 1
-        self._key1_429_started = None
-        self._key1_429_count = 0
-        self._failover_count = 0
-        self._key2_429_stop = False
-        self.api_key = self.api_keys[0] if self.api_keys else None
-
-    def begin_run(self) -> None:
-        """Reset slot state so every source run starts with key1."""
-        self.key_slot = 1
-        self.api_key = self.api_keys[0] if self.api_keys else None
-        self.cooldown_active = False
-        self._key1_429_started = None
-        self._key1_429_count = 0
-        self._failover_count = 0
-        self._key2_429_stop = False
-
-    def diagnostics(self) -> dict[str, Any]:
-        return {
-            "active_key_slot": f"key{self.key_slot}",
-            "key1_429_count": self._key1_429_count,
-            "failover_count": self._failover_count,
-            "key2_429_stop": self._key2_429_stop,
-        }
-
-    def _record_success(self) -> None:
-        if self.key_slot == 1:
-            self._key1_429_started = None
-            self._key1_429_count = 0
-
-    def _reset_key1_429_streak(self) -> None:
-        self._key1_429_started = None
-        self._key1_429_count = 0
-
-    def _handle_429(self, error: urllib.error.HTTPError) -> str:
-        """Return retry, failover, or stop without exposing credential values."""
-        if self.key_slot == 2:
-            self._key2_429_stop = True
-            self.cooldown_active = True
-            self.last_diagnostics.update(self.diagnostics(), stop_reason="provider_rate_limited_key2")
-            return "stop"
-        now = time.monotonic()
-        if (self._key1_429_started is None
-                or now - self._key1_429_started > SEMANTIC_SCHOLAR_429_WINDOW_SECONDS):
-            self._key1_429_started = now
-            self._key1_429_count = 0
-        self._key1_429_count += 1
-        if self._key1_429_count >= SEMANTIC_SCHOLAR_KEY1_429_THRESHOLD:
-            if len(self.api_keys) < 2:
-                self.cooldown_active = True
-                self.last_diagnostics.update(self.diagnostics(), stop_reason="key1_rate_limit_no_key2")
-                return "stop"
-            self.key_slot = 2
-            self.api_key = self.api_keys[1]
-            self._failover_count += 1
-            self.last_diagnostics.update(self.diagnostics(), stop_reason="key1_rate_limit_failover")
-            self._record("failover", from_key_slot="key1", to_key_slot="key2")
-            return "failover"
-        self.last_diagnostics.update(self.diagnostics())
-        return "retry"
+        self.api_key = api_key if api_key is not None else os.getenv("SEMANTIC_SCHOLAR_API_KEY")
 
     def _record(self, event: str, **details: Any) -> None:
         record = {"at": datetime.now(timezone.utc).isoformat(), "event": event, **details}
@@ -489,10 +401,8 @@ class SemanticScholarSource:
     def fetch(self, topics: list[str], max_results: int, freshness_months: int) -> list[ScoutCandidate]:
         if self.cooldown_active:
             raise RuntimeError("Semantic Scholar source cooldown: requests stopped for the remainder of this run after exhausted HTTP 429 retries")
-        self.begin_run()
         self.last_diagnostics = {"requests": [], "successful_topics": 0, "failed_topics": 0,
                                  "empty_topics": 0, "skipped_topics": 0}
-        self.last_diagnostics.update(self.diagnostics())
         terms = [topic for topic in topics if topic.strip()] or DEFAULT_SCOUT_TOPICS
         per_topic = max(1, min(10, (max_results + len(terms) - 1) // len(terms)))
         cutoff_year = (date.today() - timedelta(days=freshness_months * 31)).year
@@ -507,10 +417,7 @@ class SemanticScholarSource:
             try:
                 papers = self._fetch_topic(topic, per_topic)
             except OSError as error:
-                if isinstance(error, urllib.error.HTTPError):
-                    errors.append(f"{topic}: HTTP {error.code}")
-                else:
-                    errors.append(f"{topic}: {type(error).__name__}")
+                errors.append(f"{topic}: {error}")
                 self.last_diagnostics["failed_topics"] += 1
                 if isinstance(error, urllib.error.HTTPError) and error.code == 429:
                     self.cooldown_active = True
@@ -542,9 +449,8 @@ class SemanticScholarSource:
         if errors and self.verbose:
             print(f"Semantic Scholar partial failures: {len(errors)}/{len(terms)} topics failed")
         if not candidates and errors:
-            cooldown_note = " source cooldown" if self.cooldown_active else ""
             raise RuntimeError(
-                f"Semantic Scholar fetch returned 0 candidates:{cooldown_note} {self.last_diagnostics['failed_topics']} failed, "
+                f"Semantic Scholar fetch returned 0 candidates: {self.last_diagnostics['failed_topics']} failed, "
                 f"{self.last_diagnostics['successful_topics']} successful "
                 f"({self.last_diagnostics['empty_topics']} empty), "
                 f"{self.last_diagnostics['skipped_topics']} skipped topics. "
@@ -553,51 +459,44 @@ class SemanticScholarSource:
         return dedupe_candidates(candidates)[:max_results]
 
     def _fetch_topic(self, topic: str, max_results: int) -> list[dict[str, Any]]:
+        params = urllib.parse.urlencode(
+            {
+                "query": topic,
+                "limit": max_results,
+                "fields": ",".join(
+                    [
+                        "paperId",
+                        "title",
+                        "abstract",
+                        "authors",
+                        "year",
+                        "publicationDate",
+                        "url",
+                        "openAccessPdf",
+                        "externalIds",
+                        "fieldsOfStudy",
+                        "publicationTypes",
+                        "venue",
+                    ]
+                ),
+            }
+        )
+        request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
+
         last_error: OSError | None = None
-        attempt = 0
-        failover_retry = False
-        while attempt <= self.retries or failover_retry:
-            failover_retry = False
-            params = urllib.parse.urlencode(
-                {
-                    "query": topic,
-                    "limit": max_results,
-                    "fields": ",".join(
-                        [
-                            "paperId", "title", "abstract", "authors", "year", "publicationDate",
-                            "url", "openAccessPdf", "externalIds", "fieldsOfStudy", "publicationTypes", "venue",
-                        ]
-                    ),
-                }
-            )
-            request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
+        for attempt in range(self.retries + 1):
             self._record("request", topic=topic, attempt=attempt + 1)
             try:
                 with telemetry.span("source.http", "TOOL", source=self.name, attempt=attempt + 1), urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 papers = payload.get("data") or []
                 papers = [paper for paper in papers if isinstance(paper, dict)]
-                self._record_success()
                 self._record("success", topic=topic, attempt=attempt + 1, entries=len(papers))
                 return papers
             except urllib.error.HTTPError as error:
                 last_error = error
                 self._record("http_error", topic=topic, attempt=attempt + 1, status=error.code,
-                             key_slot=f"key{self.key_slot}",
                              retry_after=error.headers.get("Retry-After") if error.headers else None)
-                if error.code == 429:
-                    action = self._handle_429(error)
-                    if action == "stop":
-                        raise
-                    if action == "failover":
-                        delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After") if error.headers else None)
-                        self._record("retry", topic=topic, attempt=attempt + 1,
-                                     key_slot=f"key{self.key_slot}", delay_seconds=delay)
-                        time.sleep(delay)
-                        failover_retry = True
-                        continue
-                else:
-                    self._reset_key1_429_streak()
                 if error.code not in {429, 500, 502, 503, 504} or attempt >= self.retries:
                     raise
                 delay = self._retry_delay(attempt, retry_after=error.headers.get("Retry-After") if error.headers else None)
@@ -606,7 +505,6 @@ class SemanticScholarSource:
                 self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
                 telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
-                attempt += 1
             except (urllib.error.URLError, TimeoutError, SocketTimeout, json.JSONDecodeError) as error:
                 self._record("request_error", topic=topic, attempt=attempt + 1, error=str(error))
                 last_error = error if isinstance(error, OSError) else OSError(str(error))
@@ -618,7 +516,6 @@ class SemanticScholarSource:
                 self._record("retry", topic=topic, attempt=attempt + 1, delay_seconds=delay)
                 telemetry.event("retry", attempt=attempt + 1, delay_seconds=delay)
                 time.sleep(delay)
-                attempt += 1
 
         if last_error:
             raise last_error
@@ -630,11 +527,8 @@ class SemanticScholarSource:
             headers["x-api-key"] = self.api_key
         return headers
 
-    def fetch_page(self, topic: str, *, offset: int, cutoff: str, page_size: int,
-                   max_attempts: int | None = None) -> dict[str, Any]:
+    def fetch_page(self, topic: str, *, offset: int, cutoff: str, page_size: int) -> dict[str, Any]:
         """Fetch one normal-search page; progressive orchestration owns retries and state."""
-        if self.cooldown_active:
-            raise RuntimeError("Semantic Scholar source cooldown: requests stopped after terminal HTTP 429")
         params = urllib.parse.urlencode(
             {
                 "query": topic,
@@ -650,51 +544,12 @@ class SemanticScholarSource:
                 ),
             }
         )
-        attempts = 0
-        request_budget = max(1, max_attempts or (self.retries + 1))
-        self.last_request_attempts = 0
-        completed = False
-        last_429_error = None
-        while attempts < request_budget:
-            request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
-            self.last_request_attempts += 1
-            self._record("request", topic=topic, offset=offset, key_slot=f"key{self.key_slot}")
-            try:
-                with telemetry.span("source.http", "TOOL", source=self.name), urllib.request.urlopen(
-                    request, timeout=self.timeout
-                ) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
-                self._record_success()
-                completed = True
-                break
-            except urllib.error.HTTPError as error:
-                if error.code != 429:
-                    self._reset_key1_429_streak()
-                    raise
-                last_429_error = error
-                action = self._handle_429(error)
-                retry_after = error.headers.get("Retry-After") if error.headers else None
-                if action == "stop":
-                    raise
-                if attempts >= request_budget:
-                    self.cooldown_active = True
-                    self.last_diagnostics.update(
-                        self.diagnostics(), stop_reason="provider_rate_limited_budget"
-                    )
-                    raise
-                delay = self._retry_delay(attempts, retry_after=retry_after)
-                self._record("retry", topic=topic, offset=offset,
-                             key_slot=f"key{self.key_slot}", delay_seconds=delay)
-                time.sleep(delay)
-                attempts += 1
-        if not completed:
-            if last_429_error is not None:
-                self.cooldown_active = True
-                self.last_diagnostics.update(
-                    self.diagnostics(), stop_reason="provider_rate_limited_budget"
-                )
-                raise last_429_error
-            raise RuntimeError("Semantic Scholar request budget exhausted")
+        request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
+        self._record("request", topic=topic, offset=offset)
+        with telemetry.span("source.http", "TOOL", source=self.name), urllib.request.urlopen(
+            request, timeout=self.timeout
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
         if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
             raise ValueError("Semantic Scholar page missing data")
         returned_offset = payload.get("offset")
@@ -714,10 +569,10 @@ class SemanticScholarSource:
 
     def _retry_delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after and retry_after.isdigit():
-            return max(self.request_delay, float(retry_after))
+            return float(retry_after)
         if retry_after:
             try:
-                return max(self.request_delay, parsedate_to_datetime(retry_after).timestamp() - time.time())
+                return max(0, parsedate_to_datetime(retry_after).timestamp() - time.time())
             except (ValueError, TypeError, OverflowError):
                 pass
         return self.request_delay * (2 ** attempt)

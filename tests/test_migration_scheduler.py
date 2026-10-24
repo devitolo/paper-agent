@@ -207,8 +207,7 @@ class ContractTests(unittest.TestCase):
         env.update(PAPER_MIGRATION_PROJECT='paper-synthetic',PAPER_MIGRATION_APP_IMAGE='synthetic/app@sha256:'+'a'*64,
             PAPER_MIGRATION_OLLAMA_IMAGE='synthetic/ollama@sha256:'+'b'*64,PAPER_AGENT_GEMINI_ENABLED='0',
             PAPER_AGENT_TELEMETRY='1',PAPER_PHOENIX_DNS='synthetic-phoenix',PAPER_IMPORT_MANIFEST_FILE='/synthetic/manifest.json',
-            PAPER_MIGRATION_PORT='18080',PAPER_GEMINI_KEY_FILE='/synthetic/private-key',
-            SEMANTIC_SCHOLAR_API_KEY1='synthetic-key1',SEMANTIC_SCHOLAR_API_KEY2='synthetic-key2')
+            PAPER_MIGRATION_PORT='18080',PAPER_GEMINI_KEY_FILE='/synthetic/private-key',SEMANTIC_SCHOLAR_API_KEY='synthetic-not-a-credential')
         for kind in ('DATA','CONFIG','CONTROL','LOG','BACKUP','MODEL'):env['PAPER_MIGRATION_'+kind+'_VOLUME']='synthetic-'+kind.lower()
         result=subprocess.run(base,env=env,capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)

@@ -157,18 +157,7 @@ arXiv remains the default Scout source and the daily cron source. Semantic Schol
 
 Scout also reads the active profile plus recent structured feedback to build deterministic guidance for every run. High-scored `keep` feedback can add a few boost terms to the source query set; low-scored `reject` feedback contributes avoid terms. The exact guidance is stored in `scouting_guidance` and copied into `scout_runs.diagnostics_json`. Candidate diagnostics record feedback boost/avoid hits, and only clear avoid-heavy matches with no positive hits are excluded before Curator. Softer matches remain visible for Curator evaluation. The sample size is still small, around 10 scored papers, so this path is deliberately conservative. Deep paper/PDF reading remains future Curator V2 evidence-aware reranking work, not Scout V2.
 
-Semantic Scholar reads the two private `SEMANTIC_SCHOLAR_API_KEY1` and
-`SEMANTIC_SCHOLAR_API_KEY2` values and sends the active slot as the `x-api-key`
-request header. Every run starts with key1. Two consecutive key1 HTTP 429
-responses within ten minutes switch once to key2; the first key2 429 stops the
-run because it likely reflects provider/IP-wide limiting. Retry-After and the
-configured backoff are honored, and neither key value is logged or included in
-health diagnostics. The source remains opt-in and rate-limited. Approved key
-guidance is 1 request per second cumulatively across endpoints, so use
-`--request-delay 2` or higher. OpenAlex uses its public API without a key. Its
-adapter narrows source queries toward software/cloud/operations context,
-requests article-like work types, and filters obvious book/index/reference and
-biomedical noise before storage.
+Semantic Scholar reads `SEMANTIC_SCHOLAR_API_KEY` and sends it as the `x-api-key` request header. The key is approved and a direct CLI test has succeeded, but the source remains opt-in and rate-limited. Approved key guidance is 1 request per second cumulatively across endpoints, so use `--request-delay 2` or higher. OpenAlex uses its public API without a key. Its adapter narrows source queries toward software/cloud/operations context, requests article-like work types, and filters obvious book/index/reference and biomedical noise before storage.
 
 CORE reads `CORE_API_KEY` from the local or production environment and uses CORE API v3 Works search first, not Outputs. Works are deduplicated/enriched scholarly records; Outputs are raw source-specific harvested records and are not the first Project Paper discovery path. Register at <https://core.ac.uk/services/api>; for this private single-user Project Paper setup, the Personal profile is usually appropriate unless applying through a real academic or institutional affiliation. Store the key only in the local environment or production env file, never in chat, logs, shell history, docs, or command examples. Preferred auth is `Authorization: Bearer [CORE_API_KEY]`, not a query parameter.
 
