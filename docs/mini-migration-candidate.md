@@ -32,8 +32,9 @@ Populate a **private** copy of `deploy/mini-migration.env.example`:
   application first call retains `model=None`; this default is supplied only to
   the CLI child via `GEMINI_MODEL`. Existing explicit application overrides and
   quota fallback to `gemini-3.1-flash-lite` are unchanged.
-- Existing Semantic Scholar API key provisioned in the private env file (existing
-  source contract); keep `PAPER_AGENT_SCHEDULER_ENABLED=0`.
+- Both Semantic Scholar API keys provisioned in the private env file (key1 and
+  key2 are required and distinct; key1 is always tried first); keep
+  `PAPER_AGENT_SCHEDULER_ENABLED=0`.
 
 Missing Gemini runtime/key/model leaves imported browsing and raw/structured
 feedback saving available with a fixed actionable error. It does not silently

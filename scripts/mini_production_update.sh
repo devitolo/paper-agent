@@ -84,7 +84,7 @@ grep -Eq "^PAPER_AGENT_SYNC_SHARED_SECRET=.{32,}$" "$ENV_FILE" || { echo "Missin
 
 # Credentials in the private production env file are authoritative. Docker Compose
 # otherwise gives an ambient shell variable precedence over --env-file.
-unset SEMANTIC_SCHOLAR_API_KEY
+unset SEMANTIC_SCHOLAR_API_KEY SEMANTIC_SCHOLAR_API_KEY1 SEMANTIC_SCHOLAR_API_KEY2
 
 cd "$CANDIDATE_DIR"
 
@@ -155,7 +155,7 @@ cat > "$RELEASE_DIR/rollback.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$CANDIDATE_DIR"
-unset SEMANTIC_SCHOLAR_API_KEY
+unset SEMANTIC_SCHOLAR_API_KEY SEMANTIC_SCHOLAR_API_KEY1 SEMANTIC_SCHOLAR_API_KEY2
 cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"
 crontab "$RELEASE_DIR/crontab.before"
 compose=(docker compose --env-file "$ENV_FILE" -f docker-compose.mini-migration.yml)

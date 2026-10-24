@@ -43,6 +43,7 @@ class SemanticScholarProgress:
     def __init__(self, connection, source, *, now=None):
         self.connection = connection
         self.source = source
+        self.source.begin_run()
         self.now = now or datetime.now(timezone.utc)
         self.original = dict(connection.execute(
             "SELECT key, value_json FROM semantic_scholar_search_state"
@@ -58,6 +59,7 @@ class SemanticScholarProgress:
             "pages": [],
             "stop_reason": "request_budget_reached",
         }
+        self.diagnostics.update(source.diagnostics())
 
     def _new_traversal(self, months):
         return {
@@ -151,6 +153,7 @@ class SemanticScholarProgress:
                     "dispositions": dispositions,
                 }
                 self.pages.append((key, topic, page))
+                self.diagnostics.update(self.source.diagnostics())
                 candidates = dedupe_candidates([*candidates, *accepted])
                 self.diagnostics["pages"].append({
                     "topic": topic,
@@ -168,7 +171,7 @@ class SemanticScholarProgress:
                     deep["offset"] = payload["next"]
                     deep["exhausted"] = payload["next"] is None
             except urllib.error.HTTPError as error:
-                provider_error = sanitized_provider_error(error, api_key=self.source.api_key)
+                provider_error = sanitized_provider_error(error, api_keys=self.source.api_keys)
                 if error.code == 429:
                     delay = cooldown_seconds(
                         error.headers.get("Retry-After") if error.headers else None, self.now
@@ -176,17 +179,19 @@ class SemanticScholarProgress:
                     control["not_before"] = clock + delay
                     self._persist_cooldown(control["not_before"])
                     self.diagnostics.update(
-                        stop_reason="source_cooldown",
+                        stop_reason=self.source.last_diagnostics.get("stop_reason", "source_cooldown"),
                         not_before=control["not_before"],
                         provider_error=provider_error,
                     )
+                    self.diagnostics.update(self.source.diagnostics())
                     break
                 errors.append(f"Semantic Scholar HTTP {error.code}: {topic}")
                 self.diagnostics.update(
                     stop_reason="source_error", provider_error=provider_error
                 )
+                self.diagnostics.update(self.source.diagnostics())
                 break
-            except (OSError, ValueError, KeyError, TypeError) as error:
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
                 errors.append(f"Semantic Scholar page failed ({type(error).__name__}): {topic}")
                 self.diagnostics.update(
                     stop_reason="source_error",
@@ -196,6 +201,7 @@ class SemanticScholarProgress:
                         if isinstance(error, urllib.error.URLError) else None,
                     },
                 )
+                self.diagnostics.update(self.source.diagnostics())
                 break
 
         if not attempted:
@@ -215,10 +221,13 @@ class SemanticScholarProgress:
         while self.diagnostics["attempts"] < ATTEMPT_BUDGET:
             if self.diagnostics["attempts"]:
                 time.sleep(delay if retried else self.source.request_delay)
-            self.diagnostics["attempts"] += 1
             try:
-                return self.source.fetch_page(topic, **kwargs)
+                remaining = ATTEMPT_BUDGET - self.diagnostics["attempts"]
+                result = self.source.fetch_page(topic, max_attempts=remaining, **kwargs)
+                self.diagnostics["attempts"] += max(1, self.source.last_request_attempts)
+                return result
             except urllib.error.HTTPError as error:
+                self.diagnostics["attempts"] += max(1, self.source.last_request_attempts)
                 if (
                     error.code not in TRANSIENT_HTTP_STATUSES
                     or retried
@@ -237,6 +246,7 @@ class SemanticScholarProgress:
                     "delay_seconds": delay,
                 })
             except urllib.error.URLError as error:
+                self.diagnostics["attempts"] += max(1, self.source.last_request_attempts)
                 if (
                     not transient_url_error(error)
                     or retried
@@ -250,6 +260,9 @@ class SemanticScholarProgress:
                     "transport_error": type(error.reason).__name__,
                     "delay_seconds": delay,
                 })
+            except RuntimeError:
+                self.diagnostics["attempts"] += max(1, self.source.last_request_attempts)
+                raise
         raise RuntimeError("Semantic Scholar request budget exhausted")
 
     def _persist_cooldown(self, not_before):
@@ -367,10 +380,20 @@ def transient_url_error(error):
     return False
 
 
-def sanitized_provider_error(error, *, api_key=None):
+def sanitized_provider_error(error, *, api_key=None, api_keys=()):
     """Return bounded HTTP diagnostics without request headers or credentials."""
+    secrets = [value for value in api_keys if isinstance(value, str) and value]
+    if api_key and api_key not in secrets:
+        secrets.append(api_key)
+
+    def redact(value):
+        result = str(value)
+        for secret in secrets:
+            result = result.replace(secret, "[REDACTED]")
+        return result
+
     headers = {
-        name.lower(): str(value)[:256]
+        name.lower(): redact(value)[:256]
         for name, value in (error.headers.items() if error.headers else [])
         if name.lower() in PROVIDER_ERROR_HEADERS
     }
@@ -384,8 +407,7 @@ def sanitized_provider_error(error, *, api_key=None):
     else:
         parsed = safe_provider_payload(parsed)
         body = json.dumps(parsed, ensure_ascii=True, separators=(",", ":"))
-    if api_key:
-        body = body.replace(api_key, "[REDACTED]")
+    body = redact(body)
     body = re.sub(r"(?i)\bbearer\s+[a-z0-9._~+/=-]+", "Bearer [REDACTED]", body)
     body = re.sub(
         r'''(?i)\b(x-api-key|api[_ -]?key|authorization)\b\s*[:=]\s*["']?[^\s,}"']+''',
@@ -397,7 +419,7 @@ def sanitized_provider_error(error, *, api_key=None):
         truncated = True
     return {
         "http_status": error.code,
-        "reason": str(error.reason)[:256],
+        "reason": redact(error.reason)[:256],
         "headers": headers,
         "body": body,
         "body_truncated": truncated,

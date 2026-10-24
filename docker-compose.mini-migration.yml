@@ -36,7 +36,8 @@ x-environment: &environment
   OMP_NUM_THREADS: "2"
   OPENBLAS_NUM_THREADS: "2"
   TZ: America/Los_Angeles
-  SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:?Provision source credential privately}
+  SEMANTIC_SCHOLAR_API_KEY1: ${SEMANTIC_SCHOLAR_API_KEY1:?Provision Semantic Scholar key1 privately}
+  SEMANTIC_SCHOLAR_API_KEY2: ${SEMANTIC_SCHOLAR_API_KEY2:?Provision Semantic Scholar key2 privately}
   CORE_API_KEY: ${CORE_API_KEY:-}
 x-volumes: &state-mounts
   - paper-data:/app/data
