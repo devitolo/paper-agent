@@ -156,7 +156,7 @@ class ServingHTTPTests(unittest.TestCase):
         legacy = self.root / "backups/manual-bootstrap/manifest.json"
         legacy.parent.mkdir(parents=True)
         legacy.write_text(json.dumps({"legacy": True}))
-        with patch.object(web, "build_input_snapshot", side_effect=ValueError("canonical snapshot unavailable")):
+        with patch("paper_agents.sync_exchange.build_input_snapshot", side_effect=ValueError("canonical snapshot unavailable")):
             with self.assertRaises(urllib.error.HTTPError) as failure:
                 self.request("/sync/backup", signed=True)
             self.assertEqual(failure.exception.code, 503)
