@@ -53,7 +53,7 @@ def _setup(c):
     c.execute('CREATE TABLE IF NOT EXISTS sync_profile_receipts(proposal_id TEXT PRIMARY KEY,payload_hash TEXT NOT NULL,response_json TEXT NOT NULL)')
 
 def _rows(c,table):return [dict(r) for r in c.execute('SELECT * FROM '+table+' ORDER BY id')]
-def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.')):
+def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.'), *, max_bytes=MAX_BODY_BYTES):
     root=Path(root)
     # Capture files before/after database read: refuse a concurrent config edit.
     def files():
@@ -80,17 +80,23 @@ def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.')):
         if config!=files():raise ValueError('configuration changed during snapshot')
         payload={'schema':1,'config':config,'profile':profile,'papers':papers,'paper_sources':sources,'history':history,'artifacts':artifacts,'saved':saved,'excluded':excluded}
         payload['revision']=_digest(encoded(payload))
-        if len(encoded(payload))>MAX_BODY_BYTES:raise ValueError('snapshot too large; pagination required')
+        if max_bytes is not None and len(encoded(payload))>max_bytes:raise ValueError('snapshot too large; pagination required')
         c.execute('INSERT OR IGNORE INTO sync_snapshot_revisions VALUES(?,?)',(payload['revision'],encoded(payload).decode()));c.commit()
     return payload
 
-def register_backup_snapshot(db_path, backup):
+def register_backup_snapshot(db_path, backup, snapshot=None):
     manifest_path=Path(backup)/'manifest.json'
     manifest=json.loads(manifest_path.read_text())
-    revision=manifest.get('snapshot_revision') or _digest(manifest_path.read_bytes())
+    revision=manifest.get('snapshot_revision')
+    if not isinstance(revision, str) or len(revision) != 64 or any(ch not in '0123456789abcdef' for ch in revision):
+        raise ValueError('backup snapshot revision required')
+    if snapshot is None:
+        snapshot=build_input_snapshot(Path(backup)/'paper_agent.db', Path(backup), max_bytes=None)
+    if not isinstance(snapshot, dict) or snapshot.get('revision') != revision:
+        raise ValueError('backup snapshot revision mismatch')
     with connect_db(db_path) as c:
         _setup(c)
-        c.execute('INSERT OR IGNORE INTO sync_snapshot_revisions VALUES(?,?)',(revision,encoded({'backup':True}).decode()))
+        c.execute('INSERT OR REPLACE INTO sync_snapshot_revisions VALUES(?,?)',(revision,encoded(snapshot).decode()))
     return revision
 
 def _paper(c,item):

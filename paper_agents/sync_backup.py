@@ -79,7 +79,7 @@ def create_backup(db_path: Path, config_dir: Path, destination: Path, root: Path
             if not required.issubset(tables):
                 raise ValueError('canonical Project Paper schema required for sync backup')
         try:
-            snapshot_revision = build_input_snapshot(staging / 'paper_agent.db', staging)['revision']
+            snapshot_revision = build_input_snapshot(staging / 'paper_agent.db', staging, max_bytes=None)['revision']
         except sqlite3.OperationalError as error:
             # Standalone backup callers may use a minimal SQLite schema. Keep the
             # revision derived from the frozen archive while production schemas use
@@ -163,7 +163,19 @@ def restore_backup(backup: Path, target: Path) -> Path:
     return target
 
 
-MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 8 * 1024 * 1024
+MAX_EXPANDED_BACKUP_BYTES = 256 * 1024 * 1024
+
+def expanded_backup_size(backup: Path, *, limit: int | None = None) -> int:
+    if limit is None:
+        limit = MAX_EXPANDED_BACKUP_BYTES
+    total = 0
+    for path in Path(backup).rglob('*'):
+        if path.is_file():
+            total += path.stat().st_size
+            if total > limit:
+                raise ValueError('Expanded recovery archive exceeds size limit')
+    return total
 
 
 def download_backup(base_url: str, destination: Path, *, allow_http_loopback: bool = False) -> Path:
@@ -202,7 +214,7 @@ def download_backup(base_url: str, destination: Path, *, allow_http_loopback: bo
                 if count > 10000 or not member.isfile():
                     raise ValueError('Unsupported archive member')
                 total += member.size
-                if total > MAX_ARCHIVE_BYTES:
+                if total > MAX_EXPANDED_BACKUP_BYTES:
                     raise ValueError('Expanded recovery archive exceeds size limit')
                 target = _safe(extracted, member.name)
                 if target.exists():

@@ -34,7 +34,7 @@ from paper_agents.topic_agent import (
 )
 from paper_agents.scout import SCOUT_SOURCES
 from paper_agents.runtime_config import default_sources, gemini_enabled, packaged, serving_only
-from paper_agents.sync_exchange import MAX_BODY_BYTES, build_input_snapshot, receive_result_batch, verify_request
+from paper_agents.sync_exchange import MAX_BODY_BYTES, build_input_snapshot, encoded, receive_result_batch, verify_request
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,
@@ -122,24 +122,43 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
                 if self.headers.get("X-Paper-Sync-Probe") == "1":
                     self.send_json(json.dumps({"schema": 1, "status": "ready", "route": parsed.path, "read_only": True}).encode())
                     return
-                self.send_json(json.dumps(build_input_snapshot(db_path, sync_root), sort_keys=True).encode())
+                try:
+                    payload = encoded(build_input_snapshot(db_path, sync_root))
+                except ValueError as error:
+                    if str(error).startswith('snapshot too large'):
+                        self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, 'Canonical JSON snapshot exceeds 8 MiB transport limit')
+                    else:
+                        self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, 'Snapshot unavailable')
+                    return
+                except (OSError, sqlite3.Error):
+                    self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, 'Snapshot unavailable')
+                    return
+                self.send_json(payload)
                 return
             if parsed.path == "/sync/backup":
                 if not verify_request(self.headers, b"", "GET", parsed.path):
                     self.send_error(HTTPStatus.UNAUTHORIZED); return
                 import tempfile
-                from paper_agents.sync_backup import create_backup, publish_archive, MAX_ARCHIVE_BYTES
+                from paper_agents.sync_backup import create_backup, publish_archive, expanded_backup_size, MAX_ARCHIVE_BYTES
                 try:
                     with tempfile.TemporaryDirectory(prefix="paper-recovery-") as directory:
-                        staging = Path(directory); backup = create_backup(db_path, sync_root / "config", staging, root=sync_root, require_canonical=True); archive = staging / "state.tar.gz"
+                        staging = Path(directory); backup = create_backup(db_path, sync_root / "config", staging, root=sync_root, require_canonical=True); expanded_backup_size(backup); archive = staging / "state.tar.gz"
                         from paper_agents.sync_exchange import register_backup_snapshot
                         register_backup_snapshot(db_path, backup)
                         publish_archive(backup, archive)
-                        if archive.stat().st_size > MAX_ARCHIVE_BYTES: raise ValueError("Backup exceeds transfer limit")
+                        if archive.stat().st_size > MAX_ARCHIVE_BYTES: raise ValueError("Compressed recovery archive exceeds 8 MiB transport limit")
                         self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "application/gzip"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(archive.stat().st_size)); self.end_headers()
                         with archive.open("rb") as source:
                             while chunk := source.read(65536): self.wfile.write(chunk)
-                except (OSError, ValueError, sqlite3.Error): self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Recovery backup unavailable")
+                except (OSError, ValueError, sqlite3.Error) as error:
+                    message = 'Recovery backup unavailable'
+                    if isinstance(error, ValueError):
+                        detail = str(error)
+                        if detail.startswith('Compressed recovery archive exceeds'):
+                            message = 'Compressed recovery archive exceeds 8 MiB transport limit'
+                        elif detail.startswith('Expanded recovery archive exceeds'):
+                            message = 'Expanded recovery archive exceeds configured resource limit'
+                    self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, message)
                 return
             if parsed.path == "/scout/status":
                 if not packaged() or serving_only():
