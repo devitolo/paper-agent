@@ -35,9 +35,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check Compose configuration tooling
+        run: docker compose version
+
       - name: Run deployment safety tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: tests
         run: |
           python3 -m unittest \
             tests.test_mini_release_pipeline \
@@ -48,6 +52,14 @@ jobs:
             tests.test_core_progress \
             tests.test_rehearsal_images \
             tests.test_import_legacy_schema \
+            tests.test_semantic_scholar_key_failover \
+            tests.test_semantic_scholar_failover_qa \
+            tests.test_semantic_scholar_env_wiring_qa \
+            tests.test_semantic_scholar_cooldown \
+            tests.test_semantic_scholar_progress \
+            tests.test_scout_diagnostics \
+            tests.test_sync_health \
+            tests.test_mini_health_trend \
             -v
 
   build:
