@@ -21,7 +21,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout exact protected release source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
       - name: Validate AWS build and deployment contracts
@@ -44,7 +44,7 @@ jobs:
       bundle: ${{ steps.source.outputs.bundle }}
     steps:
       - name: Checkout exact protected release source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
       - name: Record exact source bundle
@@ -105,7 +105,7 @@ jobs:
     permissions: {}
     steps:
       - name: Checkout exact qualified release source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
       - name: Deploy qualified digest to existing AWS Compose service
