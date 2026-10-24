@@ -64,6 +64,15 @@ class BackupCompleteTests(unittest.TestCase):
             conn.execute('INSERT INTO profile_versions VALUES (1,1,?)', ('{"interests":[]}',))
         backup = self.backup()
         self.assertEqual(json.loads((backup / 'data/profile.json').read_text()), {'interests': []})
+
+    def test_snapshot_revision_is_derived_from_frozen_backup(self):
+        backup = create_backup(self.db, self.config, self.root / 'backups')
+        manifest = json.loads((backup / 'manifest.json').read_text())
+        self.assertRegex(manifest['snapshot_revision'], r'^[0-9a-f]{64}$')
+        self.assertTrue(validate_backup(backup))
+        manifest['snapshot_revision'] = 'short'
+        (backup / 'manifest.json').write_text(json.dumps(manifest))
+        self.assertFalse(validate_backup(backup))
     def test_foreign_key_failure(self):
         with sqlite3.connect(self.db) as conn:
             conn.execute('CREATE TABLE parent(id INTEGER PRIMARY KEY)')

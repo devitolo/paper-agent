@@ -127,14 +127,14 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
             if parsed.path == "/sync/backup":
                 if not verify_request(self.headers, b"", "GET", parsed.path):
                     self.send_error(HTTPStatus.UNAUTHORIZED); return
-                import tempfile, tarfile
-                from paper_agents.sync_backup import create_backup, MAX_ARCHIVE_BYTES
+                import tempfile
+                from paper_agents.sync_backup import create_backup, publish_archive, MAX_ARCHIVE_BYTES
                 try:
                     with tempfile.TemporaryDirectory(prefix="paper-recovery-") as directory:
-                        staging = Path(directory); snapshot = build_input_snapshot(db_path, sync_root); backup = create_backup(db_path, sync_root / "config", staging, root=sync_root, snapshot_revision=snapshot['revision']); archive = staging / "state.tar.gz"
-                        with tarfile.open(archive, "w:gz", compresslevel=9) as output:
-                            for source in sorted(backup.rglob("*")):
-                                if source.is_file(): output.add(source, arcname=source.relative_to(backup).as_posix(), recursive=False)
+                        staging = Path(directory); backup = create_backup(db_path, sync_root / "config", staging, root=sync_root, require_canonical=True); archive = staging / "state.tar.gz"
+                        from paper_agents.sync_exchange import register_backup_snapshot
+                        register_backup_snapshot(db_path, backup)
+                        publish_archive(backup, archive)
                         if archive.stat().st_size > MAX_ARCHIVE_BYTES: raise ValueError("Backup exceeds transfer limit")
                         self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "application/gzip"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(archive.stat().st_size)); self.end_headers()
                         with archive.open("rb") as source:
