@@ -207,8 +207,19 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
                         db_path,
                         days=parse_days(params.get("days", ["21"])[0]),
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
+                        tab=params.get("tab", ["attention"])[0],
                     )
                 )
+                return
+            if parsed.path == "/health/needs-attention":
+                summary = health_summary(db_path, days=21, source=None)
+                payload = json.dumps({"items": render_needs_attention_items(summary)}, ensure_ascii=False).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
                 return
             if parsed.path in ("/minilm-eval", "/retrieval-experiment", "/scout-eval"):
                 self.send_response(HTTPStatus.SEE_OTHER)
@@ -1296,9 +1307,102 @@ def render_sync_health() -> str:
     return f'<section class="health-section"><h2>Mini sync</h2><dl class="health-kv">{rows}</dl></section>'
 
 
-def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:
+def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]]:
+    """Return deterministic, evidence-linked operational explanations."""
+    items: list[dict[str, str]] = []
+    for warning in summary.get("warnings", []):
+        message = str(warning.get("message", "Unknown warning"))
+        level = str(warning.get("level", "unknown"))
+        category, cause, action, confidence = classify_attention_message(message)
+        items.append({
+            "state": "observed",
+            "domain": "processing",
+            "severity": level,
+            "what_happened": message,
+            "why_it_matters": "The discovery or recommendation pipeline may be producing incomplete results.",
+            "likely_cause": cause,
+            "evidence": message,
+            "affected_scope": "Latest affected workflow or source run",
+            "recommended_next_action": action,
+            "confidence": confidence,
+            "category": category,
+            "observed_at": str(warning.get("recorded_at", "unknown")),
+        })
+    sync = sync_health_snapshot()
+    if sync["state"] != "completed":
+        state = sync["state"] if sync["state"] in {"stale", "unavailable", "malformed", "unknown"} else "observed"
+        items.append({
+            "state": state,
+            "domain": "delivery",
+            "severity": "warning" if state in {"stale", "unknown"} else "critical",
+            "what_happened": f"AWS sync status is {state}.",
+            "why_it_matters": "New Mini results may not be visible in the AWS serving UI.",
+            "likely_cause": "The sync receipt is stale, unavailable, or malformed; the exact delivery cause is unknown.",
+            "evidence": f"state={sync['state']}, updated_at={sync['time']}, revision={sync['revision']}",
+            "affected_scope": "Mini-to-AWS delivery",
+            "recommended_next_action": "Inspect the sync receipt and outbox delivery logs before rerunning a source job.",
+            "confidence": "confirmed",
+            "observed_at": sync["time"],
+        })
+    return items
+
+
+def classify_attention_message(message: str) -> tuple[str, str, str, str]:
+    text = message.lower()
+    rules = (
+        ("configuration", ("missing", "config", "credential", "key"), "A required configuration value may be absent or invalid.", "Check the private production configuration and rerun the affected stage.", "likely"),
+        ("rate_limit", ("429", "thrott", "rate limit"), "The provider is rate limiting requests.", "Wait for the provider window to clear and verify backoff/key rotation evidence.", "confirmed"),
+        ("timeout", ("timeout", "timed out"), "The stage exceeded its configured time limit.", "Inspect the stage event and retry only after checking provider and host health.", "confirmed"),
+        ("empty_results", ("0 candidates", "0 eligible", "empty"), "The source returned no usable records or filtering removed them.", "Inspect source diagnostics to distinguish provider emptiness from local filtering.", "confirmed"),
+        ("delivery", ("sync", "aws", "outbox", "receipt"), "The delivery stage did not produce a current accepted receipt.", "Inspect the outbox and AWS acceptance receipt; preserve the local result while reconciling.", "likely"),
+    )
+    for category, needles, cause, action, confidence in rules:
+        if any(needle in text for needle in needles):
+            return category, cause, action, confidence
+    return "unknown", "The recorded evidence does not identify a single root cause.", "Inspect the linked evidence and wait for the next scheduled occurrence before changing configuration.", "unknown"
+
+
+def render_needs_attention(summary: dict[str, Any]) -> str:
+    items = render_needs_attention_items(summary)
+    if not items:
+        return '<section class="health-section needs-attention"><h2>Needs Attention</h2><p>No deterministic attention items are currently observed.</p></section>'
+    cards = "".join(
+        '<article class="attention-card">'
+        f'<h3>{escape(item["severity"])} · {escape(item["domain"])}</h3>'
+        f'<p><strong>What happened:</strong> {escape(item["what_happened"])}</p>'
+        f'<p><strong>Why it matters:</strong> {escape(item["why_it_matters"])}</p>'
+        f'<p><strong>Likely cause:</strong> {escape(item["likely_cause"])}</p>'
+        f'<p><strong>Evidence:</strong> {escape(item["evidence"])}</p>'
+        f'<p><strong>Scope:</strong> {escape(item["affected_scope"])} · <strong>Next:</strong> {escape(item["recommended_next_action"])}</p>'
+        f'<p><strong>Confidence:</strong> {escape(item["confidence"])} · <strong>Observed:</strong> {escape(item["observed_at"])}</p>'
+        '</article>'
+        for item in items
+    )
+    return f'<section class="health-section needs-attention"><h2>Needs Attention</h2>{cards}</section>'
+
+
+def render_health_jobs(summary: dict[str, Any]) -> str:
+    rows = summary.get("job_events", [])
+    return '<section class="health-section"><h2>Jobs</h2><p>Durable stage events are retained here for operational review. Processing and delivery outcomes remain separate.</p>' + render_health_table("Stage event history", rows, ["recorded_at", "job", "status", "message"]) + '</section>'
+
+
+def render_health_infrastructure(summary: dict[str, Any]) -> str:
+    sync = sync_health_snapshot()
+    values = {
+        "Database integrity": str(summary["db"]["integrity"]),
+        "Database path": str(summary["db"]["path"]),
+        "AWS delivery state": sync["state"],
+        "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
+        "Delivery age": sync["age"],
+        "Next scheduled action": "Verify the next scheduled occurrence and inspect stale evidence before mutating state.",
+    }
+    return '<section class="health-section"><h2>Infrastructure</h2><p>Infrastructure facts are read-only observations; this page performs no provider calls or health-side mutations.</p>' + render_key_values(values) + '</section>'
+
+
+def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL, tab: str = "attention") -> str:
     days = days if days in {7, 21, 30, 90} else 21
     summary = health_summary(db_path, days=days, source=source_value)
+    tab = tab if tab in {"attention", "jobs", "infrastructure"} else "attention"
     source_choices = [(SOURCE_FILTER_ALL, "All sources")]
     source_choices.extend((source, source_display_name(source)) for source in summary["available_sources"])
     source_value = normalize_choice(summary["range"]["source"], source_choices, SOURCE_FILTER_ALL)
@@ -1324,6 +1428,8 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
       </form>
     """
 
+    tabs = ''.join(f'<a class="health-tab {"active" if tab == value else ""}" href="/health?tab={value}">{label}</a>' for value, label in (("attention", "Needs Attention"), ("jobs", "Jobs"), ("infrastructure", "Infrastructure")))
+    tab_content = render_needs_attention(summary) if tab == "attention" else (render_health_jobs(summary) if tab == "jobs" else render_health_infrastructure(summary))
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1336,6 +1442,8 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
   <main>
     {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
     {warning_html}
+    <nav class="health-tabs" aria-label="Health sections">{tabs}</nav>
+    {tab_content}
     <div class="health-cards">{card_html}</div>
     {render_sync_health()}
     {render_profile_maintenance(summary["profile_maintenance"])}
@@ -3626,6 +3734,14 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-warnings li { margin: 2px 0; }
 .health-warnings li.critical strong { color: #cf222e; }
 .health-section { margin-top: 12px; }
+.needs-attention { border: 1px solid #bf8700; background: #fff8c5; border-radius: 6px; padding: 8px; }
+.health-tabs { display: flex; gap: 8px; margin: 10px 0; }
+.health-tab { border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 9px; text-decoration: none; }
+.health-tab.active { background: #0969da; color: #fff; }
+.attention-card { border-top: 1px solid #d8dee4; padding: 7px 0; }
+.attention-card:first-of-type { border-top: 0; }
+.attention-card h3 { margin: 0 0 4px; font-size: 13px; }
+.attention-card p { margin: 3px 0; font-size: 12px; }
 .health-table { margin: 8px 0 12px; overflow-x: auto; }
 .health-table table { width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; }
 .health-table th, .health-table td { padding: 5px 7px; border-bottom: 1px solid #d8dee4; text-align: left; white-space: nowrap; }
