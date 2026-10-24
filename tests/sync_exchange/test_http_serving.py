@@ -92,8 +92,8 @@ class ServingHTTPTests(unittest.TestCase):
     def test_backup_stream_download_and_restore(self):
         from paper_agents import sync_backup
         original = sync_backup.create_backup
-        def create(db_path, config_dir, destination, root=None):
-            return original(self.db, self.root / "config", destination, root=self.root)
+        def create(db_path, config_dir, destination, root=None, require_canonical=False):
+            return original(self.db, self.root / "config", destination, root=self.root, require_canonical=require_canonical)
         with patch.object(sync_backup, "create_backup", side_effect=create):
             downloaded = sync_backup.download_backup(self.url, self.root / "received", allow_http_loopback=True)
         self.assertTrue(sync_backup.validate_backup(downloaded))
