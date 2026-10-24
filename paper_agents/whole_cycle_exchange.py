@@ -50,7 +50,9 @@ def pull(db_path, root, state, backup):
         raise ValueError('existing intended Mini database required')
     manifest=json.loads((backup/'manifest.json').read_text())
     manifest_revision=manifest.get('snapshot_revision')
-    revision=manifest_revision or hashlib.sha256((backup/'manifest.json').read_bytes()).hexdigest()
+    if not isinstance(manifest_revision, str) or len(manifest_revision) != 64:
+        raise ValueError('backup missing canonical snapshot_revision')
+    revision=manifest_revision
     state.mkdir(parents=True,exist_ok=True)
     cycle={'batch_id':uuid.uuid4().hex,'input_revision':revision,'stage':'restoring'}
     atomic_json(state/'active-cycle.json',cycle)
