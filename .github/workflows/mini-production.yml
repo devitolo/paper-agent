@@ -166,6 +166,7 @@ jobs:
         shell: bash
         env:
           PAPER_MINI_APP_IMAGE: ${{ needs.build.outputs.image_ref }}
+          PAPER_MINI_ENV_FILE: ${{ vars.PAPER_MINI_ENV_FILE }}
           PAPER_MINI_DEPLOY_BRANCH: ${{ env.DEPLOY_BRANCH }}
           PAPER_MINI_DRAIN_TIMEOUT: "1800"
           PAPER_MINI_ARXIV_PROGRESS: "1"
