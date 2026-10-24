@@ -130,7 +130,8 @@ class ComposeIdentityTests(unittest.TestCase):
             'PAPER_AGENT_GEMINI_ENABLED':'1','PAPER_AGENT_TELEMETRY':'1',
             'PAPER_PHOENIX_DNS':'synthetic-phoenix','PAPER_IMPORT_MANIFEST_FILE':'/synthetic/manifest.json',
             'PAPER_MIGRATION_PORT':'18080','PAPER_GEMINI_KEY_FILE':'/synthetic/key',
-            'SEMANTIC_SCHOLAR_API_KEY':'synthetic','PAPER_REHEARSAL_SOURCE_SHA256':'d'*64,
+            'SEMANTIC_SCHOLAR_API_KEY1':'synthetic-key1','SEMANTIC_SCHOLAR_API_KEY2':'synthetic-key2',
+            'PAPER_REHEARSAL_SOURCE_SHA256':'d'*64,
             'PAPER_REHEARSAL_IDENTITY_FILE':'/synthetic/identity.json'}
         for kind in ('DATA','CONFIG','CONTROL','LOG','BACKUP','MODEL'):
             env['PAPER_MIGRATION_'+kind+'_VOLUME']='synthetic-'+kind.lower()

@@ -1509,6 +1509,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                 scout_runs.source,
                 scout_runs.started_at,
                 scout_runs.completed_at,
+                scout_runs.diagnostics_json,
                 COUNT(scout_candidates.id) AS candidate_count,
                 SUM(CASE WHEN scout_candidates.excluded = 0 THEN 1 ELSE 0 END) AS eligible_count,
                 SUM(CASE WHEN scout_candidates.excluded = 1 THEN 1 ELSE 0 END) AS excluded_count,
@@ -1530,6 +1531,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                 "source",
                 "started_at",
                 "completed_at",
+                "diagnostics_json",
                 "candidate_count",
                 "eligible_count",
                 "excluded_count",
@@ -1748,6 +1750,28 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, Any]]:
     for latest_scout in summary["latest_scout_runs_by_source"]:
         if not _is_recent_scheduled_scout(latest_scout):
             continue
+        try:
+            decoded_diagnostics = json.loads(latest_scout.get("diagnostics_json") or "{}")
+            source_diagnostics = (
+                decoded_diagnostics.get("source_diagnostics", {})
+                if isinstance(decoded_diagnostics, dict) else {}
+            )
+            if not isinstance(source_diagnostics, dict):
+                source_diagnostics = {}
+        except (TypeError, ValueError):
+            source_diagnostics = {}
+        if source_diagnostics.get("stop_reason") == "provider_rate_limited_key2":
+            warnings.append({
+                "level": "critical",
+                "scout_run_id": latest_scout["id"],
+                "message": "semantic_scholar stopped after key2 received HTTP 429; provider/IP-wide rate limiting is likely.",
+            })
+        elif source_diagnostics.get("stop_reason") == "semantic_scholar_key_configuration_invalid":
+            warnings.append({
+                "level": "critical",
+                "scout_run_id": latest_scout["id"],
+                "message": "semantic_scholar key1/key2 configuration is invalid; both private keys are required.",
+            })
         started_at = _format_local_run_time(latest_scout.get("started_at"))
         run_label = f"Scout run at {started_at}" if started_at else "Latest Scout run"
         candidate_count = int(latest_scout["candidate_count"] or 0)
