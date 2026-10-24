@@ -34,7 +34,7 @@ def _check_db(path: Path) -> None:
         if conn.execute('PRAGMA foreign_key_check').fetchone() is not None:
             raise ValueError('Database foreign keys failed')
 
-def create_backup(db_path: Path, config_dir: Path, destination: Path, root: Path | None = None) -> Path:
+def create_backup(db_path: Path, config_dir: Path, destination: Path, root: Path | None = None, *, require_canonical: bool = False) -> Path:
     db_path, config_dir, destination = map(Path, (db_path, config_dir, destination))
     root = Path(root) if root is not None else config_dir.parent
     _check_db(db_path)
@@ -71,7 +71,13 @@ def create_backup(db_path: Path, config_dir: Path, destination: Path, root: Path
         if before!={name:(config_dir/name).read_bytes() for name in before}:raise ValueError('configuration changed during backup')
         # Derive the revision from the exact frozen database and files staged for
         # this backup. Never reread the live database after the SQLite backup.
-        from .sync_exchange import build_input_snapshot, encoded
+        from .sync_exchange import build_input_snapshot
+        if require_canonical:
+            with closing(sqlite3.connect(staging / 'paper_agent.db')) as conn:
+                tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            required = {'papers', 'paper_sources', 'artifacts', 'workflow_cycles', 'curator_runs', 'curator_evaluations', 'recommendations'}
+            if not required.issubset(tables):
+                raise ValueError('canonical Project Paper schema required for sync backup')
         try:
             snapshot_revision = build_input_snapshot(staging / 'paper_agent.db', staging)['revision']
         except sqlite3.OperationalError as error:
@@ -95,6 +101,21 @@ def create_backup(db_path: Path, config_dir: Path, destination: Path, root: Path
         return final
     except Exception:
         shutil.rmtree(staging)
+        raise
+
+def publish_archive(backup: Path, archive: Path) -> Path:
+    """Write a complete backup archive, then atomically expose its final path."""
+    backup, archive = Path(backup), Path(archive)
+    partial = archive.with_name(archive.name + '.partial')
+    try:
+        with tarfile.open(partial, 'w:gz', compresslevel=9) as output:
+            for source in sorted(backup.rglob('*')):
+                if source.is_file():
+                    output.add(source, arcname=source.relative_to(backup).as_posix(), recursive=False)
+        partial.replace(archive)
+        return archive
+    except Exception:
+        partial.unlink(missing_ok=True)
         raise
 
 def validate_backup(path: Path) -> bool:
