@@ -3734,7 +3734,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-warnings li { margin: 2px 0; }
 .health-warnings li.critical strong { color: #cf222e; }
 .health-section { margin-top: 12px; }
-.needs-attention { border: 1px solid #bf8700; background: #fff8c5; border-radius: 6px; padding: 8px; }
+.needs-attention { border: 1px solid rgba(251, 191, 36, 0.58); background: rgba(251, 191, 36, 0.09); border-radius: 10px; padding: 10px; }
+.needs-attention h2 { color: var(--text); }
+.needs-attention p { color: var(--muted-strong); }
 .health-tabs { display: flex; gap: 8px; margin: 10px 0; }
 .health-tab { border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 9px; text-decoration: none; }
 .health-tab.active { background: #0969da; color: #fff; }
