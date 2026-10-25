@@ -1386,25 +1386,25 @@ def classify_attention_message(message: str) -> tuple[str, str, str, str]:
 def render_needs_attention(summary: dict[str, Any]) -> str:
     items = render_needs_attention_items(summary)
     if not items:
-        return '<section class="health-section needs-attention"><h2>Needs Attention</h2><p>No deterministic attention items are currently observed.</p></section>'
+        return '<details class="health-section needs-attention" open><summary><h2>Needs Attention</h2><span>No active issues</span></summary><p>No deterministic attention items are currently observed.</p></details>'
     cards = []
     for item in items:
         diagnostic = ""
         if item.get("diagnostic_href"):
             diagnostic = f' · <a href="{escape(item["diagnostic_href"])}" target="_blank" rel="noopener">View diagnostics</a>'
         cards.append(
-            '<article class="attention-card">'
-            f'<h3>{escape(item["severity"])} · {escape(item["domain"])}</h3>'
+            '<details class="attention-card">'
+            f'<summary><strong>{escape(item["severity"])} · {escape(item["domain"])}</strong><span>{escape(item["what_happened"])}</span></summary>'
             f'<p><strong>What happened:</strong> {escape(item["what_happened"])}</p>'
             f'<p><strong>Why it matters:</strong> {escape(item["why_it_matters"])}</p>'
             f'<p><strong>Likely cause:</strong> {escape(item["likely_cause"])}</p>'
             f'<p><strong>Evidence:</strong> {escape(item["evidence"])}</p>'
             f'<p><strong>Scope:</strong> {escape(item["affected_scope"])} · <strong>Next:</strong> {escape(item["recommended_next_action"])}{diagnostic}</p>'
             f'<p><strong>Confidence:</strong> {escape(item["confidence"])} · <strong>Observed:</strong> {escape(item["observed_at"])}</p>'
-            '</article>'
+            '</details>'
         )
     cards = "".join(cards)
-    return f'<section class="health-section needs-attention"><h2>Needs Attention</h2>{cards}</section>'
+    return f'<details class="health-section needs-attention" open><summary><h2>Needs Attention</h2><span>{len(items)} active issue(s) · expand an issue for evidence</span></summary>{cards}</details>'
 
 
 def render_health_jobs(summary: dict[str, Any]) -> str:
@@ -3761,6 +3761,14 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .needs-attention { border: 1px solid rgba(251, 191, 36, 0.58); background: rgba(251, 191, 36, 0.09); border-radius: 10px; padding: 10px; }
 .needs-attention h2 { color: var(--text); }
 .needs-attention p { color: var(--muted-strong); }
+.needs-attention > summary, .attention-card > summary { cursor: pointer; list-style: none; }
+.needs-attention > summary::-webkit-details-marker, .attention-card > summary::-webkit-details-marker { display: none; }
+.needs-attention > summary { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.needs-attention > summary > span { color: var(--muted); font-size: 12px; }
+.attention-card > summary { display: flex; gap: 12px; align-items: baseline; padding: 7px 0; }
+.attention-card > summary strong { min-width: 170px; color: var(--muted-strong); font-size: 13px; text-transform: uppercase; }
+.attention-card > summary span { color: var(--text); }
+.attention-card[open] > summary { margin-bottom: 4px; }
 .health-tabs { display: flex; gap: 8px; margin: 10px 0; }
 .health-tab { border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 9px; text-decoration: none; }
 .health-tab.active { background: #0969da; color: #fff; }
