@@ -1344,6 +1344,22 @@ def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]
             "confidence": "confirmed",
             "observed_at": sync["time"],
         })
+    for notice in summary.get("profile_maintenance", []):
+        message = str(notice.get("message", "Profile maintenance requires attention"))
+        items.append({
+            "state": "observed",
+            "domain": "profile",
+            "severity": "warning",
+            "what_happened": message,
+            "why_it_matters": "Profile changes may not be reflected in recommendation scoring.",
+            "likely_cause": "The profile maintenance record reports unapplied or failed work.",
+            "evidence": message,
+            "affected_scope": "Profile maintenance",
+            "recommended_next_action": "Review the profile maintenance record and retry the affected update when safe.",
+            "confidence": "confirmed",
+            "category": "profile",
+            "observed_at": "unknown",
+        })
     return items
 
 
@@ -1382,31 +1398,47 @@ def render_needs_attention(summary: dict[str, Any]) -> str:
 
 
 def render_health_jobs(summary: dict[str, Any]) -> str:
-    rows = summary.get("job_events", [])
-    return '<section class="health-section"><h2>Jobs</h2><p>Durable stage events are retained here for operational review. Processing and delivery outcomes remain separate.</p>' + render_health_table("Stage event history", rows, ["recorded_at", "job", "status", "message"]) + '</section>'
+    events = summary.get("job_events", [])
+    rows = []
+    for event in events:
+        status = str(event.get("status", "unknown"))
+        processing = "completed" if status in {"completed", "success", "succeeded"} else ("failed" if status in {"failed", "error"} else status)
+        delivery = "accepted" if "push" in str(event.get("message", "")).lower() and status in {"completed", "success", "succeeded"} else "not recorded"
+        rows.append({"recorded_at": event.get("recorded_at", "unknown"), "job": event.get("job", "unknown"), "processing": processing, "delivery": delivery, "message": event.get("message", "")})
+    return '<section class="health-section"><div class="section-heading"><div><h2>Jobs</h2><p>Scheduled operations, with processing and AWS delivery shown separately.</p></div><span class="health-note">Live events · refresh the page to update</span></div>' + render_health_table("Operational job history", rows, ["recorded_at", "job", "processing", "delivery", "message"]) + '</section>'
 
 
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
     sync = sync_health_snapshot()
+    # Placeholder values make the layout reviewable until the restricted host collector is wired in.
+    # They are deliberately labeled and must never be treated as live telemetry.
     values = {
         "Database integrity": str(summary["db"]["integrity"]),
         "Database path": str(summary["db"]["path"]),
         "AWS delivery state": sync["state"],
         "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
-        "Delivery age": sync["age"],
-        "Next scheduled action": "Verify the next scheduled occurrence and inspect stale evidence before mutating state.",
+        "Mini CPU": "placeholder · 38% observed",
+        "Mini memory": "placeholder · 2.1 / 8.0 GiB observed",
+        "Mini disk": "placeholder · 61% used · 14.2 GiB free",
+        "Mini container": "placeholder · healthy · image digest unavailable",
+        "AWS CPU / memory": "placeholder · collector not connected",
+        "AWS disk / service": "placeholder · collector not connected",
+        "Telemetry freshness": "placeholder · unknown until collector is installed",
     }
-    return '<section class="health-section"><h2>Infrastructure</h2><p>Infrastructure facts are read-only observations; this page performs no provider calls or health-side mutations.</p>' + render_key_values(values) + '</section>'
+    return '<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database and host capacity are separate from job history.</p></div><span class="placeholder-badge">PLACEHOLDER TELEMETRY</span></div>' + render_key_values(values) + '<p class="health-footnote">Resource values marked placeholder are made-up review data. The future collector will publish sanitized, timestamped CPU, memory, disk, container, runtime, and delivery observations.</p></section>'
+
+
+def render_health_analytics(summary: dict[str, Any]) -> str:
+    return f'''<section class="health-section"><h2>Pipeline analytics</h2><p>Historical yield and filtering analysis lives here; it is not used to decide operational health.</p>{render_health_graphs(summary)}<h3>Daily funnel</h3>{render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}{render_health_table("Scout", summary["daily"]["scout"], ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])}{render_health_table("Curator", summary["daily"]["curator"], ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])}{render_health_table("Reviewer", summary["daily"]["reviewer"], ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])}{render_health_table("Feedback/Profile", summary["daily"]["feedback"], ["day", "raw_feedback_count", "structured_feedback_count", "profile_version_count", "apply_failure_count"])}<h3>Source breakdown</h3>{render_health_table("Scout by source", summary["source_breakdown"]["funnel"], ["source", "candidate_count", "eligible_count", "excluded_count"])}{render_health_table("Recommendations by source", summary["source_breakdown"]["recommendations"], ["source", "recommendation_count"])}{render_health_table("Exclusion reasons", summary["source_breakdown"]["exclusion_reasons"], ["source", "reason", "count"])}</section>'''
 
 
 def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL, tab: str = "attention") -> str:
     days = days if days in {7, 21, 30, 90} else 21
     summary = health_summary(db_path, days=days, source=source_value)
-    tab = tab if tab in {"attention", "jobs", "infrastructure"} else "attention"
+    tab = tab if tab in {"jobs", "infrastructure", "analytics"} else "jobs"
     source_choices = [(SOURCE_FILTER_ALL, "All sources")]
     source_choices.extend((source, source_display_name(source)) for source in summary["available_sources"])
     source_value = normalize_choice(summary["range"]["source"], source_choices, SOURCE_FILTER_ALL)
-    warning_html = render_warnings(summary["warnings"])
     cards = [
         ("Latest Run", f"{summary['top']['latest_run_time'] or 'none'}", f"{summary['top']['latest_run_age_hours'] or 0}h old"),
         ("Workflow", summary["top"]["latest_workflow_state"] or "none", "latest state"),
@@ -1420,7 +1452,6 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
         f'<section class="health-card"><h2>{escape(title)}</h2><strong>{escape(value)}</strong><span>{escape(detail)}</span></section>'
         for title, value, detail in cards
     )
-    graph_html = render_health_graphs(summary)
     controls = f"""
       <form method="get" action="/health" class="queue-controls">
         {render_select([("7", "7 days"), ("21", "21 days"), ("30", "30 days"), ("90", "90 days")], "days", str(days), "Range")}
@@ -1428,8 +1459,8 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
       </form>
     """
 
-    tabs = ''.join(f'<a class="health-tab {"active" if tab == value else ""}" href="/health?tab={value}">{label}</a>' for value, label in (("attention", "Needs Attention"), ("jobs", "Jobs"), ("infrastructure", "Infrastructure")))
-    tab_content = render_needs_attention(summary) if tab == "attention" else (render_health_jobs(summary) if tab == "jobs" else render_health_infrastructure(summary))
+    tabs = ''.join(f'<a class="health-tab {"active" if tab == value else ""}" href="/health?tab={value}">{label}</a>' for value, label in (("jobs", "Jobs"), ("infrastructure", "Infrastructure"), ("analytics", "Pipeline analytics")))
+    tab_content = render_health_jobs(summary) if tab == "jobs" else (render_health_infrastructure(summary) if tab == "infrastructure" else render_health_analytics(summary))
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1441,31 +1472,11 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 <body>
   <main>
     {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
-    {warning_html}
     <nav class="health-tabs" aria-label="Health sections">{tabs}</nav>
+    {render_needs_attention(summary) if tab == "jobs" else ""}
     {tab_content}
     <div class="health-cards">{card_html}</div>
-    {render_sync_health()}
-    {render_profile_maintenance(summary["profile_maintenance"])}
-    <section class="health-section">
-      <h2>Scheduled jobs</h2>
-      {render_health_table("Recent job events", summary["job_events"], ["recorded_at", "job", "status", "message"])}
-    </section>
-    {graph_html}
-    <section class="health-section">
-      <h2>Daily Funnel</h2>
-      {render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}
-      {render_health_table("Scout", summary["daily"]["scout"], ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])}
-      {render_health_table("Curator", summary["daily"]["curator"], ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])}
-      {render_health_table("Reviewer", summary["daily"]["reviewer"], ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])}
-      {render_health_table("Feedback/Profile", summary["daily"]["feedback"], ["day", "raw_feedback_count", "structured_feedback_count", "profile_version_count", "apply_failure_count"])}
-    </section>
-    <section class="health-section">
-      <h2>Source Breakdown</h2>
-      {render_health_table("Scout by source", summary["source_breakdown"]["funnel"], ["source", "candidate_count", "eligible_count", "excluded_count"])}
-      {render_health_table("Recommendations by source", summary["source_breakdown"]["recommendations"], ["source", "recommendation_count"])}
-      {render_health_table("Exclusion reasons", summary["source_breakdown"]["exclusion_reasons"], ["source", "reason", "count"])}
-    </section>
+    {render_sync_health() if tab == "jobs" else ""}
     <section class="health-section">
       <h2>Artifact Health</h2>
       {render_key_values(summary["artifact_health"])}
@@ -3740,6 +3751,11 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-tabs { display: flex; gap: 8px; margin: 10px 0; }
 .health-tab { border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 9px; text-decoration: none; }
 .health-tab.active { background: #0969da; color: #fff; }
+.section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.section-heading h2 { margin-bottom: 3px; }
+.section-heading p { margin: 0; }
+.health-note, .health-footnote { color: var(--muted); font-size: 12px; }
+.placeholder-badge { color: #f2cc60; border: 1px solid #9e6a03; border-radius: 999px; padding: 3px 7px; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .attention-card { border-top: 1px solid #d8dee4; padding: 7px 0; }
 .attention-card:first-of-type { border-top: 0; }
 .attention-card h3 { margin: 0 0 4px; font-size: 13px; }
@@ -3946,6 +3962,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .banner { background: #0f2a1a; border-color: #238636; }
   .banner.warning { background: #2d2300; border-color: #9e6a03; }
   .health-warnings { background: #2d2300; border-color: #9e6a03; }
+  .placeholder-badge { color: #f2cc60; border-color: #9e6a03; }
   .health-table th { background: #21262d; }
   .health-table th, .health-table td { border-color: #30363d; }
   .topic-table, .topic-table-head, .topic-row { border-color: #30363d; }

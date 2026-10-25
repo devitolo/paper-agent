@@ -41,8 +41,11 @@ class NeedsAttentionTests(unittest.TestCase):
             with patch.dict(os.environ, {"PAPER_AGENT_ORCHESTRATOR_STATUS_FILE": str(Path(directory) / "missing.json")}):
                 jobs = render_health_page(db, tab="jobs")
                 infrastructure = render_health_page(db, tab="infrastructure")
-        self.assertIn("Stage event history", jobs)
+        self.assertIn("Operational job history", jobs)
         self.assertIn("Aws Delivery State", infrastructure)
+        self.assertIn("placeholder", infrastructure)
+        analytics = render_health_page(db, tab="analytics")
+        self.assertIn("Pipeline analytics", analytics)
 
     def test_rate_limit_and_unknown_rules_are_deterministic(self):
         self.assertEqual(classify_attention_message("provider returned HTTP 429" )[0], "rate_limit")
