@@ -11,13 +11,15 @@ package_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 config_dir=/etc/project-paper-observability/mini-production
 state=/var/lib/project-paper-observability/mini-production
 export_dir=/var/lib/project-paper-observability/mini-production-export
+control=/var/lib/project-paper-observability/mini-production-control
 exec 9>"/run/lock/project-paper-observability.lock"
 /usr/bin/flock -n 9 || { echo 'observability installation already running' >&2; exit 75; }
 install -d -o root -g root -m 0755 "$config_dir"
 install -d -o 10001 -g 10001 -m 0755 "$export_dir"
 install -d -o 10001 -g 10001 -m 0700 "$state"
+install -d -o root -g root -m 0700 "$control"
 
-backup=$(mktemp -d "$state/previous-install-XXXXXX")
+backup=$(mktemp -d "$control/previous-install-XXXXXX")
 manifest="$backup/manifest"
 for target in /usr/local/sbin/project-paper-observability-container "$config_dir/mini-production.env" /etc/cron.d/project-paper-observability-mini-production "$export_dir/INSTALL-RECEIPT"; do
   previous="$backup/$(basename "$target").previous"
@@ -52,7 +54,7 @@ mv -f "$config_dir/mini-production.env.new" "$config_dir/mini-production.env"
 mv -f /etc/cron.d/project-paper-observability-mini-production.new /etc/cron.d/project-paper-observability-mini-production
 printf 'target=mini-production\nimage=%s\nconfig=%s\n' "$PROJECT_PAPER_OBSERVABILITY_IMAGE" "$config_dir/mini-production.env" > "$export_dir/INSTALL-RECEIPT"
 chown root:root "$export_dir/INSTALL-RECEIPT"; chmod 0644 "$export_dir/INSTALL-RECEIPT"
-printf '%s\n' "$backup" > "$state/CURRENT-BACKUP"
-chown 10001:10001 "$state/CURRENT-BACKUP"; chmod 0600 "$state/CURRENT-BACKUP"
+printf '%s\n' "$backup" > "$control/CURRENT-BACKUP"
+chown root:root "$control/CURRENT-BACKUP"; chmod 0600 "$control/CURRENT-BACKUP"
 echo 'container observability cron installed'
 trap - ERR
