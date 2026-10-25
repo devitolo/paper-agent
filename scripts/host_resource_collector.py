@@ -165,22 +165,37 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         try: timestamps.append(datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp())
         except (TypeError, ValueError): pass
     gaps = sum(1 for left, right in zip(sorted(timestamps), sorted(timestamps)[1:]) if right - left > 90)
-    contiguous = []
-    for left, right in zip(records, records[1:]):
-        try:
-            delta = (datetime.fromisoformat(right["observed_at"].replace("Z", "+00:00")) - datetime.fromisoformat(left["observed_at"].replace("Z", "+00:00"))).total_seconds()
-            if delta <= 90 and right.get("cpu", {}).get("utilization_percent") is not None:
-                contiguous.append(float(right["cpu"]["utilization_percent"]))
-        except (TypeError, ValueError):
+    segments = []
+    segment = []
+    for row in records:
+        value = row.get("cpu", {}).get("utilization_percent")
+        if not segment:
+            segment = [float(value)] if value is not None else []
             continue
+        try:
+            delta = (datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")) - datetime.fromisoformat(records[records.index(row)-1]["observed_at"].replace("Z", "+00:00"))).total_seconds()
+        except (TypeError, ValueError):
+            delta = 999
+        if delta > 90 or value is None:
+            if segment: segments.append(segment)
+            segment = [float(value)] if value is not None else []
+        else:
+            segment.append(float(value))
+    if segment: segments.append(segment)
+    contiguous = []
+    for values in segments:
+        contiguous.extend(values)
     five = [sum(contiguous[i:i + 5]) / 5 for i in range(len(contiguous) - 4)]
     latest = records[-1] if records else {}
+    try: observations = json.loads((root / "last-observations.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError): observations = {}
     def latest_field(name: str):
         for row in reversed(records):
             if row.get(name) is not None:
                 return row.get(name)
-        return None
-    summary = {"schema": SCHEMA, "collector_version": "3", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 60, "complete": len(records) == 15 and gaps == 0, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(five), 2) if five else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_field("disk"), "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup")}, "errors": []}
+        entry = observations.get(name)
+        return entry.get("value") if isinstance(entry, dict) else entry
+    summary = {"schema": SCHEMA, "collector_version": "3", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 60, "complete": len(records) == 15 and gaps == 0, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(five), 2) if five else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_field("disk"), "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup"), "observation_times": {name: (entry.get("observed_at") if isinstance(entry, dict) else None) for name, entry in observations.items()}}, "errors": []}
     return summary
 
 
@@ -204,6 +219,13 @@ def collect(root: Path) -> None:
     os.chmod(root, 0o700)
     current = sample(root)
     append_bounded(root / "samples.jsonl", current, 10080)
+    observations = {}
+    try: observations = json.loads((root / "last-observations.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError): pass
+    for field in ("disk", "containers", "temperature", "cgroup"):
+        if current.get(field) is not None:
+            observations[field] = {"observed_at": current["observed_at"], "value": current[field]}
+    publish(root / "last-observations.json", observations, mode=0o600)
     current_time = datetime.fromisoformat(current["observed_at"])
     if current_time.minute % 15 == 0:
         summary = summarize(root, reference=current_time)
