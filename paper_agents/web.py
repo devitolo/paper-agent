@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
+from paper_agents.resource_status import load_resource_status
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.pdf_links import looks_like_direct_pdf_url
 from paper_agents.topic_inventory import scout_topic_inventory
@@ -229,8 +230,19 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
                         db_path,
                         days=parse_days(params.get("days", ["21"])[0]),
                         source_value=params.get("source", [SOURCE_FILTER_ALL])[0],
+                        tab=params.get("tab", ["attention"])[0],
                     )
                 )
+                return
+            if parsed.path == "/health/needs-attention":
+                summary = health_summary(db_path, days=21, source=None)
+                payload = json.dumps({"items": render_needs_attention_items(summary)}, ensure_ascii=False).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
                 return
             if parsed.path in ("/minilm-eval", "/retrieval-experiment", "/scout-eval"):
                 self.send_response(HTTPStatus.SEE_OTHER)
@@ -1320,6 +1332,8 @@ def sync_health_snapshot() -> dict[str, str]:
             if seconds > 48 * 3600:
                 return {**unknown, "time": str(value.get("updated_at", "unknown")), "revision": str(value.get("input_revision", "unknown")), "age": age, "state": "stale"}
         result = str(value.get("overall_result", "unknown"))
+        if not isinstance(updated, str):
+            return {**unknown, "revision": str(value.get("input_revision", "unknown")), "state": "unknown"}
         return {"time": str(value.get("updated_at", "unknown")), "revision": str(value.get("input_revision", "unknown")), "age": age, "size": str(value.get("snapshot_size", "unknown")), "failure": str(value.get("reason", "none"))[:160], "skipped": "yes" if result == "skipped" else "no", "installed": str(value.get("installed_input_revision", value.get("input_revision", "unknown"))), "state": result}
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return {**unknown, "state": "unavailable"}
@@ -1332,13 +1346,183 @@ def render_sync_health() -> str:
     return f'<section class="health-section"><h2>Mini sync</h2><dl class="health-kv">{rows}</dl></section>'
 
 
-def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL) -> str:
+def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]]:
+    """Return deterministic, evidence-linked operational explanations."""
+    items: list[dict[str, str]] = []
+    for warning in summary.get("warnings", []):
+        message = str(warning.get("message", "Unknown warning"))
+        level = str(warning.get("level", "unknown"))
+        category, cause, action, confidence = classify_attention_message(message)
+        items.append({
+            "state": "observed",
+            "domain": "processing",
+            "severity": level,
+            "what_happened": message,
+            "why_it_matters": "The discovery or recommendation pipeline may be producing incomplete results.",
+            "likely_cause": cause,
+            "evidence": message,
+            "affected_scope": "Latest affected workflow or source run",
+            "recommended_next_action": action,
+            "confidence": confidence,
+            "category": category,
+            "observed_at": str(warning.get("recorded_at", "unknown")),
+            "diagnostic_href": f"/health/scout-diagnostics/{warning['scout_run_id']}" if isinstance(warning.get("scout_run_id"), int) and warning["scout_run_id"] > 0 else "",
+        })
+    sync = sync_health_snapshot()
+    if sync["state"] != "completed":
+        state = sync["state"] if sync["state"] in {"stale", "unavailable", "malformed", "unknown"} else "observed"
+        items.append({
+            "state": state,
+            "domain": "delivery",
+            "severity": "warning" if state in {"stale", "unknown"} else "critical",
+            "what_happened": f"AWS sync status is {state}.",
+            "why_it_matters": "New Mini results may not be visible in the AWS serving UI.",
+            "likely_cause": "The sync receipt is stale, unavailable, or malformed; the exact delivery cause is unknown.",
+            "evidence": f"state={sync['state']}, updated_at={sync['time']}, revision={sync['revision']}",
+            "affected_scope": "Mini-to-AWS delivery",
+            "recommended_next_action": "Inspect the sync receipt and outbox delivery logs before rerunning a source job.",
+            "confidence": "confirmed",
+            "observed_at": sync["time"],
+            "diagnostic_href": "",
+        })
+    for notice in summary.get("profile_maintenance", []):
+        message = str(notice.get("message", "Profile maintenance requires attention"))
+        items.append({
+            "state": "observed",
+            "domain": "profile",
+            "severity": str(notice.get("level", "warning")),
+            "what_happened": message,
+            "why_it_matters": "Profile changes may not be reflected in recommendation scoring.",
+            "likely_cause": "The profile maintenance record reports unapplied or failed work.",
+            "evidence": message,
+            "affected_scope": "Profile maintenance",
+            "recommended_next_action": "Review the profile maintenance record and retry the affected update when safe.",
+            "confidence": "confirmed",
+            "category": "profile",
+            "observed_at": "unknown",
+            "diagnostic_href": "",
+        })
+    return items
+
+
+def classify_attention_message(message: str) -> tuple[str, str, str, str]:
+    text = message.lower()
+    rules = (
+        ("rate_limit", ("429", "thrott", "rate limit"), "The provider is rate limiting requests.", "Wait for the provider window to clear and verify backoff/key rotation evidence.", "confirmed"),
+        ("configuration", ("missing", "config", "credential", "api key"), "A required configuration value may be absent or invalid.", "Check the private production configuration and rerun the affected stage.", "likely"),
+        ("timeout", ("timeout", "timed out"), "The stage exceeded its configured time limit.", "Inspect the stage event and retry only after checking provider and host health.", "confirmed"),
+        ("empty_results", ("0 candidates", "0 eligible", "empty"), "The source returned no usable records or filtering removed them.", "Inspect source diagnostics to distinguish provider emptiness from local filtering.", "confirmed"),
+        ("delivery", ("sync", "aws", "outbox", "receipt"), "The delivery stage did not produce a current accepted receipt.", "Inspect the outbox and AWS acceptance receipt; preserve the local result while reconciling.", "likely"),
+    )
+    for category, needles, cause, action, confidence in rules:
+        if any(needle in text for needle in needles):
+            return category, cause, action, confidence
+    return "unknown", "The recorded evidence does not identify a single root cause.", "Inspect the linked evidence and wait for the next scheduled occurrence before changing configuration.", "unknown"
+
+
+def render_needs_attention(summary: dict[str, Any]) -> str:
+    items = render_needs_attention_items(summary)
+    if not items:
+        return '<details class="health-section needs-attention" open><summary><h2>Needs Attention</h2><span>No active issues</span></summary><p>No deterministic attention items are currently observed.</p></details>'
+    cards = []
+    for item in items:
+        diagnostic = ""
+        if item.get("diagnostic_href"):
+            diagnostic = f' · <a href="{escape(item["diagnostic_href"])}" target="_blank" rel="noopener">View diagnostics</a>'
+        cards.append(
+            '<details class="attention-card">'
+            f'<summary><strong>{escape(item["severity"])} · {escape(item["domain"])}</strong><span>{escape(item["what_happened"])}</span></summary>'
+            f'<p><strong>What happened:</strong> {escape(item["what_happened"])}</p>'
+            f'<p><strong>Why it matters:</strong> {escape(item["why_it_matters"])}</p>'
+            f'<p><strong>Likely cause:</strong> {escape(item["likely_cause"])}</p>'
+            f'<p><strong>Evidence:</strong> {escape(item["evidence"])}</p>'
+            f'<p><strong>Scope:</strong> {escape(item["affected_scope"])} · <strong>Next:</strong> {escape(item["recommended_next_action"])}{diagnostic}</p>'
+            f'<p><strong>Confidence:</strong> {escape(item["confidence"])} · <strong>Observed:</strong> {escape(item["observed_at"])}</p>'
+            '</details>'
+        )
+    cards = "".join(cards)
+    return f'<details class="health-section needs-attention" open><summary><h2>Needs Attention</h2><span>{len(items)} active issue(s) · expand an issue for evidence</span></summary>{cards}</details>'
+
+
+def render_health_jobs(summary: dict[str, Any]) -> str:
+    events = summary.get("job_events", [])
+    rows = []
+    for event in events:
+        status = str(event.get("status", "unknown"))
+        processing = "completed" if status in {"completed", "success", "succeeded"} else ("failed" if status in {"failed", "error"} else status)
+        message = str(event.get("message", ""))
+        lower_message = message.lower()
+        delivery = "accepted" if status in {"completed", "success", "succeeded"} and any(token in lower_message for token in ("receipt applied", "receipt=applied", "delivery accepted", "push applied")) else ("failed" if "push failed" in lower_message else "pending" if "push pending" in lower_message else "not recorded")
+        rows.append({"recorded_at": event.get("recorded_at", "unknown"), "job": event.get("job", "unknown"), "processing": processing, "delivery": delivery, "message": message})
+    return '<section class="health-section"><div class="section-heading"><div><h2>Jobs</h2><p>Scheduled operations, with processing and AWS delivery shown separately.</p></div><span class="health-note">Live events · refresh the page to update</span></div>' + render_health_table("Operational job history", rows, ["recorded_at", "job", "processing", "delivery", "message"]) + '</section>'
+
+
+def render_health_infrastructure(summary: dict[str, Any]) -> str:
+    sync = sync_health_snapshot()
+    mini_status = load_resource_status(Path(os.environ.get("PAPER_AGENT_MINI_RESOURCE_STATUS_FILE", os.environ.get("PAPER_AGENT_RESOURCE_STATUS_FILE", "data/resource-status.json"))))
+    aws_status = load_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
+    def metric(status: dict[str, Any], key: str, suffix: str = "") -> str:
+        value = status.get(key)
+        return f"{value}{suffix} observed" if value is not None else f"placeholder · {status.get('state', 'unknown')} unavailable"
+    mini_cpu = mini_status.get("cpu", {})
+    mini_memory = mini_status.get("memory", {})
+    aws_cpu = aws_status.get("cpu", {})
+    aws_memory = aws_status.get("memory", {})
+    database = {
+        "Database integrity": str(summary["db"]["integrity"]),
+        "Database path": str(summary["db"]["path"]),
+    }
+    mini = {
+        "Mini CPU": metric(mini_status, "cpu") if not mini_cpu.get("average_percent") else f"{mini_cpu['average_percent']}% avg · {mini_cpu.get('peak_sustained_5m_percent', 'unknown')}% peak sustained",
+        "Mini memory": metric(mini_status, "memory") if not mini_memory.get("available_average_bytes") else f"{mini_memory['available_average_bytes']} bytes available avg",
+        "Mini disk": "observed · see collector snapshot" if mini_status.get("disk") else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
+        "Mini container": str(mini_status.get("containers", {}).get("state", mini_status.get("state", "unknown"))) if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
+        "Mini telemetry freshness": f"{mini_status.get('state', 'unknown')} · {mini_status.get('age_seconds') if mini_status.get('age_seconds') is not None else 'unknown'}s old" if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} · age unknown",
+    }
+    aws = {
+        "AWS delivery state": sync["state"],
+        "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
+        "AWS CPU / memory": f"{aws_cpu.get('average_percent', 'unknown')}% avg CPU · {aws_memory.get('available_average_bytes', 'unknown')} bytes available" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
+        "AWS disk / service": "observed · see collector snapshot" if aws_status.get("disk") else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
+        "AWS telemetry freshness": f"{aws_status.get('state', 'unknown')} · {aws_status.get('age_seconds') if aws_status.get('age_seconds') is not None else 'unknown'}s old" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} · age unknown",
+    }
+    badge = "SANITIZED COLLECTOR DATA" if mini_status.get("state") == "observed" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · COLLECTOR NOT CONNECTED"
+    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked observed, stale, unknown, or unavailable. The web process only reads the status files.</p></section>'
+
+
+def render_health_job_charts(summary: dict[str, Any]) -> str:
+    daily_rows = daily_funnel_rows(summary)
+    feedback_rows = feedback_activity_rows(summary)
+    return '<section class="health-section job-charts"><h2>Recent pipeline trend</h2><p>Compact context for today’s jobs; detailed filtering analysis remains in Pipeline analytics.</p><div class="health-graphs"><div class="health-graph"><div class="graph-head"><h2>Daily Trend</h2><span>Candidates, eligible, recommendations</span></div>' + render_daily_trend_svg(daily_rows) + '</div><div class="health-graph"><div class="graph-head"><h2>Feedback/Profile Activity</h2><span>Recent changes</span></div>' + render_feedback_activity_svg(feedback_rows) + '</div></div></section>'
+
+
+def render_funnel_summary(summary: dict[str, Any]) -> str:
+    source_rows = source_funnel_rows(summary)
+    totals = {
+        "candidates": sum(int(row["candidate_count"] or 0) for row in source_rows),
+        "eligible": sum(int(row["eligible_count"] or 0) for row in source_rows),
+        "recommendations": sum(int(row["recommendation_count"] or 0) for row in source_rows),
+    }
+    totals["excluded"] = max(0, totals["candidates"] - totals["eligible"])
+    eligible_rate = f"{totals['eligible'] / totals['candidates']:.0%}" if totals["candidates"] else "—"
+    recommendation_rate = f"{totals['recommendations'] / totals['eligible']:.0%}" if totals["eligible"] else "—"
+    cards = "".join(f'<section class="health-card"><h2>{escape(label)}</h2><strong>{escape(str(value))}</strong><span>{escape(detail)}</span></section>' for label, value, detail in (("Candidates", totals["candidates"], "fetched"), ("Eligible", totals["eligible"], f"{eligible_rate} of candidates"), ("Recommendations", totals["recommendations"], f"{recommendation_rate} of eligible"), ("Excluded", totals["excluded"], "filtered out")))
+    compact_sources = [{"source": source_display_name(row["source"]), "candidates": row["candidate_count"], "eligible": row["eligible_count"], "recommendations": row["recommendation_count"], "eligible_rate": f"{row['eligible_count'] / row['candidate_count']:.0%}" if row["candidate_count"] else "—"} for row in source_rows]
+    exclusions = sorted(summary["source_breakdown"]["exclusion_reasons"], key=lambda row: int(row["count"] or 0), reverse=True)[:5]
+    return f'<section class="funnel-summary"><h3>At a glance</h3><div class="health-cards">{cards}</div>{render_health_table("By source", compact_sources, ["source", "candidates", "eligible", "recommendations", "eligible_rate"])}<details class="funnel-details"><summary>Show full funnel data</summary>{render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}{render_health_table("Scout", summary["daily"]["scout"], ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])}{render_health_table("Top exclusion reasons", exclusions, ["source", "reason", "count"])}{render_health_table("Curator", summary["daily"]["curator"], ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])}{render_health_table("Reviewer", summary["daily"]["reviewer"], ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])}{render_health_table("Feedback/Profile", summary["daily"]["feedback"], ["day", "raw_feedback_count", "structured_feedback_count", "profile_version_count", "apply_failure_count"])}{render_health_table("Recommendations by source", summary["source_breakdown"]["recommendations"], ["source", "recommendation_count"])}</details></section>'
+
+
+def render_health_analytics(summary: dict[str, Any]) -> str:
+    return f'''<section class="health-section"><h2>Pipeline analytics</h2><p>Historical yield and filtering analysis lives here; it is not used to decide operational health.</p>{render_health_graphs(summary)}{render_funnel_summary(summary)}</section>'''
+
+
+def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL, tab: str = "attention") -> str:
     days = days if days in {7, 21, 30, 90} else 21
     summary = health_summary(db_path, days=days, source=source_value)
+    tab = tab if tab in {"jobs", "infrastructure", "analytics"} else "jobs"
     source_choices = [(SOURCE_FILTER_ALL, "All sources")]
     source_choices.extend((source, source_display_name(source)) for source in summary["available_sources"])
     source_value = normalize_choice(summary["range"]["source"], source_choices, SOURCE_FILTER_ALL)
-    warning_html = render_warnings(summary["warnings"])
     cards = [
         ("Latest Run", f"{summary['top']['latest_run_time'] or 'none'}", f"{summary['top']['latest_run_age_hours'] or 0}h old"),
         ("Workflow", summary["top"]["latest_workflow_state"] or "none", "latest state"),
@@ -1352,14 +1536,16 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
         f'<section class="health-card"><h2>{escape(title)}</h2><strong>{escape(value)}</strong><span>{escape(detail)}</span></section>'
         for title, value, detail in cards
     )
-    graph_html = render_health_graphs(summary)
     controls = f"""
       <form method="get" action="/health" class="queue-controls">
+        <input type="hidden" name="tab" value="{escape(tab)}">
         {render_select([("7", "7 days"), ("21", "21 days"), ("30", "30 days"), ("90", "90 days")], "days", str(days), "Range")}
         {render_select(source_choices, "source", source_value, "Source")}
       </form>
     """
 
+    tabs = ''.join(f'<a class="health-tab {"active" if tab == value else ""}" href="/health?tab={value}&days={days}&source={escape(source_value)}">{label}</a>' for value, label in (("jobs", "Jobs"), ("infrastructure", "Infrastructure"), ("analytics", "Pipeline analytics")))
+    tab_content = render_health_jobs(summary) if tab == "jobs" else (render_health_infrastructure(summary) if tab == "infrastructure" else render_health_analytics(summary))
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1371,30 +1557,13 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
 <body>
   <main>
     {render_app_header("Health", f"{escape(summary['db']['path'])} | integrity {escape(summary['db']['integrity'])} | {format_bytes(summary['db']['size_bytes'])}", controls, "health")}
-    {warning_html}
+    <nav class="health-tabs" aria-label="Health sections">{tabs}</nav>
+    {render_needs_attention(summary) if tab == "jobs" else ""}
+    {tab_content}
     <div class="health-cards">{card_html}</div>
-    {render_sync_health()}
-    {render_profile_maintenance(summary["profile_maintenance"])}
-    <section class="health-section">
-      <h2>Scheduled jobs</h2>
-      {render_health_table("Recent job events", summary["job_events"], ["recorded_at", "job", "status", "message"])}
-    </section>
-    {graph_html}
-    <section class="health-section">
-      <h2>Daily Funnel</h2>
-      {render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}
-      {render_health_table("Scout", summary["daily"]["scout"], ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])}
-      {render_health_table("Curator", summary["daily"]["curator"], ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])}
-      {render_health_table("Reviewer", summary["daily"]["reviewer"], ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])}
-      {render_health_table("Feedback/Profile", summary["daily"]["feedback"], ["day", "raw_feedback_count", "structured_feedback_count", "profile_version_count", "apply_failure_count"])}
-    </section>
-    <section class="health-section">
-      <h2>Source Breakdown</h2>
-      {render_health_table("Scout by source", summary["source_breakdown"]["funnel"], ["source", "candidate_count", "eligible_count", "excluded_count"])}
-      {render_health_table("Recommendations by source", summary["source_breakdown"]["recommendations"], ["source", "recommendation_count"])}
-      {render_health_table("Exclusion reasons", summary["source_breakdown"]["exclusion_reasons"], ["source", "reason", "count"])}
-    </section>
-    <section class="health-section">
+    {render_health_job_charts(summary) if tab == "jobs" else ""}
+    {render_sync_health() if tab == "jobs" else ""}
+    <section class="health-section" style="display: {'block' if tab == 'analytics' else 'none'}">
       <h2>Artifact Health</h2>
       {render_key_values(summary["artifact_health"])}
     </section>
@@ -3662,6 +3831,29 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-warnings li { margin: 2px 0; }
 .health-warnings li.critical strong { color: #cf222e; }
 .health-section { margin-top: 12px; }
+.needs-attention { border: 1px solid rgba(251, 191, 36, 0.58); background: rgba(251, 191, 36, 0.09); border-radius: 10px; padding: 10px; }
+.needs-attention h2 { color: var(--text); }
+.needs-attention p { color: var(--muted-strong); }
+.needs-attention > summary, .attention-card > summary { cursor: pointer; list-style: none; }
+.needs-attention > summary::-webkit-details-marker, .attention-card > summary::-webkit-details-marker { display: none; }
+.needs-attention > summary { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.needs-attention > summary > span { color: var(--muted); font-size: 12px; }
+.attention-card > summary { display: flex; gap: 12px; align-items: baseline; padding: 7px 0; }
+.attention-card > summary strong { min-width: 170px; color: var(--muted-strong); font-size: 13px; text-transform: uppercase; }
+.attention-card > summary span { color: var(--text); }
+.attention-card[open] > summary { margin-bottom: 4px; }
+.health-tabs { display: flex; gap: 8px; margin: 10px 0; }
+.health-tab { border: 1px solid #d8dee4; border-radius: 5px; padding: 5px 9px; text-decoration: none; }
+.health-tab.active { background: #0969da; color: #fff; }
+.section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.section-heading h2 { margin-bottom: 3px; }
+.section-heading p { margin: 0; }
+.health-note, .health-footnote { color: var(--muted); font-size: 12px; }
+.placeholder-badge { color: #f2cc60; border: 1px solid #9e6a03; border-radius: 999px; padding: 3px 7px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.attention-card { border-top: 1px solid #d8dee4; padding: 7px 0; }
+.attention-card:first-of-type { border-top: 0; }
+.attention-card h3 { margin: 0 0 4px; font-size: 13px; }
+.attention-card p { margin: 3px 0; font-size: 12px; }
 .health-table { margin: 8px 0 12px; overflow-x: auto; }
 .health-table table { width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; }
 .health-table th, .health-table td { padding: 5px 7px; border-bottom: 1px solid #d8dee4; text-align: left; white-space: nowrap; }
@@ -3670,6 +3862,15 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
+.infra-database { margin-bottom: 14px; }
+.resource-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.resource-panel { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(8, 13, 20, 0.28); }
+.resource-panel .health-kv { border: 0; padding: 0; background: transparent; }
+.job-charts { margin-top: 12px; }
+.funnel-summary { margin-top: 14px; }
+.funnel-summary > .health-cards { margin: 8px 0 14px; }
+.funnel-details { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.funnel-details > summary { cursor: pointer; color: var(--muted-strong); font-weight: 650; }
 
 .topics-main-tabs { display: flex; gap: 4px; margin: 0 0 10px; padding: 3px; width: fit-content; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(12, 20, 32, 0.82); }
 .topics-main-tab { min-width: 118px; padding: 7px 14px; border-radius: var(--radius-sm); color: var(--muted); font-weight: 720; text-align: center; text-decoration: none; }
@@ -3864,6 +4065,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .banner { background: #0f2a1a; border-color: #238636; }
   .banner.warning { background: #2d2300; border-color: #9e6a03; }
   .health-warnings { background: #2d2300; border-color: #9e6a03; }
+  .placeholder-badge { color: #f2cc60; border-color: #9e6a03; }
   .health-table th { background: #21262d; }
   .health-table th, .health-table td { border-color: #30363d; }
   .topic-table, .topic-table-head, .topic-row { border-color: #30363d; }
@@ -3896,6 +4098,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-graphs { grid-template-columns: 1fr; }
   .health-graph-wide { grid-column: auto; }
   .health-kv { grid-template-columns: 1fr; }
+  .resource-columns { grid-template-columns: 1fr; }
   .topic-columns { grid-template-columns: 1fr; }
   .topic-list { columns: 1; }
   .topic-agent-form, .topic-edit-form, .topic-table-head, .topic-row, .topic-proposal-grid { grid-template-columns: 1fr; }
