@@ -39,6 +39,15 @@ class ObservabilityContainerContractTests(unittest.TestCase):
         self.assertIn("install -d -o 10001 -g 10001 -m 0700", installer)
         self.assertIn("restore_on_error()", installer)
         self.assertIn("trap restore_on_error ERR", installer)
+        self.assertIn("CURRENT-BACKUP", installer)
+        rollback = (ROOT / "deploy/observability/remove_container_cron.sh").read_text()
+        self.assertIn("manifest.restored", rollback)
+        self.assertIn("CURRENT-BACKUP", rollback)
+
+    def test_log_rotation_preserves_active_path(self):
+        launcher = (ROOT / "deploy/observability/run-container.sh").read_text()
+        self.assertIn(': > "$log"', launcher)
+        self.assertIn('tail -c 524288 "$log"', launcher)
 
 
 if __name__ == "__main__":

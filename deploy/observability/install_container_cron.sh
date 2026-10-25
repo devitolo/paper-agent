@@ -18,15 +18,17 @@ install -d -o 10001 -g 10001 -m 0755 "$export_dir"
 install -d -o 10001 -g 10001 -m 0700 "$state"
 
 backup=$(mktemp -d "$state/previous-install-XXXXXX")
+manifest="$backup/manifest"
 for target in /usr/local/sbin/project-paper-observability-container "$config_dir/mini-production.env" /etc/cron.d/project-paper-observability-mini-production "$export_dir/INSTALL-RECEIPT"; do
-  if [ -e "$target" ]; then cp -p "$target" "$backup/$(basename "$target").previous"; fi
+  previous="$backup/$(basename "$target").previous"
+  printf '%s|%s\n' "$target" "$previous" >> "$manifest"
+  if [ -e "$target" ]; then cp -p "$target" "$previous"; fi
 done
 restore_on_error() {
-  for target in /usr/local/sbin/project-paper-observability-container "$config_dir/mini-production.env" /etc/cron.d/project-paper-observability-mini-production "$export_dir/INSTALL-RECEIPT"; do
+  while IFS='|' read -r target previous; do
     rm -f "$target"
-    previous="$backup/$(basename "$target").previous"
     [ -f "$previous" ] && mv -f "$previous" "$target"
-  done
+  done < "$manifest"
   rm -rf "$backup"
 }
 trap restore_on_error ERR
@@ -50,5 +52,7 @@ mv -f "$config_dir/mini-production.env.new" "$config_dir/mini-production.env"
 mv -f /etc/cron.d/project-paper-observability-mini-production.new /etc/cron.d/project-paper-observability-mini-production
 printf 'target=mini-production\nimage=%s\nconfig=%s\n' "$PROJECT_PAPER_OBSERVABILITY_IMAGE" "$config_dir/mini-production.env" > "$export_dir/INSTALL-RECEIPT"
 chown root:root "$export_dir/INSTALL-RECEIPT"; chmod 0644 "$export_dir/INSTALL-RECEIPT"
+printf '%s\n' "$backup" > "$state/CURRENT-BACKUP"
+chown 10001:10001 "$state/CURRENT-BACKUP"; chmod 0600 "$state/CURRENT-BACKUP"
 echo 'container observability cron installed'
 trap - ERR
