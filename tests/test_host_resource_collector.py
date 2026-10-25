@@ -47,6 +47,19 @@ class HostResourceCollectorTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["image"], payload["Config"]["Image"])
         self.assertEqual(result["items"][0]["revision"], "b" * 40)
 
+    def test_summary_marks_missing_intervals_and_uses_aligned_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = []
+            for minute in (0, 1, 3, 4):
+                rows.append(json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T12:{minute:02d}:00+00:00", "cpu": {"utilization_percent": 10}, "memory": {"available_bytes": 100}}))
+            (root / "samples.jsonl").write_text("\n".join(rows) + "\n")
+            result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
+        self.assertEqual(result["window"]["start_at"], "2026-10-24T12:00:00+00:00")
+        self.assertEqual(result["window"]["end_at"], "2026-10-24T12:15:00+00:00")
+        self.assertEqual(result["window"]["sample_gaps"], 1)
+        self.assertFalse(result["window"]["complete"])
+
     def test_collect_publishes_atomic_summary_without_database_access(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(collector, "now", return_value=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc)):
             root = Path(directory)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bounded, read-only host resource collector for Project Paper.
 
-The one-minute systemd timer calls ``collect``.  It appends sanitized samples,
+The one-minute cron wrapper calls ``collect``.  It appends sanitized samples,
 emits a 15-minute summary, and atomically publishes the latest status.  It
 does not access the application database, credentials, providers, or Docker
 unless an explicitly configured container-name list is present.
@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 from typing import Any
@@ -127,10 +126,14 @@ def append_bounded(path: Path, record: dict[str, Any], limit: int) -> None:
         pass
 
 
-def summarize(root: Path) -> dict[str, Any]:
+def aligned_end(value: datetime) -> datetime:
+    return value.replace(minute=(value.minute // 15) * 15, second=0, microsecond=0)
+
+
+def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     try:
-        for line in (root / "samples.jsonl").read_text(encoding="utf-8").splitlines()[-15:]:
+        for line in (root / "samples.jsonl").read_text(encoding="utf-8").splitlines()[-60:]:
             try:
                 value = json.loads(line)
                 if isinstance(value, dict) and isinstance(value.get("observed_at"), str):
@@ -139,13 +142,30 @@ def summarize(root: Path) -> dict[str, Any]:
                 continue
     except OSError:
         pass
+    end = aligned_end(reference or now())
+    start = end.timestamp() - 15 * 60
+    window_records = []
+    for row in records:
+        try:
+            observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
+            if start <= observed.timestamp() < end.timestamp():
+                window_records.append(row)
+        except (TypeError, ValueError):
+            continue
+    if window_records:
+        records = window_records
     cpu = [float(row["cpu"]["utilization_percent"]) for row in records if row.get("cpu", {}).get("utilization_percent") is not None]
     available = [int(row["memory"]["available_bytes"]) for row in records if row.get("memory", {}).get("available_bytes") is not None]
-    summary = {"schema": SCHEMA, "collector_version": "2", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"end_at": now().replace(second=0, microsecond=0).isoformat(), "interval_seconds": 60, "complete": len(records) >= 15}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(sum(cpu[i:i + 5]) / len(cpu[i:i + 5]) for i in range(max(1, len(cpu) - 4))), 2) if cpu else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "errors": []}
+    timestamps = []
+    for row in records:
+        try: timestamps.append(datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp())
+        except (TypeError, ValueError): pass
+    gaps = sum(1 for left, right in zip(sorted(timestamps), sorted(timestamps)[1:]) if right - left > 90)
+    summary = {"schema": SCHEMA, "collector_version": "3", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 60, "complete": len(records) >= 15 and gaps == 0, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(sum(cpu[i:i + 5]) / len(cpu[i:i + 5]) for i in range(max(1, len(cpu) - 4))), 2) if cpu else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "errors": []}
     return summary
 
 
-def publish(path: Path, record: dict[str, Any]) -> None:
+def publish(path: Path, record: dict[str, Any], *, mode: int = 0o640) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix="resource-status-", dir=path.parent)
     try:
@@ -153,6 +173,7 @@ def publish(path: Path, record: dict[str, Any]) -> None:
             json.dump(record, stream, separators=(",", ":"))
             stream.write("\n")
             stream.flush(); os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
@@ -163,10 +184,14 @@ def collect(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     current = sample(root)
     append_bounded(root / "samples.jsonl", current, 10080)
-    if now().minute % 15 == 0:
-        summary = summarize(root)
+    current_time = datetime.fromisoformat(current["observed_at"])
+    if current_time.minute % 15 == 0:
+        summary = summarize(root, reference=current_time)
         append_bounded(root / "summaries.jsonl", summary, 8640)
         publish(root / "status.json", summary)
+        export = os.environ.get("PROJECT_PAPER_RESOURCE_EXPORT")
+        if export:
+            publish(Path(export), summary, mode=0o644)
     elif not (root / "status.json").exists():
         publish(root / "status.json", {**summarize(root), "state": "warming"})
 
