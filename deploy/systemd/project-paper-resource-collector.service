@@ -1,0 +1,17 @@
+[Unit]
+Description=Project Paper sanitized host resource sample
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=project-paper
+Group=project-paper
+EnvironmentFile=-/etc/project-paper/resource-collector.env
+ExecStart=/usr/bin/python3 /opt/project-paper/scripts/host_resource_collector.py collect
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/proc /sys
+ReadWritePaths=/var/lib/project-paper/resource-status
+
