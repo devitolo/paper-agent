@@ -18,7 +18,7 @@ install -d -o root -g root -m 0755 "$prefix" "$config_dir"
 install -d -o root -g root -m 0700 "$state"
 install -d -o root -g root -m 0755 "$export_dir"
 install -d -o root -g root -m 0700 "$backup"
-exec 9>"$state/install.lock"
+exec 9>"$state/collector.lock"
 /usr/bin/flock -n 9 || { echo 'collector installation already running' >&2; exit 75; }
 targets=("$prefix/host_resource_collector.py" "$config_dir/mini-production.env" /usr/local/sbin/project-paper-resource-collector /etc/cron.d/project-paper-resource-collector)
 backups=("$backup/host_resource_collector.py.previous" "$backup/mini-production.env.previous" "$backup/collector-wrapper.previous" "$backup/collector-cron.previous")
@@ -46,6 +46,8 @@ cat > /etc/cron.d/project-paper-resource-collector.new <<'EOF'
 EOF
 chown root:root /etc/cron.d/project-paper-resource-collector.new; chmod 0644 /etc/cron.d/project-paper-resource-collector.new; mv -f /etc/cron.d/project-paper-resource-collector.new /etc/cron.d/project-paper-resource-collector
 printf '%s\n' "$backup" > "$state/CURRENT-BACKUP"
+printf 'target=mini-production\nstate=%s\ncollector=%s\n' "$state" "$prefix/host_resource_collector.py" > "$export_dir/INSTALL-RECEIPT"
+chown root:root "$export_dir/INSTALL-RECEIPT"; chmod 0644 "$export_dir/INSTALL-RECEIPT"
 if [[ -n ${PROJECT_PAPER_OBSERVABILITY_RELEASE:-} ]]; then
   printf 'release=%s\n' "$PROJECT_PAPER_OBSERVABILITY_RELEASE" > "$state/RELEASE"
   chown root:root "$state/RELEASE"; chmod 0640 "$state/RELEASE"

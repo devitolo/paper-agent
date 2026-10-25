@@ -182,10 +182,9 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         else:
             segment.append(float(value))
     if segment: segments.append(segment)
-    contiguous = []
+    five = []
     for values in segments:
-        contiguous.extend(values)
-    five = [sum(contiguous[i:i + 5]) / 5 for i in range(len(contiguous) - 4)]
+        five.extend(sum(values[i:i + 5]) / 5 for i in range(len(values) - 4))
     latest = records[-1] if records else {}
     try: observations = json.loads((root / "last-observations.json").read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError): observations = {}
