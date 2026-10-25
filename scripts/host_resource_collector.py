@@ -42,7 +42,7 @@ def read_meminfo() -> dict[str, int]:
 def read_cpu() -> tuple[int, int] | None:
     try:
         fields = Path("/proc/stat").read_text().splitlines()[0].split()[1:]
-        numbers = [int(value) for value in fields]
+        numbers = [int(value) for value in fields[:8]]
         return sum(numbers), numbers[3] + (numbers[4] if len(numbers) > 4 else 0)
     except (OSError, IndexError, ValueError):
         return None
@@ -100,11 +100,15 @@ def sample(root: Path) -> dict[str, Any]:
             previous = json.loads(previous_path.read_text())
             total_delta = cpu[0] - int(previous["total"])
             idle_delta = cpu[1] - int(previous["idle"])
-            if total_delta > 0:
+            elapsed = (stamp - datetime.fromisoformat(previous["observed_at"])).total_seconds()
+            record["cpu"]["interval_seconds"] = elapsed
+            if total_delta > 0 and 0 < elapsed <= 90:
                 record["cpu"]["utilization_percent"] = round(max(0.0, min(100.0, (total_delta - idle_delta) * 100 / total_delta)), 2)
+            elif elapsed > 90:
+                record["cpu"]["state"] = "gap"
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             pass
-        previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1]}))
+        previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1], "observed_at": stamp.isoformat()}))
     if stamp.minute % 60 == 0:
         record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
     cgroup = Path("/sys/fs/cgroup")

@@ -20,6 +20,9 @@ install -d -o root -g root -m 0755 "$export_dir"
 install -d -o root -g root -m 0700 "$backup"
 exec 9>"$state/collector.lock"
 /usr/bin/flock -n 9 || { echo 'collector installation already running' >&2; exit 75; }
+for required in "$package_root/scripts/host_resource_collector.py" "$package_root/scripts/resource_collector_job.sh"; do
+  [[ -f "$required" ]] || { echo "package file missing: $required" >&2; exit 66; }
+done
 targets=("$prefix/host_resource_collector.py" "$config_dir/mini-production.env" /usr/local/sbin/project-paper-resource-collector /etc/cron.d/project-paper-resource-collector)
 backups=("$backup/host_resource_collector.py.previous" "$backup/mini-production.env.previous" "$backup/collector-wrapper.previous" "$backup/collector-cron.previous")
 for i in "${!targets[@]}"; do
@@ -27,6 +30,15 @@ for i in "${!targets[@]}"; do
 done
 printf '%s\n' "${targets[0]}|${backups[0]}" "${targets[1]}|${backups[1]}" "/usr/local/sbin/project-paper-resource-collector|${backups[2]}" "/etc/cron.d/project-paper-resource-collector|${backups[3]}" > "$state/INSTALL-MANIFEST.new"
 chown root:root "$state/INSTALL-MANIFEST.new"; chmod 0600 "$state/INSTALL-MANIFEST.new"; mv -f "$state/INSTALL-MANIFEST.new" "$state/INSTALL-MANIFEST"
+restore_on_error() {
+  while IFS='|' read -r target previous; do
+    [[ -n "$target" ]] || continue
+    rm -f "$target"
+    if [[ -f "$previous" ]]; then mv -f "$previous" "$target"; fi
+  done < "$state/INSTALL-MANIFEST"
+  rm -f "$state/INSTALL-MANIFEST"
+}
+trap restore_on_error ERR
 install -o root -g root -m 0755 "$package_root/scripts/host_resource_collector.py" "$prefix/host_resource_collector.py.new"
 mv -f "$prefix/host_resource_collector.py.new" "$prefix/host_resource_collector.py"
 install -o root -g root -m 0755 "$package_root/scripts/resource_collector_job.sh" /usr/local/sbin/project-paper-resource-collector.new
@@ -53,3 +65,4 @@ if [[ -n ${PROJECT_PAPER_OBSERVABILITY_RELEASE:-} ]]; then
   chown root:root "$state/RELEASE"; chmod 0640 "$state/RELEASE"
 fi
 echo 'installed; add a read-only UI mount separately, then verify samples before enabling production display'
+trap - ERR
