@@ -81,10 +81,21 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF_TYPE" = tag && "$GITHUB_REF_NAME" = observability-v* ]] || { echo 'observability deploy requires observability-v* tag' >&2; exit 64; }
+      - name: Check host resources and prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v sudo >/dev/null
+          command -v docker >/dev/null
+          command -v flock >/dev/null
+          df -Pk /var/lib /opt /etc
+          free -b || true
       - name: Deploy package through host installer
         shell: bash
         run: |
           set -euo pipefail
+          rollback() { sudo -n bash scripts/remove_resource_collector_cron.sh || true; }
+          trap rollback ERR
           archive=$(find /tmp/project-paper-observability-package -maxdepth 1 -name '*.tar.gz' -print -quit)
           test -n "$archive"
           rm -rf /tmp/project-paper-observability-extracted
@@ -94,5 +105,16 @@ jobs:
           sudo -n bash scripts/install_resource_collector_cron.sh --apply --target=mini-production
           test -f /etc/cron.d/project-paper-resource-collector
           test -f /var/lib/project-paper-observability/mini-production/INSTALL-MANIFEST
+          sudo -n /usr/local/sbin/project-paper-resource-collector
+          test -f /var/lib/project-paper-observability/mini-production/status-export.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          value=json.loads(Path('/var/lib/project-paper-observability/mini-production/status-export.json').read_text())
+          assert value['schema'] == 'project-paper.resource-status.v1'
+          assert value['environment'] == 'mini-production'
+          assert value['scope'] == 'host'
+          print('collector_status_schema_ok=yes')
+          PY
           printf 'release=%s\npackage_sha256=%s\n' "$GITHUB_REF_NAME" "${{ needs.package.outputs.sha256 }}" > /var/lib/project-paper-observability/mini-production/RELEASE
           echo 'Installation complete; verify sample and complete UTC window before enabling UI consumption.'
