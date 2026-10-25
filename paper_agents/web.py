@@ -1451,8 +1451,24 @@ def render_health_job_charts(summary: dict[str, Any]) -> str:
     return '<section class="health-section job-charts"><h2>Recent pipeline trend</h2><p>Compact context for today’s jobs; detailed filtering analysis remains in Pipeline analytics.</p><div class="health-graphs"><div class="health-graph"><div class="graph-head"><h2>Daily Trend</h2><span>Candidates, eligible, recommendations</span></div>' + render_daily_trend_svg(daily_rows) + '</div><div class="health-graph"><div class="graph-head"><h2>Feedback/Profile Activity</h2><span>Recent changes</span></div>' + render_feedback_activity_svg(feedback_rows) + '</div></div></section>'
 
 
+def render_funnel_summary(summary: dict[str, Any]) -> str:
+    source_rows = source_funnel_rows(summary)
+    totals = {
+        "candidates": sum(int(row["candidate_count"] or 0) for row in source_rows),
+        "eligible": sum(int(row["eligible_count"] or 0) for row in source_rows),
+        "recommendations": sum(int(row["recommendation_count"] or 0) for row in source_rows),
+    }
+    totals["excluded"] = max(0, totals["candidates"] - totals["eligible"])
+    eligible_rate = f"{totals['eligible'] / totals['candidates']:.0%}" if totals["candidates"] else "—"
+    recommendation_rate = f"{totals['recommendations'] / totals['eligible']:.0%}" if totals["eligible"] else "—"
+    cards = "".join(f'<section class="health-card"><h2>{escape(label)}</h2><strong>{escape(str(value))}</strong><span>{escape(detail)}</span></section>' for label, value, detail in (("Candidates", totals["candidates"], "fetched"), ("Eligible", totals["eligible"], f"{eligible_rate} of candidates"), ("Recommendations", totals["recommendations"], f"{recommendation_rate} of eligible"), ("Excluded", totals["excluded"], "filtered out")))
+    compact_sources = [{"source": source_display_name(row["source"]), "candidates": row["candidate_count"], "eligible": row["eligible_count"], "recommendations": row["recommendation_count"], "eligible_rate": f"{row['eligible_count'] / row['candidate_count']:.0%}" if row["candidate_count"] else "—"} for row in source_rows]
+    exclusions = sorted(summary["source_breakdown"]["exclusion_reasons"], key=lambda row: int(row["count"] or 0), reverse=True)[:5]
+    return f'<section class="funnel-summary"><h3>At a glance</h3><div class="health-cards">{cards}</div>{render_health_table("By source", compact_sources, ["source", "candidates", "eligible", "recommendations", "eligible_rate"])}<details class="funnel-details"><summary>Show full funnel data</summary>{render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}{render_health_table("Scout", summary["daily"]["scout"], ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])}{render_health_table("Top exclusion reasons", exclusions, ["source", "reason", "count"])}{render_health_table("Curator", summary["daily"]["curator"], ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])}{render_health_table("Reviewer", summary["daily"]["reviewer"], ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])}{render_health_table("Feedback/Profile", summary["daily"]["feedback"], ["day", "raw_feedback_count", "structured_feedback_count", "profile_version_count", "apply_failure_count"])}{render_health_table("Recommendations by source", summary["source_breakdown"]["recommendations"], ["source", "recommendation_count"])}</details></section>'
+
+
 def render_health_analytics(summary: dict[str, Any]) -> str:
-    return f'''<section class="health-section"><h2>Pipeline analytics</h2><p>Historical yield and filtering analysis lives here; it is not used to decide operational health.</p>{render_health_graphs(summary)}<h3>Daily funnel</h3>{render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}{render_health_table("Scout", summary["daily"]["scout"], ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])}{render_health_table("Curator", summary["daily"]["curator"], ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])}{render_health_table("Reviewer", summary["daily"]["reviewer"], ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])}{render_health_table("Feedback/Profile", summary["daily"]["feedback"], ["day", "raw_feedback_count", "structured_feedback_count", "profile_version_count", "apply_failure_count"])}<h3>Source breakdown</h3>{render_health_table("Scout by source", summary["source_breakdown"]["funnel"], ["source", "candidate_count", "eligible_count", "excluded_count"])}{render_health_table("Recommendations by source", summary["source_breakdown"]["recommendations"], ["source", "recommendation_count"])}{render_health_table("Exclusion reasons", summary["source_breakdown"]["exclusion_reasons"], ["source", "reason", "count"])}</section>'''
+    return f'''<section class="health-section"><h2>Pipeline analytics</h2><p>Historical yield and filtering analysis lives here; it is not used to decide operational health.</p>{render_health_graphs(summary)}{render_funnel_summary(summary)}</section>'''
 
 
 def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOURCE_FILTER_ALL, tab: str = "attention") -> str:
@@ -3806,6 +3822,10 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .resource-panel { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(8, 13, 20, 0.28); }
 .resource-panel .health-kv { border: 0; padding: 0; background: transparent; }
 .job-charts { margin-top: 12px; }
+.funnel-summary { margin-top: 14px; }
+.funnel-summary > .health-cards { margin: 8px 0 14px; }
+.funnel-details { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.funnel-details > summary { cursor: pointer; color: var(--muted-strong); font-weight: 650; }
 
 .topics-main-tabs { display: flex; gap: 4px; margin: 0 0 10px; padding: 3px; width: fit-content; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(12, 20, 32, 0.82); }
 .topics-main-tab { min-width: 118px; padding: 7px 14px; border-radius: var(--radius-sm); color: var(--muted); font-weight: 720; text-align: center; text-decoration: none; }
