@@ -23,8 +23,11 @@ jobs:
           persist-credentials: false
       - name: Validate standalone package
         run: |
-          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release -v
-          bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh
+          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container -v
+          bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/observability/*.sh
+          test -s deploy/observability/Dockerfile
+          test -s deploy/observability/entrypoint.sh
+          test -s deploy/observability/run-container.sh
           git diff --check
 
   package:
@@ -33,9 +36,12 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      packages: write
     outputs:
       archive: ${{ steps.archive.outputs.archive }}
       sha256: ${{ steps.archive.outputs.sha256 }}
+      image: ${{ steps.image.outputs.image }}
+      image_digest: ${{ steps.image.outputs.digest }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -47,11 +53,26 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME:-observability-${GITHUB_SHA}}"
           archive="project-paper-observability-${tag}.tar.gz"
-          tar -czf "$archive" scripts/host_resource_collector.py scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/project-paper-resource-collector.crontab.example docs/mini-resource-collector-operations.md
+          tar -czf "$archive" scripts/host_resource_collector.py deploy/observability/Dockerfile deploy/observability/entrypoint.sh deploy/observability/run-container.sh deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/cron.example docs/mini-resource-collector-operations.md
           sha=$(sha256sum "$archive" | cut -d' ' -f1)
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
           printf 'package=%s\nsha256=%s\nrevision=%s\n' "$archive" "$sha" "$GITHUB_SHA" > observability-release-evidence.txt
+      - id: image
+        name: Build and publish immutable AMD64 image
+        shell: bash
+        env:
+          CR_PAT: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/observability:${GITHUB_REF_NAME}"
+          printf '%s' "$CR_PAT" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          docker buildx build --platform linux/amd64 --push -t "$image" deploy/observability
+          digest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          [[ "$digest" = sha256:* ]]
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          printf 'image=%s@%s\n' "$image" "$digest" >> observability-release-evidence.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: project-paper-observability-${{ github.sha }}
@@ -104,13 +125,14 @@ jobs:
           tar -xzf "$archive" -C /tmp/project-paper-observability-extracted
           cd /tmp/project-paper-observability-extracted
           transaction_started=0
-          rollback() { [[ "$transaction_started" -eq 1 ]] && sudo -n bash scripts/remove_resource_collector_cron.sh || true; }
+          rollback() { [[ "$transaction_started" -eq 1 ]] && sudo -n bash deploy/observability/remove_container_cron.sh || true; }
           trap rollback ERR
-          sudo -n env PROJECT_PAPER_OBSERVABILITY_RELEASE="$GITHUB_REF_NAME" bash scripts/install_resource_collector_cron.sh --apply --target=mini-production
+          image='${{ needs.package.outputs.image }}@${{ needs.package.outputs.image_digest }}'
+          sudo -n env PROJECT_PAPER_OBSERVABILITY_IMAGE="$image" bash deploy/observability/install_container_cron.sh --apply --target=mini-production
           transaction_started=1
-          test -f /etc/cron.d/project-paper-resource-collector
+          test -f /etc/cron.d/project-paper-observability-mini-production
           test -f /var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT
-          sudo -n /usr/local/sbin/project-paper-resource-collector
+          sudo -n /usr/local/sbin/project-paper-observability-container
           test -f /var/lib/project-paper-observability/mini-production-export/status.json
           python3 - <<'PY'
           import json
