@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -177,8 +178,8 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
     for row in records:
         deduped[row["observed_at"][:16]] = row
     records = list(deduped.values())
-    cpu = [float(row["cpu"]["utilization_percent"]) for row in records if isinstance(row.get("cpu"), dict) and isinstance(row["cpu"].get("utilization_percent"), (int, float))]
-    available = [int(row["memory"]["available_bytes"]) for row in records if isinstance(row.get("memory"), dict) and isinstance(row["memory"].get("available_bytes"), (int, float))]
+    cpu = [float(row["cpu"]["utilization_percent"]) for row in records if isinstance(row.get("cpu"), dict) and isinstance(row["cpu"].get("utilization_percent"), (int, float)) and math.isfinite(float(row["cpu"]["utilization_percent"]))]
+    available = [int(row["memory"]["available_bytes"]) for row in records if isinstance(row.get("memory"), dict) and isinstance(row["memory"].get("available_bytes"), (int, float)) and math.isfinite(float(row["memory"]["available_bytes"]))]
     timestamps = []
     for row in records:
         try: timestamps.append(datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp())
@@ -187,7 +188,9 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
     segments = []
     segment = []
     for row in records:
-        value = row.get("cpu", {}).get("utilization_percent")
+        value = row.get("cpu", {}).get("utilization_percent") if isinstance(row.get("cpu"), dict) else None
+        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            value = None
         if not segment:
             segment = [float(value)] if value is not None else []
             continue
