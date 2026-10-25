@@ -13,9 +13,9 @@ class HostResourceCollectorTests(unittest.TestCase):
             root = Path(directory)
             rows = []
             for index, value in enumerate((10, 20, 30, 40, 50, 60)):
-                rows.append(json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T00:{index:02d}:00+00:00", "cpu": {"utilization_percent": value}, "memory": {"available_bytes": 1000 - value}}))
+                rows.append(json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T12:{index:02d}:00+00:00", "cpu": {"utilization_percent": value}, "memory": {"available_bytes": 1000 - value}}))
             (root / "samples.jsonl").write_text("\n".join(rows) + "\n")
-            result = collector.summarize(root)
+            result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
         self.assertEqual(result["sample_count"], 6)
         self.assertEqual(result["coverage_seconds"], 300)
         self.assertEqual(result["cpu"]["average_percent"], 35)
@@ -66,7 +66,7 @@ class HostResourceCollectorTests(unittest.TestCase):
             collector.collect(root)
             status = json.loads((root / "status.json").read_text())
             self.assertEqual(status["schema"], collector.SCHEMA)
-            self.assertEqual(status["sample_count"], 1)
+            self.assertEqual(status["sample_count"], 0)
             self.assertTrue((root / "summaries.jsonl").exists())
 
 

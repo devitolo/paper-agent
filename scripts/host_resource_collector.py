@@ -83,7 +83,7 @@ def containers() -> dict[str, Any]:
             state = inspected.get("State") or {}
             config = inspected.get("Config") or {}
             labels = config.get("Labels") or {}
-            result.append({"name": name, "status": state.get("Status", "unknown"), "health": (state.get("Health") or {}).get("Status", "unknown"), "restart_count": state.get("RestartCount", 0), "oom_killed": bool(state.get("OOMKilled", False)), "image": config.get("Image", "unknown"), "revision": labels.get("org.opencontainers.image.revision", "unknown")})
+            result.append({"name": name, "status": state.get("Status", "unknown"), "health": (state.get("Health") or {}).get("Status", "unknown"), "restart_count": inspected.get("RestartCount", 0), "oom_killed": bool(state.get("OOMKilled", False)), "image": config.get("Image", "unknown"), "revision": labels.get("org.opencontainers.image.revision", "unknown")})
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             result.append({"name": name, "state": "unavailable"})
     return {"state": "observed", "items": result}
@@ -152,8 +152,12 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
                 window_records.append(row)
         except (TypeError, ValueError):
             continue
-    if window_records:
-        records = window_records
+    records = window_records
+    records.sort(key=lambda row: row["observed_at"])
+    deduped = {}
+    for row in records:
+        deduped[row["observed_at"][:16]] = row
+    records = list(deduped.values())
     cpu = [float(row["cpu"]["utilization_percent"]) for row in records if row.get("cpu", {}).get("utilization_percent") is not None]
     available = [int(row["memory"]["available_bytes"]) for row in records if row.get("memory", {}).get("available_bytes") is not None]
     timestamps = []
@@ -161,7 +165,22 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         try: timestamps.append(datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp())
         except (TypeError, ValueError): pass
     gaps = sum(1 for left, right in zip(sorted(timestamps), sorted(timestamps)[1:]) if right - left > 90)
-    summary = {"schema": SCHEMA, "collector_version": "3", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 60, "complete": len(records) >= 15 and gaps == 0, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(sum(cpu[i:i + 5]) / len(cpu[i:i + 5]) for i in range(max(1, len(cpu) - 4))), 2) if cpu else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "errors": []}
+    contiguous = []
+    for left, right in zip(records, records[1:]):
+        try:
+            delta = (datetime.fromisoformat(right["observed_at"].replace("Z", "+00:00")) - datetime.fromisoformat(left["observed_at"].replace("Z", "+00:00"))).total_seconds()
+            if delta <= 90 and right.get("cpu", {}).get("utilization_percent") is not None:
+                contiguous.append(float(right["cpu"]["utilization_percent"]))
+        except (TypeError, ValueError):
+            continue
+    five = [sum(contiguous[i:i + 5]) / 5 for i in range(len(contiguous) - 4)]
+    latest = records[-1] if records else {}
+    def latest_field(name: str):
+        for row in reversed(records):
+            if row.get(name) is not None:
+                return row.get(name)
+        return None
+    summary = {"schema": SCHEMA, "collector_version": "3", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 60, "complete": len(records) == 15 and gaps == 0, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(five), 2) if five else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_field("disk"), "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup")}, "errors": []}
     return summary
 
 
@@ -181,7 +200,8 @@ def publish(path: Path, record: dict[str, Any], *, mode: int = 0o640) -> None:
 
 
 def collect(root: Path) -> None:
-    root.mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(root, 0o700)
     current = sample(root)
     append_bounded(root / "samples.jsonl", current, 10080)
     current_time = datetime.fromisoformat(current["observed_at"])
@@ -189,11 +209,17 @@ def collect(root: Path) -> None:
         summary = summarize(root, reference=current_time)
         append_bounded(root / "summaries.jsonl", summary, 8640)
         publish(root / "status.json", summary)
-        export = os.environ.get("PROJECT_PAPER_RESOURCE_EXPORT")
-        if export:
-            publish(Path(export), summary, mode=0o644)
+        export_dir = os.environ.get("PROJECT_PAPER_RESOURCE_EXPORT_DIR")
+        if export_dir:
+            Path(export_dir).mkdir(parents=True, exist_ok=True, mode=0o755)
+            publish(Path(export_dir) / "status.json", summary, mode=0o644)
     elif not (root / "status.json").exists():
-        publish(root / "status.json", {**summarize(root), "state": "warming"})
+        warming = {**summarize(root), "state": "warming"}
+        publish(root / "status.json", warming)
+        export_dir = os.environ.get("PROJECT_PAPER_RESOURCE_EXPORT_DIR")
+        if export_dir:
+            Path(export_dir).mkdir(parents=True, exist_ok=True, mode=0o755)
+            publish(Path(export_dir) / "status.json", warming, mode=0o644)
 
 
 def main() -> None:

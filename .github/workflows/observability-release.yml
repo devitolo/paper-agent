@@ -40,10 +40,6 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
-        with:
-          name: project-paper-observability-${{ github.sha }}
-          path: /tmp/project-paper-observability-package
       - id: archive
         name: Build immutable observability package
         shell: bash
@@ -76,6 +72,10 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: project-paper-observability-${{ github.sha }}
+          path: /tmp/project-paper-observability-package
       - name: Require explicit release tag
         shell: bash
         run: |
@@ -94,27 +94,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rollback() { sudo -n bash scripts/remove_resource_collector_cron.sh || true; }
-          trap rollback ERR
           archive=$(find /tmp/project-paper-observability-package -maxdepth 1 -name '*.tar.gz' -print -quit)
           test -n "$archive"
+          expected='${{ needs.package.outputs.sha256 }}'
+          actual=$(sha256sum "$archive" | cut -d' ' -f1)
+          test "$actual" = "$expected"
           rm -rf /tmp/project-paper-observability-extracted
           mkdir -p /tmp/project-paper-observability-extracted
           tar -xzf "$archive" -C /tmp/project-paper-observability-extracted
           cd /tmp/project-paper-observability-extracted
-          sudo -n bash scripts/install_resource_collector_cron.sh --apply --target=mini-production
+          transaction_started=0
+          rollback() { [[ "$transaction_started" -eq 1 ]] && sudo -n bash scripts/remove_resource_collector_cron.sh || true; }
+          trap rollback ERR
+          transaction_started=1
+          sudo -n env PROJECT_PAPER_OBSERVABILITY_RELEASE="$GITHUB_REF_NAME" bash scripts/install_resource_collector_cron.sh --apply --target=mini-production
           test -f /etc/cron.d/project-paper-resource-collector
           test -f /var/lib/project-paper-observability/mini-production/INSTALL-MANIFEST
           sudo -n /usr/local/sbin/project-paper-resource-collector
-          test -f /var/lib/project-paper-observability/mini-production/status-export.json
+          test -f /var/lib/project-paper-observability/mini-production/export/status.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          value=json.loads(Path('/var/lib/project-paper-observability/mini-production/status-export.json').read_text())
+          value=json.loads(Path('/var/lib/project-paper-observability/mini-production/export/status.json').read_text())
           assert value['schema'] == 'project-paper.resource-status.v1'
           assert value['environment'] == 'mini-production'
           assert value['scope'] == 'host'
           print('collector_status_schema_ok=yes')
           PY
-          printf 'release=%s\npackage_sha256=%s\n' "$GITHUB_REF_NAME" "${{ needs.package.outputs.sha256 }}" > /var/lib/project-paper-observability/mini-production/RELEASE
           echo 'Installation complete; verify sample and complete UTC window before enabling UI consumption.'

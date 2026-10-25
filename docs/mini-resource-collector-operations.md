@@ -1,6 +1,6 @@
 # Mini resource collector operations
 
-This procedure covers the host collector for Mini non-production. It is
+This procedure covers the host collector for Mini production. It is
 separate from paper discovery, SQLite sync, cron, and AWS delivery. The
 collector does not write the Paper database and does not send metrics to AWS.
 
@@ -10,7 +10,7 @@ The release contains the read-only collector, a locked one-minute cron wrapper,
 a root-owned environment template, and bounded-retention
 tests. The collector samples CPU counter deltas, memory and swap, filesystem
 capacity/free/inodes, optional thermal sensors, cgroup memory, and an explicit
-allowlist of non-production container state. Container observations may include
+allowlist of production container state. Container observations may include
 health, restart/OOM state, image identity, and revision labels. It stores raw
 samples for seven days and complete UTC-aligned summaries for 90 days.
 
@@ -21,21 +21,21 @@ transport. Those are deliberate host/operator steps.
 ## Manual host steps
 
 SRE must perform these steps on the Mini production host using the approved
-host-install path. Do not run them against production or AWS during this phase.
+host-install path. Do not run them against AWS during this phase.
 
 1. Install the standalone host package with
    `scripts/install_resource_collector_cron.sh --apply`. It installs the
    collector script, locked cron wrapper, and environment file as
    root-owned files. Keep the script immutable to the cron user.
-2. Create `/var/lib/project-paper-observability/mini-nonprod` with ownership and
+2. Create `/var/lib/project-paper-observability/mini-production` with ownership and
    mode that permit only the collector to write and the UI consumer to read the
    sanitized status file.
 3. Set `PROJECT_PAPER_RESOURCE_HOST`,
-   `PROJECT_PAPER_RESOURCE_ENVIRONMENT=mini-nonprod`, the state root, and the
-   fixed non-production container-name allowlist. Leave the allowlist empty if
+   `PROJECT_PAPER_RESOURCE_ENVIRONMENT=mini-production`, the state root, and the
+   fixed production container-name allowlist. Leave the allowlist empty if
    Docker inspection is not approved; the result must be `unconfigured`, not a
    guessed healthy value.
-4. Make the status file available to the non-production UI through a read-only
+4. Make the sanitized export directory available to the production UI through a read-only
    bind mount or an equivalent existing observability mount. Do not mount the
    Docker socket, `/proc`, `/sys`, environment files, secrets, or raw sample
    logs into the web container.
@@ -45,7 +45,7 @@ host-install path. Do not run them against production or AWS during this phase.
    Cron must remain separate from Paper discovery jobs.
 6. Observe at least one raw sample and one complete 15-minute summary. Verify
    restart persistence, bounded file growth, atomic replacement, correct
-   `mini-nonprod` identity, and stale/unknown behavior after an interrupted
+   `mini-production` identity, and stale/unknown behavior after an interrupted
    collection.
 
 ## Rollback
