@@ -31,6 +31,22 @@ class HostResourceCollectorTests(unittest.TestCase):
         self.assertIsNone(result["cpu"]["average_percent"])
         self.assertIsNone(result["memory"]["available_average_bytes"])
 
+    def test_sample_reports_swap_used_and_explicit_nonprod_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(collector, "read_meminfo", return_value={"MemAvailable": 10, "MemTotal": 20, "SwapTotal": 30, "SwapFree": 7}), patch.object(collector, "read_cpu", return_value=(100, 40)), patch.object(collector, "containers", return_value={"state": "unconfigured"}), patch.object(collector, "temperature", return_value={"state": "unavailable"}):
+                result = collector.sample(root)
+        self.assertEqual(result["environment"], "mini-nonprod")
+        self.assertEqual(result["scope"], "host")
+        self.assertEqual(result["memory"]["swap_used_bytes"], 23)
+
+    def test_container_identity_is_sanitized(self):
+        payload = {"State": {"Status": "running", "Health": {"Status": "healthy"}, "RestartCount": 0, "OOMKilled": False}, "Config": {"Image": "ghcr.io/example@sha256:" + "a" * 64, "Labels": {"org.opencontainers.image.revision": "b" * 40}}}
+        with patch.dict(collector.os.environ, {"PROJECT_PAPER_CONTAINER_NAMES": "paper-mini-nonprod-app-1"}), patch.object(collector.subprocess, "check_output", return_value=json.dumps(payload)):
+            result = collector.containers()
+        self.assertEqual(result["items"][0]["image"], payload["Config"]["Image"])
+        self.assertEqual(result["items"][0]["revision"], "b" * 40)
+
     def test_collect_publishes_atomic_summary_without_database_access(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(collector, "now", return_value=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc)):
             root = Path(directory)
