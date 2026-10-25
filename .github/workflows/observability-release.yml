@@ -1,0 +1,98 @@
+name: Project Paper Observability Release
+
+on:
+  push:
+    tags:
+      - 'observability-v*'
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: project-paper-observability-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Validate standalone package
+        run: |
+          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status -v
+          bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh
+          git diff --check
+
+  package:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      archive: ${{ steps.archive.outputs.archive }}
+      sha256: ${{ steps.archive.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: project-paper-observability-${{ github.sha }}
+          path: /tmp/project-paper-observability-package
+      - id: archive
+        name: Build immutable observability package
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME:-observability-${GITHUB_SHA}}"
+          archive="project-paper-observability-${tag}.tar.gz"
+          tar -czf "$archive" scripts/host_resource_collector.py scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/project-paper-resource-collector.crontab.example docs/mini-resource-collector-operations.md
+          sha=$(sha256sum "$archive" | cut -d' ' -f1)
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          printf 'package=%s\nsha256=%s\nrevision=%s\n' "$archive" "$sha" "$GITHUB_SHA" > observability-release-evidence.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: project-paper-observability-${{ github.sha }}
+          path: |
+            ${{ steps.archive.outputs.archive }}
+            observability-release-evidence.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    needs: package
+    if: needs.package.result == 'success' && github.event_name == 'push' && startsWith(github.ref_name, 'observability-v')
+    environment: observability-production
+    runs-on: [self-hosted, linux, x64, project-paper-observability-deploy]
+    timeout-minutes: 20
+    permissions: {}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Require explicit release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_TYPE" = tag && "$GITHUB_REF_NAME" = observability-v* ]] || { echo 'observability deploy requires observability-v* tag' >&2; exit 64; }
+      - name: Deploy package through host installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=$(find /tmp/project-paper-observability-package -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "$archive"
+          rm -rf /tmp/project-paper-observability-extracted
+          mkdir -p /tmp/project-paper-observability-extracted
+          tar -xzf "$archive" -C /tmp/project-paper-observability-extracted
+          cd /tmp/project-paper-observability-extracted
+          sudo -n bash scripts/install_resource_collector_cron.sh --apply --target=mini-production
+          test -f /etc/cron.d/project-paper-resource-collector
+          test -f /var/lib/project-paper-observability/mini-production/INSTALL-MANIFEST
+          printf 'release=%s\npackage_sha256=%s\n' "$GITHUB_REF_NAME" "${{ needs.package.outputs.sha256 }}" > /var/lib/project-paper-observability/mini-production/RELEASE
+          echo 'Installation complete; verify sample and complete UTC window before enabling UI consumption.'
