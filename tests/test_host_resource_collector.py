@@ -60,6 +60,14 @@ class HostResourceCollectorTests(unittest.TestCase):
         self.assertEqual(result["window"]["sample_gaps"], 1)
         self.assertFalse(result["window"]["complete"])
 
+    def test_sustained_peak_never_spans_a_gap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = [json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T12:{minute:02d}:00+00:00", "cpu": {"utilization_percent": 100}, "memory": {"available_bytes": 100}}) for minute in (0, 1, 2, 7, 8, 9, 13, 14)]
+            (root / "samples.jsonl").write_text("\n".join(rows) + "\n")
+            result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
+        self.assertIsNone(result["cpu"]["peak_sustained_5m_percent"])
+
     def test_collect_publishes_atomic_summary_without_database_access(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(collector, "now", return_value=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc)):
             root = Path(directory)

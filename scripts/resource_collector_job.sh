@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # Dedicated host cron entry. This never runs a Paper pipeline job.
-root="${PROJECT_PAPER_RESOURCE_ROOT:-/var/lib/project-paper-observability/mini-nonprod}"
-collector="${PROJECT_PAPER_RESOURCE_COLLECTOR:-/opt/project-paper/scripts/host_resource_collector.py}"
 env_file="${PROJECT_PAPER_RESOURCE_ENV_FILE:-/etc/project-paper-observability/mini-production/mini-production.env}"
 if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
 [[ -n "${PROJECT_PAPER_RESOURCE_ENVIRONMENT:-}" ]] || { echo 'collector environment is not configured' >&2; exit 64; }
+root="${PROJECT_PAPER_RESOURCE_ROOT:-/var/lib/project-paper-observability/mini-nonprod}"
+collector="${PROJECT_PAPER_RESOURCE_COLLECTOR:-/opt/project-paper/scripts/host_resource_collector.py}"
 mkdir -p "$root"
 log="$root/collector.log"
 if [[ -f "$log" ]] && [[ $(stat -c %s "$log" 2>/dev/null || echo 0) -gt 1048576 ]]; then

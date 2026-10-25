@@ -106,10 +106,10 @@ jobs:
           transaction_started=0
           rollback() { [[ "$transaction_started" -eq 1 ]] && sudo -n bash scripts/remove_resource_collector_cron.sh || true; }
           trap rollback ERR
-          transaction_started=1
           sudo -n env PROJECT_PAPER_OBSERVABILITY_RELEASE="$GITHUB_REF_NAME" bash scripts/install_resource_collector_cron.sh --apply --target=mini-production
+          transaction_started=1
           test -f /etc/cron.d/project-paper-resource-collector
-          test -f /var/lib/project-paper-observability/mini-production/INSTALL-MANIFEST
+          test -f /var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT
           sudo -n /usr/local/sbin/project-paper-resource-collector
           test -f /var/lib/project-paper-observability/mini-production-export/status.json
           python3 - <<'PY'
