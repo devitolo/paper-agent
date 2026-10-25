@@ -19,7 +19,7 @@ import tempfile
 from typing import Any
 
 
-DEFAULT_ROOT = Path("/var/lib/project-paper/resource-status")
+DEFAULT_ROOT = Path("/var/lib/project-paper-observability/mini-nonprod")
 SCHEMA = "project-paper.resource-status.v1"
 
 
@@ -79,9 +79,12 @@ def containers() -> dict[str, Any]:
     result: list[dict[str, Any]] = []
     for name in names:
         try:
-            output = subprocess.check_output(["docker", "inspect", "--format", "{{json .State}}", name], text=True, timeout=3)
-            state = json.loads(output)
-            result.append({"name": name, "status": state.get("Status", "unknown"), "health": (state.get("Health") or {}).get("Status", "unknown"), "restart_count": state.get("RestartCount", 0), "oom_killed": bool(state.get("OOMKilled", False))})
+            output = subprocess.check_output(["docker", "inspect", "--format", "{{json .}}", name], text=True, timeout=3)
+            inspected = json.loads(output)
+            state = inspected.get("State") or {}
+            config = inspected.get("Config") or {}
+            labels = config.get("Labels") or {}
+            result.append({"name": name, "status": state.get("Status", "unknown"), "health": (state.get("Health") or {}).get("Status", "unknown"), "restart_count": state.get("RestartCount", 0), "oom_killed": bool(state.get("OOMKilled", False)), "image": config.get("Image", "unknown"), "revision": labels.get("org.opencontainers.image.revision", "unknown")})
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             result.append({"name": name, "state": "unavailable"})
     return {"state": "observed", "items": result}
@@ -91,7 +94,7 @@ def sample(root: Path) -> dict[str, Any]:
     stamp = now()
     cpu = read_cpu()
     mem = read_meminfo()
-    record: dict[str, Any] = {"schema": SCHEMA, "collector_version": "1", "observed_at": stamp.isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "unknown"), "memory": {"available_bytes": mem.get("MemAvailable"), "total_bytes": mem.get("MemTotal"), "swap_total_bytes": mem.get("SwapTotal"), "swap_free_bytes": mem.get("SwapFree")}, "cpu": {"total_jiffies": cpu[0], "idle_jiffies": cpu[1]} if cpu else {"state": "unavailable"}, "containers": containers(), "temperature": temperature()}
+    record: dict[str, Any] = {"schema": SCHEMA, "collector_version": "2", "observed_at": stamp.isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "memory": {"available_bytes": mem.get("MemAvailable"), "total_bytes": mem.get("MemTotal"), "swap_total_bytes": mem.get("SwapTotal"), "swap_free_bytes": mem.get("SwapFree"), "swap_used_bytes": (mem.get("SwapTotal") - mem.get("SwapFree")) if mem.get("SwapTotal") is not None and mem.get("SwapFree") is not None else None}, "cpu": {"total_jiffies": cpu[0], "idle_jiffies": cpu[1]} if cpu else {"state": "unavailable"}, "containers": containers(), "temperature": temperature()}
     previous_path = root / "last-cpu.json"
     if cpu:
         try:
@@ -105,6 +108,11 @@ def sample(root: Path) -> dict[str, Any]:
         previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1]}))
     if stamp.minute % 60 == 0:
         record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
+    cgroup = Path("/sys/fs/cgroup")
+    try:
+        record["cgroup"] = {"memory_current_bytes": int((cgroup / "memory.current").read_text().strip()), "memory_max_bytes": (lambda value: None if value == "max" else int(value))((cgroup / "memory.max").read_text().strip())}
+    except (OSError, ValueError):
+        record["cgroup"] = {"state": "unavailable"}
     return record
 
 
@@ -133,7 +141,7 @@ def summarize(root: Path) -> dict[str, Any]:
         pass
     cpu = [float(row["cpu"]["utilization_percent"]) for row in records if row.get("cpu", {}).get("utilization_percent") is not None]
     available = [int(row["memory"]["available_bytes"]) for row in records if row.get("memory", {}).get("available_bytes") is not None]
-    summary = {"schema": SCHEMA, "collector_version": "1", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "unknown"), "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(sum(cpu[i:i + 5]) / len(cpu[i:i + 5]) for i in range(max(1, len(cpu) - 4))), 2) if cpu else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}}
+    summary = {"schema": SCHEMA, "collector_version": "2", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"end_at": now().replace(second=0, microsecond=0).isoformat(), "interval_seconds": 60, "complete": len(records) >= 15}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(sum(cpu[i:i + 5]) / len(cpu[i:i + 5]) for i in range(max(1, len(cpu) - 4))), 2) if cpu else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "errors": []}
     return summary
 
 

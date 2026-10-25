@@ -13,5 +13,5 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadOnlyPaths=/proc /sys
-ReadWritePaths=/var/lib/project-paper/resource-status
+ReadWritePaths=/var/lib/project-paper-observability/mini-nonprod
 
