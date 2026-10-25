@@ -3,7 +3,8 @@ name: Project Paper Observability Release
 on:
   push:
     tags:
-      - 'observability-v*'
+      - 'observability-mini-v*'
+      - 'observability-aws-v*'
   workflow_dispatch:
 
 permissions: {}
@@ -23,8 +24,11 @@ jobs:
           persist-credentials: false
       - name: Validate standalone package
         run: |
-          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status -v
-          bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh
+          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container -v
+          bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/observability/*.sh
+          test -s deploy/observability/Dockerfile
+          test -s deploy/observability/entrypoint.sh
+          test -s deploy/observability/run-container.sh
           git diff --check
 
   package:
@@ -33,17 +37,16 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      packages: write
     outputs:
       archive: ${{ steps.archive.outputs.archive }}
       sha256: ${{ steps.archive.outputs.sha256 }}
+      image: ${{ steps.image.outputs.image }}
+      image_digest: ${{ steps.image.outputs.digest }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
-        with:
-          name: project-paper-observability-${{ github.sha }}
-          path: /tmp/project-paper-observability-package
       - id: archive
         name: Build immutable observability package
         shell: bash
@@ -51,11 +54,26 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME:-observability-${GITHUB_SHA}}"
           archive="project-paper-observability-${tag}.tar.gz"
-          tar -czf "$archive" scripts/host_resource_collector.py scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/project-paper-resource-collector.crontab.example docs/mini-resource-collector-operations.md
+          tar -czf "$archive" scripts/host_resource_collector.py deploy/observability/Dockerfile deploy/observability/entrypoint.sh deploy/observability/run-container.sh deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/recovery-common.sh deploy/observability/cron.example docs/mini-resource-collector-operations.md
           sha=$(sha256sum "$archive" | cut -d' ' -f1)
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
           printf 'package=%s\nsha256=%s\nrevision=%s\n' "$archive" "$sha" "$GITHUB_SHA" > observability-release-evidence.txt
+      - id: image
+        name: Build and publish immutable AMD64 image
+        shell: bash
+        env:
+          CR_PAT: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/observability:${GITHUB_REF_NAME}"
+          printf '%s' "$CR_PAT" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          docker buildx build --platform linux/amd64 --push -f deploy/observability/Dockerfile -t "$image" .
+          digest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          [[ "$digest" = sha256:* ]]
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          printf 'image=%s@%s\n' "$image" "$digest" >> observability-release-evidence.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: project-paper-observability-${{ github.sha }}
@@ -68,31 +86,74 @@ jobs:
   deploy:
     needs: package
     if: needs.package.result == 'success' && github.event_name == 'push' && startsWith(github.ref_name, 'observability-v')
-    environment: observability-production
-    runs-on: [self-hosted, linux, x64, project-paper-observability-deploy]
+    environment:
+      name: ${{ startsWith(github.ref_name, 'observability-mini-v') && 'observability-mini-production' || 'observability-aws-production' }}
+    runs-on: ${{ startsWith(github.ref_name, 'observability-mini-v') && fromJSON('["self-hosted","linux","x64","project-paper-observability-mini-deploy"]') || fromJSON('["self-hosted","linux","x64","project-paper-observability-aws-deploy"]') }}
     timeout-minutes: 20
     permissions: {}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: project-paper-observability-${{ github.sha }}
+          path: /tmp/project-paper-observability-package
       - name: Require explicit release tag
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_TYPE" = tag && "$GITHUB_REF_NAME" = observability-v* ]] || { echo 'observability deploy requires observability-v* tag' >&2; exit 64; }
+          [[ "$GITHUB_REF_TYPE" = tag ]] || { echo 'observability deploy requires a target-specific tag' >&2; exit 64; }
+          case "$GITHUB_REF_NAME" in
+            observability-mini-v*) target=mini-production ;;
+            observability-aws-v*) target=aws-production ;;
+            *) echo 'tag must be observability-mini-v* or observability-aws-v*' >&2; exit 64 ;;
+          esac
+          echo "target=$target"
+      - name: Check host resources and prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v sudo >/dev/null
+          command -v docker >/dev/null
+          command -v flock >/dev/null
+          df -Pk /var/lib /opt /etc
+          free -b || true
       - name: Deploy package through host installer
         shell: bash
         run: |
           set -euo pipefail
           archive=$(find /tmp/project-paper-observability-package -maxdepth 1 -name '*.tar.gz' -print -quit)
           test -n "$archive"
+          expected='${{ needs.package.outputs.sha256 }}'
+          actual=$(sha256sum "$archive" | cut -d' ' -f1)
+          test "$actual" = "$expected"
           rm -rf /tmp/project-paper-observability-extracted
           mkdir -p /tmp/project-paper-observability-extracted
           tar -xzf "$archive" -C /tmp/project-paper-observability-extracted
           cd /tmp/project-paper-observability-extracted
-          sudo -n bash scripts/install_resource_collector_cron.sh --apply --target=mini-production
-          test -f /etc/cron.d/project-paper-resource-collector
-          test -f /var/lib/project-paper-observability/mini-production/INSTALL-MANIFEST
-          printf 'release=%s\npackage_sha256=%s\n' "$GITHUB_REF_NAME" "${{ needs.package.outputs.sha256 }}" > /var/lib/project-paper-observability/mini-production/RELEASE
+          transaction_started=0
+          rollback() { [[ "$transaction_started" -eq 1 ]] && sudo -n bash deploy/observability/remove_container_cron.sh || true; }
+          trap rollback ERR
+          image='${{ needs.package.outputs.image }}@${{ needs.package.outputs.image_digest }}'
+          case "$GITHUB_REF_NAME" in
+            observability-mini-v*) target=mini-production ;;
+            observability-aws-v*) target=aws-production ;;
+            *) echo 'invalid target tag' >&2; exit 64 ;;
+          esac
+          sudo -n env PROJECT_PAPER_OBSERVABILITY_IMAGE="$image" bash deploy/observability/install_container_cron.sh --apply --target="$target"
+          transaction_started=1
+          test -f /etc/cron.d/project-paper-observability-mini-production
+          test -f /var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT
+          sudo -n /usr/local/sbin/project-paper-observability-container
+          test -f /var/lib/project-paper-observability/mini-production-export/status.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          value=json.loads(Path('/var/lib/project-paper-observability/mini-production-export/status.json').read_text())
+          assert value['schema'] == 'project-paper.resource-status.v1'
+          assert value['environment'] == 'mini-production'
+          assert value['scope'] == 'host'
+          print('collector_status_schema_ok=yes')
+          PY
           echo 'Installation complete; verify sample and complete UTC window before enabling UI consumption.'
