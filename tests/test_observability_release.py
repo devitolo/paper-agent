@@ -12,7 +12,8 @@ class ObservabilityReleaseContractTests(unittest.TestCase):
         self.assertIn("actions/download-artifact", text)
         self.assertIn("actual=$(sha256sum", text)
         self.assertIn("test \"$actual\" = \"$expected\"", text)
-        self.assertIn("environment: observability-production", text)
+        self.assertIn("observability-mini-production", text)
+        self.assertIn("observability-aws-production", text)
         self.assertIn("cancel-in-progress: false", text)
 
     def test_installer_has_unique_manifest_backups_and_fail_closed_target(self):

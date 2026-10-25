@@ -24,6 +24,10 @@ class ObservabilityContainerContractTests(unittest.TestCase):
         self.assertIn("@${{ needs.package.outputs.image_digest }}", workflow)
         self.assertIn("install_container_cron.sh", workflow)
         self.assertIn("remove_container_cron.sh", workflow)
+        self.assertIn("observability-mini-v*", workflow)
+        self.assertIn("observability-aws-v*", workflow)
+        self.assertIn("observability-mini-production", workflow)
+        self.assertIn("observability-aws-production", workflow)
         self.assertIn("-f deploy/observability/Dockerfile", workflow)
         self.assertIn(" .", workflow)
 
