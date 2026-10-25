@@ -22,11 +22,19 @@ class ObservabilityReleaseContractTests(unittest.TestCase):
         self.assertIn("collector-cron.previous", text)
         self.assertIn("INSTALL-MANIFEST", text)
         self.assertIn("PROJECT_PAPER_RESOURCE_EXPORT_DIR", text)
+        self.assertIn("mini-production-export", text)
 
     def test_rollback_requires_manifest_and_does_not_remove_shared_prefix(self):
         text = (ROOT / "scripts/remove_resource_collector_cron.sh").read_text()
         self.assertIn("owned manifest missing; refusing rollback", text)
         self.assertNotIn("rm -rf /opt/project-paper-observability", text)
+
+    def test_wrapper_loads_exact_production_env_and_distinguishes_lock(self):
+        text = (ROOT / "scripts/resource_collector_job.sh").read_text()
+        self.assertIn("/etc/project-paper-observability/mini-production/mini-production.env", text)
+        self.assertIn("write_state skipped", text)
+        self.assertIn("write_state failed", text)
+        self.assertIn("timeout --signal=TERM", text)
 
 
 if __name__ == "__main__":

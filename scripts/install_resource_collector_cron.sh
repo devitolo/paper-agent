@@ -12,16 +12,21 @@ package_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 prefix=/opt/project-paper-observability/mini-production
 config_dir=/etc/project-paper-observability/mini-production
 state=/var/lib/project-paper-observability/mini-production
-backup="$state/previous-install"
+export_dir=/var/lib/project-paper-observability/mini-production-export
+backup="$state/previous-install-$(date -u +%Y%m%dT%H%M%SZ)"
 install -d -o root -g root -m 0755 "$prefix" "$config_dir"
 install -d -o root -g root -m 0700 "$state"
-install -d -o root -g root -m 0755 "$state/export"
+install -d -o root -g root -m 0755 "$export_dir"
 install -d -o root -g root -m 0700 "$backup"
+exec 9>"$state/install.lock"
+/usr/bin/flock -n 9 || { echo 'collector installation already running' >&2; exit 75; }
 targets=("$prefix/host_resource_collector.py" "$config_dir/mini-production.env" /usr/local/sbin/project-paper-resource-collector /etc/cron.d/project-paper-resource-collector)
 backups=("$backup/host_resource_collector.py.previous" "$backup/mini-production.env.previous" "$backup/collector-wrapper.previous" "$backup/collector-cron.previous")
 for i in "${!targets[@]}"; do
   if [[ -e "${targets[$i]}" && ! -e "${backups[$i]}" ]]; then cp -p "${targets[$i]}" "${backups[$i]}"; fi
 done
+printf '%s\n' "${targets[0]}|${backups[0]}" "${targets[1]}|${backups[1]}" "/usr/local/sbin/project-paper-resource-collector|${backups[2]}" "/etc/cron.d/project-paper-resource-collector|${backups[3]}" > "$state/INSTALL-MANIFEST.new"
+chown root:root "$state/INSTALL-MANIFEST.new"; chmod 0600 "$state/INSTALL-MANIFEST.new"; mv -f "$state/INSTALL-MANIFEST.new" "$state/INSTALL-MANIFEST"
 install -o root -g root -m 0755 "$package_root/scripts/host_resource_collector.py" "$prefix/host_resource_collector.py.new"
 mv -f "$prefix/host_resource_collector.py.new" "$prefix/host_resource_collector.py"
 install -o root -g root -m 0755 "$package_root/scripts/resource_collector_job.sh" /usr/local/sbin/project-paper-resource-collector.new
@@ -29,7 +34,8 @@ mv -f /usr/local/sbin/project-paper-resource-collector.new /usr/local/sbin/proje
 cat > "$config_dir/mini-production.env.new" <<'EOF'
 PROJECT_PAPER_RESOURCE_ROOT=/var/lib/project-paper-observability/mini-production
 PROJECT_PAPER_RESOURCE_COLLECTOR=/opt/project-paper-observability/mini-production/host_resource_collector.py
-PROJECT_PAPER_RESOURCE_EXPORT_DIR=/var/lib/project-paper-observability/mini-production/export
+PROJECT_PAPER_RESOURCE_EXPORT_DIR=/var/lib/project-paper-observability/mini-production-export
+PROJECT_PAPER_RESOURCE_ENV_FILE=/etc/project-paper-observability/mini-production/mini-production.env
 PROJECT_PAPER_RESOURCE_HOST=clarkmini
 PROJECT_PAPER_RESOURCE_ENVIRONMENT=mini-production
 PROJECT_PAPER_CONTAINER_NAMES=paper-mini-production-app-1,paper-minilm-production-minilm-1,paper-mini-production-ollama-1
@@ -39,7 +45,7 @@ cat > /etc/cron.d/project-paper-resource-collector.new <<'EOF'
 * * * * * root . /etc/project-paper-observability/mini-production/mini-production.env; export PROJECT_PAPER_RESOURCE_ROOT PROJECT_PAPER_RESOURCE_COLLECTOR PROJECT_PAPER_RESOURCE_EXPORT_DIR PROJECT_PAPER_RESOURCE_HOST PROJECT_PAPER_RESOURCE_ENVIRONMENT PROJECT_PAPER_CONTAINER_NAMES; /usr/local/sbin/project-paper-resource-collector
 EOF
 chown root:root /etc/cron.d/project-paper-resource-collector.new; chmod 0644 /etc/cron.d/project-paper-resource-collector.new; mv -f /etc/cron.d/project-paper-resource-collector.new /etc/cron.d/project-paper-resource-collector
-printf '%s\n' "${targets[0]}|${backups[0]}" "${targets[1]}|${backups[1]}" "/usr/local/sbin/project-paper-resource-collector|${backups[2]}" "/etc/cron.d/project-paper-resource-collector|${backups[3]}" > "$state/INSTALL-MANIFEST"
+printf '%s\n' "$backup" > "$state/CURRENT-BACKUP"
 if [[ -n ${PROJECT_PAPER_OBSERVABILITY_RELEASE:-} ]]; then
   printf 'release=%s\n' "$PROJECT_PAPER_OBSERVABILITY_RELEASE" > "$state/RELEASE"
   chown root:root "$state/RELEASE"; chmod 0640 "$state/RELEASE"

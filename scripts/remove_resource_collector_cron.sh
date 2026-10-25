@@ -7,6 +7,6 @@ manifest="$state/INSTALL-MANIFEST"
 while IFS='|' read -r target previous; do
   [[ -n "$target" ]] || continue
   rm -f "$target"
-  [[ -f "$previous" ]] && mv -f "$previous" "$target"
+  if [[ -f "$previous" ]]; then mv -f "$previous" "$target"; fi
 done < "$manifest"
 echo 'owned collector files and cron removed/restored; retained state at /var/lib/project-paper-observability'

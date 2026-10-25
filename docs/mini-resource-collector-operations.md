@@ -35,8 +35,9 @@ host-install path. Do not run them against AWS during this phase.
    fixed production container-name allowlist. Leave the allowlist empty if
    Docker inspection is not approved; the result must be `unconfigured`, not a
    guessed healthy value.
-4. Make the sanitized export directory available to the production UI through a read-only
-   bind mount or an equivalent existing observability mount. Do not mount the
+4. Make `/var/lib/project-paper-observability/mini-production-export` available
+   to the production UI through a read-only bind mount or an equivalent existing
+   observability mount. Do not mount the
    Docker socket, `/proc`, `/sys`, environment files, secrets, or raw sample
    logs into the web container.
 5. Add the dedicated one-minute cron entry from

@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
       - name: Validate standalone package
         run: |
-          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status -v
+          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release -v
           bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh
           git diff --check
 
@@ -111,11 +111,11 @@ jobs:
           test -f /etc/cron.d/project-paper-resource-collector
           test -f /var/lib/project-paper-observability/mini-production/INSTALL-MANIFEST
           sudo -n /usr/local/sbin/project-paper-resource-collector
-          test -f /var/lib/project-paper-observability/mini-production/export/status.json
+          test -f /var/lib/project-paper-observability/mini-production-export/status.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          value=json.loads(Path('/var/lib/project-paper-observability/mini-production/export/status.json').read_text())
+          value=json.loads(Path('/var/lib/project-paper-observability/mini-production-export/status.json').read_text())
           assert value['schema'] == 'project-paper.resource-status.v1'
           assert value['environment'] == 'mini-production'
           assert value['scope'] == 'host'
