@@ -1,0 +1,2 @@
+# Dedicated resource collection; keep separate from Paper discovery cron.
+* * * * * PROJECT_PAPER_RESOURCE_ROOT=/var/lib/project-paper-observability/mini-nonprod PROJECT_PAPER_RESOURCE_COLLECTOR=/opt/project-paper/scripts/host_resource_collector.py /usr/bin/flock -n /var/lib/project-paper-observability/mini-nonprod/cron.lock /usr/local/sbin/project-paper-resource-collector >>/var/lib/project-paper-observability/mini-nonprod/collector.log 2>&1
