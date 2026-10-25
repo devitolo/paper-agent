@@ -1424,20 +1424,31 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
     sync = sync_health_snapshot()
     # Placeholder values make the layout reviewable until the restricted host collector is wired in.
     # They are deliberately labeled and must never be treated as live telemetry.
-    values = {
+    database = {
         "Database integrity": str(summary["db"]["integrity"]),
         "Database path": str(summary["db"]["path"]),
-        "AWS delivery state": sync["state"],
-        "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
+    }
+    mini = {
         "Mini CPU": "placeholder · 38% observed",
         "Mini memory": "placeholder · 2.1 / 8.0 GiB observed",
         "Mini disk": "placeholder · 61% used · 14.2 GiB free",
         "Mini container": "placeholder · healthy · image digest unavailable",
+        "Mini telemetry freshness": "placeholder · unknown until collector is installed",
+    }
+    aws = {
+        "AWS delivery state": sync["state"],
+        "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
         "AWS CPU / memory": "placeholder · collector not connected",
         "AWS disk / service": "placeholder · collector not connected",
-        "Telemetry freshness": "placeholder · unknown until collector is installed",
+        "AWS telemetry freshness": "placeholder · unknown until collector is installed",
     }
-    return '<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database and host capacity are separate from job history.</p></div><span class="placeholder-badge">PLACEHOLDER TELEMETRY</span></div>' + render_key_values(values) + '<p class="health-footnote">Resource values marked placeholder are made-up review data. The future collector will publish sanitized, timestamped CPU, memory, disk, container, runtime, and delivery observations.</p></section>'
+    return '<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">PLACEHOLDER TELEMETRY</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Resource values marked placeholder are made-up review data. The future collector will publish sanitized, timestamped CPU, memory, disk, container, runtime, and delivery observations.</p></section>'
+
+
+def render_health_job_charts(summary: dict[str, Any]) -> str:
+    daily_rows = daily_funnel_rows(summary)
+    feedback_rows = feedback_activity_rows(summary)
+    return '<section class="health-section job-charts"><h2>Recent pipeline trend</h2><p>Compact context for today’s jobs; detailed filtering analysis remains in Pipeline analytics.</p><div class="health-graphs"><div class="health-graph"><div class="graph-head"><h2>Daily Trend</h2><span>Candidates, eligible, recommendations</span></div>' + render_daily_trend_svg(daily_rows) + '</div><div class="health-graph"><div class="graph-head"><h2>Feedback/Profile Activity</h2><span>Recent changes</span></div>' + render_feedback_activity_svg(feedback_rows) + '</div></div></section>'
 
 
 def render_health_analytics(summary: dict[str, Any]) -> str:
@@ -1489,8 +1500,9 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     {render_needs_attention(summary) if tab == "jobs" else ""}
     {tab_content}
     <div class="health-cards">{card_html}</div>
+    {render_health_job_charts(summary) if tab == "jobs" else ""}
     {render_sync_health() if tab == "jobs" else ""}
-    <section class="health-section">
+    <section class="health-section" style="display: {'block' if tab == 'analytics' else 'none'}">
       <h2>Artifact Health</h2>
       {render_key_values(summary["artifact_health"])}
     </section>
@@ -3789,6 +3801,11 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
+.infra-database { margin-bottom: 14px; }
+.resource-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.resource-panel { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(8, 13, 20, 0.28); }
+.resource-panel .health-kv { border: 0; padding: 0; background: transparent; }
+.job-charts { margin-top: 12px; }
 
 .topics-main-tabs { display: flex; gap: 4px; margin: 0 0 10px; padding: 3px; width: fit-content; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(12, 20, 32, 0.82); }
 .topics-main-tab { min-width: 118px; padding: 7px 14px; border-radius: var(--radius-sm); color: var(--muted); font-weight: 720; text-align: center; text-decoration: none; }
@@ -4016,6 +4033,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
   .health-graphs { grid-template-columns: 1fr; }
   .health-graph-wide { grid-column: auto; }
   .health-kv { grid-template-columns: 1fr; }
+  .resource-columns { grid-template-columns: 1fr; }
   .topic-columns { grid-template-columns: 1fr; }
   .topic-list { columns: 1; }
   .topic-agent-form, .topic-edit-form, .topic-table-head, .topic-row, .topic-proposal-grid { grid-template-columns: 1fr; }
