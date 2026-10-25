@@ -23,6 +23,7 @@ backup=$(mktemp -d "$control/previous-install-XXXXXX")
 manifest="$backup/manifest"
 for target in /usr/local/sbin/project-paper-observability-container "$config_dir/mini-production.env" /etc/cron.d/project-paper-observability-mini-production "$export_dir/INSTALL-RECEIPT"; do
   previous="$backup/$(basename "$target").previous"
+  [[ ! -L "$target" ]] || { echo "managed target is a symlink: $target" >&2; exit 75; }
   if [ -e "$target" ]; then
     cp -p "$target" "$previous"
     printf '%s|%s|1|%s|%s|%s|%s\n' "$target" "$previous" "$(sha256sum "$previous" | cut -d' ' -f1)" "$(stat -c %a "$previous")" "$(stat -c %u "$previous")" "$(stat -c %g "$previous")" >> "$manifest"
@@ -60,8 +61,9 @@ chown root:root /etc/cron.d/project-paper-observability-mini-production.new; chm
 mv -f /usr/local/sbin/project-paper-observability-container.new /usr/local/sbin/project-paper-observability-container
 mv -f "$config_dir/mini-production.env.new" "$config_dir/mini-production.env"
 mv -f /etc/cron.d/project-paper-observability-mini-production.new /etc/cron.d/project-paper-observability-mini-production
-printf 'target=mini-production\nimage=%s\nconfig=%s\n' "$PROJECT_PAPER_OBSERVABILITY_IMAGE" "$config_dir/mini-production.env" > "$export_dir/INSTALL-RECEIPT"
-chown root:root "$export_dir/INSTALL-RECEIPT"; chmod 0644 "$export_dir/INSTALL-RECEIPT"
+printf 'target=mini-production\nimage=%s\nconfig=%s\n' "$PROJECT_PAPER_OBSERVABILITY_IMAGE" "$config_dir/mini-production.env" > "$control/INSTALL-RECEIPT.new"
+chown root:root "$control/INSTALL-RECEIPT.new"; chmod 0644 "$control/INSTALL-RECEIPT.new"
+mv -f "$control/INSTALL-RECEIPT.new" "$export_dir/INSTALL-RECEIPT"
 printf '%s\n' "$backup" > "$control/CURRENT-BACKUP.new"
 chown root:root "$control/CURRENT-BACKUP.new"; chmod 0600 "$control/CURRENT-BACKUP.new"
 mv -f "$control/CURRENT-BACKUP.new" "$control/CURRENT-BACKUP"
