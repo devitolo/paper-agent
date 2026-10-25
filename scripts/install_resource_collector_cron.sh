@@ -13,22 +13,22 @@ prefix=/opt/project-paper-observability/mini-production
 config_dir=/etc/project-paper-observability/mini-production
 state=/var/lib/project-paper-observability/mini-production
 export_dir=/var/lib/project-paper-observability/mini-production-export
-backup="$state/previous-install-$(date -u +%Y%m%dT%H%M%SZ)"
 install -d -o root -g root -m 0755 "$prefix" "$config_dir"
 install -d -o root -g root -m 0700 "$state"
 install -d -o root -g root -m 0755 "$export_dir"
-install -d -o root -g root -m 0700 "$backup"
 exec 9>"$state/collector.lock"
 /usr/bin/flock -n 9 || { echo 'collector installation already running' >&2; exit 75; }
+backup=$(mktemp -d "$state/previous-install-XXXXXX")
+chown root:root "$backup"; chmod 0700 "$backup"
 for required in "$package_root/scripts/host_resource_collector.py" "$package_root/scripts/resource_collector_job.sh"; do
   [[ -f "$required" ]] || { echo "package file missing: $required" >&2; exit 66; }
 done
-targets=("$prefix/host_resource_collector.py" "$config_dir/mini-production.env" /usr/local/sbin/project-paper-resource-collector /etc/cron.d/project-paper-resource-collector)
-backups=("$backup/host_resource_collector.py.previous" "$backup/mini-production.env.previous" "$backup/collector-wrapper.previous" "$backup/collector-cron.previous")
+targets=("$prefix/host_resource_collector.py" "$config_dir/mini-production.env" /usr/local/sbin/project-paper-resource-collector /etc/cron.d/project-paper-resource-collector "$export_dir/INSTALL-RECEIPT" "$state/RELEASE")
+backups=("$backup/host_resource_collector.py.previous" "$backup/mini-production.env.previous" "$backup/collector-wrapper.previous" "$backup/collector-cron.previous" "$backup/install-receipt.previous" "$backup/release.previous")
 for i in "${!targets[@]}"; do
   if [[ -e "${targets[$i]}" && ! -e "${backups[$i]}" ]]; then cp -p "${targets[$i]}" "${backups[$i]}"; fi
 done
-printf '%s\n' "${targets[0]}|${backups[0]}" "${targets[1]}|${backups[1]}" "/usr/local/sbin/project-paper-resource-collector|${backups[2]}" "/etc/cron.d/project-paper-resource-collector|${backups[3]}" > "$state/INSTALL-MANIFEST.new"
+printf '%s\n' "${targets[0]}|${backups[0]}" "${targets[1]}|${backups[1]}" "/usr/local/sbin/project-paper-resource-collector|${backups[2]}" "/etc/cron.d/project-paper-resource-collector|${backups[3]}" "${targets[4]}|${backups[4]}" "${targets[5]}|${backups[5]}" > "$state/INSTALL-MANIFEST.new"
 chown root:root "$state/INSTALL-MANIFEST.new"; chmod 0600 "$state/INSTALL-MANIFEST.new"; mv -f "$state/INSTALL-MANIFEST.new" "$state/INSTALL-MANIFEST"
 restore_on_error() {
   while IFS='|' read -r target previous; do
