@@ -1,10 +1,15 @@
 #!/bin/sh
 set -eu
+env_file="${PROJECT_PAPER_RESOURCE_ENV_FILE:-/etc/project-paper-observability/mini-production/mini-production.env}"
+if [ -r "$env_file" ]; then . "$env_file"; fi
 image="${PROJECT_PAPER_OBSERVABILITY_IMAGE:?image digest is required}"
+printf '%s\n' "$image" | /usr/bin/grep -Eq '@sha256:[0-9a-f]{64}$' || { echo 'immutable image digest is required' >&2; exit 64; }
 state="${PROJECT_PAPER_RESOURCE_ROOT:?state path is required}"
 export_dir="${PROJECT_PAPER_RESOURCE_EXPORT_DIR:?export path is required}"
 mkdir -p "$state" "$export_dir"
-exec docker run --rm --name project-paper-observability-collector \
+log="$state/collector.log"
+if [ -f "$log" ] && [ "$(wc -c <"$log")" -gt 1048576 ]; then mv -f "$log" "$log.1"; fi
+exec /usr/bin/timeout --signal=TERM --kill-after=5s 45s docker run --rm --name project-paper-observability-collector \
   --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
   --memory 64m --cpus 0.10 --pids-limit 32 --tmpfs /tmp:rw,noexec,nosuid,size=8m \
   -e PROJECT_PAPER_RESOURCE_ROOT=/state \

@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}/observability:${GITHUB_REF_NAME}"
           printf '%s' "$CR_PAT" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          docker buildx build --platform linux/amd64 --push -t "$image" deploy/observability
+          docker buildx build --platform linux/amd64 --push -f deploy/observability/Dockerfile -t "$image" .
           digest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
           [[ "$digest" = sha256:* ]]
           echo "image=$image" >> "$GITHUB_OUTPUT"
