@@ -4,17 +4,18 @@ set -euo pipefail
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo 'must run as root' >&2; exit 77; }
 [[ ${1:-} == --apply && ${2:-} == --target=mini-production ]] || { echo 'usage: install_container_cron.sh --apply --target=mini-production' >&2; exit 64; }
 [[ -n ${PROJECT_PAPER_OBSERVABILITY_IMAGE:-} ]] || { echo 'PROJECT_PAPER_OBSERVABILITY_IMAGE must be an immutable digest' >&2; exit 64; }
-printf '%s\n' "$PROJECT_PAPER_OBSERVABILITY_IMAGE" | /usr/bin/grep -Eq '@sha256:[0-9a-f]{64}$' || { echo 'PROJECT_PAPER_OBSERVABILITY_IMAGE must be an immutable digest' >&2; exit 64; }
+case "$PROJECT_PAPER_OBSERVABILITY_IMAGE" in *[!A-Za-z0-9_./:@-]*) echo 'PROJECT_PAPER_OBSERVABILITY_IMAGE must be an immutable digest' >&2; exit 64 ;; esac
+printf '%s' "$PROJECT_PAPER_OBSERVABILITY_IMAGE" | /usr/bin/grep -Eq '^[^@[:space:]]+@sha256:[0-9a-f]{64}$' || { echo 'PROJECT_PAPER_OBSERVABILITY_IMAGE must be an immutable digest' >&2; exit 64; }
 
 package_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 config_dir=/etc/project-paper-observability/mini-production
 state=/var/lib/project-paper-observability/mini-production
 export_dir=/var/lib/project-paper-observability/mini-production-export
+exec 9>"/run/lock/project-paper-observability.lock"
+/usr/bin/flock -n 9 || { echo 'observability installation already running' >&2; exit 75; }
 install -d -o root -g root -m 0755 "$config_dir"
 install -d -o 10001 -g 10001 -m 0755 "$export_dir"
 install -d -o 10001 -g 10001 -m 0700 "$state"
-exec 9>"/run/lock/project-paper-observability.lock"
-/usr/bin/flock -n 9 || { echo 'observability installation already running' >&2; exit 75; }
 
 backup=$(mktemp -d "$state/previous-install-XXXXXX")
 for target in /usr/local/sbin/project-paper-observability-container "$config_dir/mini-production.env" /etc/cron.d/project-paper-observability-mini-production "$export_dir/INSTALL-RECEIPT"; do
