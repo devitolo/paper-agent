@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
+from paper_agents.resource_status import load_resource_status
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.pdf_links import looks_like_direct_pdf_url
 from paper_agents.topic_inventory import scout_topic_inventory
@@ -1422,27 +1423,35 @@ def render_health_jobs(summary: dict[str, Any]) -> str:
 
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
     sync = sync_health_snapshot()
-    # Placeholder values make the layout reviewable until the restricted host collector is wired in.
-    # They are deliberately labeled and must never be treated as live telemetry.
+    mini_status = load_resource_status(Path(os.environ.get("PAPER_AGENT_MINI_RESOURCE_STATUS_FILE", os.environ.get("PAPER_AGENT_RESOURCE_STATUS_FILE", "data/resource-status.json"))))
+    aws_status = load_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
+    def metric(status: dict[str, Any], key: str, suffix: str = "") -> str:
+        value = status.get(key)
+        return f"{value}{suffix} observed" if value is not None else f"placeholder · {status.get('state', 'unknown')} unavailable"
+    mini_cpu = mini_status.get("cpu", {})
+    mini_memory = mini_status.get("memory", {})
+    aws_cpu = aws_status.get("cpu", {})
+    aws_memory = aws_status.get("memory", {})
     database = {
         "Database integrity": str(summary["db"]["integrity"]),
         "Database path": str(summary["db"]["path"]),
     }
     mini = {
-        "Mini CPU": "placeholder · 38% observed",
-        "Mini memory": "placeholder · 2.1 / 8.0 GiB observed",
-        "Mini disk": "placeholder · 61% used · 14.2 GiB free",
-        "Mini container": "placeholder · healthy · image digest unavailable",
-        "Mini telemetry freshness": "placeholder · unknown until collector is installed",
+        "Mini CPU": metric(mini_status, "cpu") if not mini_cpu.get("average_percent") else f"{mini_cpu['average_percent']}% avg · {mini_cpu.get('peak_sustained_5m_percent', 'unknown')}% peak sustained",
+        "Mini memory": metric(mini_status, "memory") if not mini_memory.get("available_average_bytes") else f"{mini_memory['available_average_bytes']} bytes available avg",
+        "Mini disk": "observed · see collector snapshot" if mini_status.get("disk") else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
+        "Mini container": str(mini_status.get("containers", {}).get("state", mini_status.get("state", "unknown"))) if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
+        "Mini telemetry freshness": f"{mini_status.get('state', 'unknown')} · {mini_status.get('age_seconds') if mini_status.get('age_seconds') is not None else 'unknown'}s old" if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} · age unknown",
     }
     aws = {
         "AWS delivery state": sync["state"],
         "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
-        "AWS CPU / memory": "placeholder · collector not connected",
-        "AWS disk / service": "placeholder · collector not connected",
-        "AWS telemetry freshness": "placeholder · unknown until collector is installed",
+        "AWS CPU / memory": f"{aws_cpu.get('average_percent', 'unknown')}% avg CPU · {aws_memory.get('available_average_bytes', 'unknown')} bytes available" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
+        "AWS disk / service": "observed · see collector snapshot" if aws_status.get("disk") else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
+        "AWS telemetry freshness": f"{aws_status.get('state', 'unknown')} · {aws_status.get('age_seconds') if aws_status.get('age_seconds') is not None else 'unknown'}s old" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} · age unknown",
     }
-    return '<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">PLACEHOLDER TELEMETRY</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Resource values marked placeholder are made-up review data. The future collector will publish sanitized, timestamped CPU, memory, disk, container, runtime, and delivery observations.</p></section>'
+    badge = "SANITIZED COLLECTOR DATA" if mini_status.get("state") == "observed" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · COLLECTOR NOT CONNECTED"
+    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked observed, stale, unknown, or unavailable. The web process only reads the status files.</p></section>'
 
 
 def render_health_job_charts(summary: dict[str, Any]) -> str:
