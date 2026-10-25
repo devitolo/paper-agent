@@ -3,7 +3,8 @@ set -eu
 env_file="${PROJECT_PAPER_RESOURCE_ENV_FILE:-/etc/project-paper-observability/mini-production/mini-production.env}"
 if [ -r "$env_file" ]; then . "$env_file"; fi
 image="${PROJECT_PAPER_OBSERVABILITY_IMAGE:?image digest is required}"
-printf '%s\n' "$image" | /usr/bin/grep -Eq '@sha256:[0-9a-f]{64}$' || { echo 'immutable image digest is required' >&2; exit 64; }
+case "$image" in *[!A-Za-z0-9_./:@-]*) echo 'immutable image digest is required' >&2; exit 64 ;; esac
+printf '%s' "$image" | /usr/bin/grep -Eq '^[^@[:space:]]+@sha256:[0-9a-f]{64}$' || { echo 'immutable image digest is required' >&2; exit 64; }
 state="${PROJECT_PAPER_RESOURCE_ROOT:?state path is required}"
 export_dir="${PROJECT_PAPER_RESOURCE_EXPORT_DIR:?export path is required}"
 mkdir -p "$state" "$export_dir"

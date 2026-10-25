@@ -15,7 +15,7 @@ class ObservabilityContainerContractTests(unittest.TestCase):
         self.assertNotIn("docker.sock", launcher)
         self.assertIn("timeout --signal=TERM --kill-after=5s 45s", launcher)
         self.assertIn("env_file=", launcher)
-        self.assertIn("grep -Eq '@sha256:[0-9a-f]{64}$'", launcher)
+        self.assertIn("grep -Eq '^[^@[:space:]]+@sha256:[0-9a-f]{64}$'", launcher)
 
     def test_release_builds_amd64_digest_and_deploys_container(self):
         workflow = (ROOT / ".github/workflows/observability-release.yml").read_text()
