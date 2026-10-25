@@ -12,12 +12,14 @@ if [[ -s "$backup_file" ]]; then
   if [[ -s "$manifest" ]]; then
     while IFS='|' read -r target previous; do
       rm -f "$target"
-      [[ -f "$previous" ]] && mv -f "$previous" "$target"
+      [[ -f "$previous" ]] && cp -p "$previous" "$target"
     done < "$manifest"
     mv -f "$manifest" "$manifest.restored"
     rm -f "$backup_file"
     echo 'container observability installation restored'
     exit 0
   fi
+  echo 'active rollback pointer has no valid manifest; refusing destructive action' >&2
+  exit 75
 fi
 echo 'container observability installation already absent; nothing to restore'
