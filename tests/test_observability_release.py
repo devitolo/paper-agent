@@ -41,7 +41,7 @@ class ObservabilityReleaseContractTests(unittest.TestCase):
         rollback = (ROOT / "scripts/remove_resource_collector_cron.sh").read_text()
         self.assertIn("restore_on_error()", installer)
         self.assertIn("trap restore_on_error ERR", installer)
-        self.assertIn("INSTALL-MANIFEST.restored", rollback)
+        self.assertIn("manifest.restored", rollback)
         self.assertIn("required in", installer)
 
 
