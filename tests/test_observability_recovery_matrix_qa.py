@@ -1,5 +1,6 @@
 """Full transaction fault matrix; run only in the guarded disposable Linux fixture."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -43,17 +44,24 @@ class ObservabilityRecoveryMatrixQA(unittest.TestCase):
                                      'registry.invalid/qa@sha256:' + 'b' * 64)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def fault(self, commands, destination):
-        marker = self.fixture.root / 'matrix-fault-used'
+    def fault(self, commands, destination, *, after=None):
+        identity = hashlib.sha256((str(destination) + ','.join(commands)).encode()).hexdigest()[:12]
+        marker = self.fixture.root / ('matrix-fault-' + identity)
+        rules_file = self.fixture.root / 'matrix-fault-rules.json'
+        rules = json.loads(rules_file.read_text()) if rules_file.exists() else []
+        rules.append({'commands': list(commands), 'destination': str(destination),
+                      'marker': str(marker), 'after': str(after) if after else None})
+        rules_file.write_text(json.dumps(rules))
         for command in commands:
             real = shutil.which(command)
             self.assertIsNotNone(real)
             script = self.fixture.bin / command
             script.write_text('#!' + sys.executable + '\n' +
-                'import os,sys\nfrom pathlib import Path\n' +
-                'marker=Path(' + repr(str(marker)) + ')\n' +
-                'if sys.argv[1:] and sys.argv[-1]==' + repr(str(destination)) + ' and not marker.exists():\n' +
-                ' marker.write_text(' + repr(command) + ');sys.exit(66)\n' +
+                'import json,os,sys\nfrom pathlib import Path\n' +
+                'for rule in json.loads(Path(' + repr(str(rules_file)) + ').read_text()):\n' +
+                ' marker=Path(rule["marker"])\n' +
+                ' if ' + repr(command) + ' in rule["commands"] and sys.argv[1:] and sys.argv[-1]==rule["destination"] and not marker.exists() and (not rule["after"] or Path(rule["after"]).exists()):\n' +
+                '  marker.write_text(' + repr(command) + ');sys.exit(66)\n' +
                 'os.execv(' + repr(real) + ',[' + repr(real) + ',*sys.argv[1:]])\n')
             script.chmod(0o755)
         return marker
@@ -96,6 +104,21 @@ class ObservabilityRecoveryMatrixQA(unittest.TestCase):
         self.assertEqual(self.state(), before)
         self.assertEqual(self.pointer(), pointer)
 
+    def test_failed_install_and_failed_error_recovery_can_resume_previous_installation(self):
+        self.fixture.installed(); before = self.state(); pointer = self.pointer()
+        publish_fault = self.fault(('mv', 'install'), linux.CONFIG)
+        recovery_fault = self.fault(('cp', 'mv', 'install'), linux.WRAPPER, after=publish_fault)
+        result = self.fixture.install(PROJECT_PAPER_OBSERVABILITY_IMAGE=
+                                      'registry.invalid/qa@sha256:' + 'b' * 64)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(publish_fault.exists())
+        self.assertTrue(recovery_fault.exists(), 'Recovery fault must actually fire after publish failure')
+        for _ in range(2):
+            retry = self.fixture.remove()
+            self.assertEqual(retry.returncode, 0, retry.stderr)
+            self.assertEqual(self.state(), before, 'Pending recovery repeats must not roll back an older installation')
+            self.assertEqual(self.pointer(), pointer, 'Failed-install recovery must preserve the previous transaction')
+
     def test_corrupt_backup_bytes_fail_before_any_active_file_changes(self):
         self.fixture.installed(); self.upgrade(); before = self.state()
         (self.backup() / (linux.WRAPPER.name + '.previous')).write_bytes(b'QA_CORRUPT_COPY')
@@ -104,14 +127,25 @@ class ObservabilityRecoveryMatrixQA(unittest.TestCase):
         self.assertEqual(self.state(), before)
 
     def test_incomplete_or_duplicate_manifest_fails_before_any_active_file_changes(self):
-        for damage in ('missing_row', 'duplicate_row', 'unmanaged_target'):
+        for damage in ('missing_row', 'duplicate_row', 'unmanaged_target',
+                       'invalid_mode', 'invalid_uid', 'outside_backup'):
             with self.subTest(damage=damage):
                 self.reset(); self.fixture.installed(); self.upgrade(); before = self.state()
                 manifest = self.backup() / 'manifest'
                 rows = manifest.read_text().splitlines()
                 if damage == 'missing_row': rows.pop()
                 elif damage == 'duplicate_row': rows[-1] = rows[0]
-                else: rows[-1] = '/etc/qa-unmanaged|/tmp/qa-missing|0|-|-|-|-'
+                elif damage == 'unmanaged_target': rows[-1] = '/etc/qa-unmanaged|/tmp/qa-missing|0|-|-|-|-'
+                else:
+                    fields = rows[0].split('|')
+                    if damage == 'invalid_mode': fields[4] = 'not-octal'
+                    elif damage == 'invalid_uid': fields[5] = 'not-a-uid'
+                    else:
+                        outside = self.fixture.root / 'outside-manifest-copy'
+                        outside.write_bytes(Path(fields[1]).read_bytes())
+                        outside.chmod(int(fields[4], 8))
+                        fields[1] = str(outside)
+                    rows[0] = '|'.join(fields)
                 manifest.write_text('\n'.join(rows) + '\n')
                 result = self.fixture.remove()
                 self.assertNotEqual(result.returncode, 0)
@@ -127,22 +161,27 @@ class ObservabilityRecoveryMatrixQA(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.state(), before)
 
-    def test_collector_export_symlink_cannot_redirect_root_receipt_restore(self):
-        self.fixture.installed(); self.upgrade()
-        victim = Path('/etc/project-paper-observability/qa-root-receipt-victim')
-        original = b'QA_UNRELATED_ROOT_CONTENT'
-        victim.write_bytes(original)
-        code = """from pathlib import Path
+    def test_collector_export_symlink_cannot_redirect_root_receipt_writes(self):
+        for operation in ('upgrade', 'rollback'):
+            with self.subTest(operation=operation):
+                self.reset(); self.fixture.installed()
+                if operation == 'rollback': self.upgrade()
+                victim = Path('/etc/project-paper-observability/qa-root-receipt-victim')
+                original = b'QA_UNRELATED_ROOT_CONTENT'
+                victim.write_bytes(original)
+                code = """from pathlib import Path
 p=Path('/var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT')
 p.unlink();p.symlink_to('/etc/project-paper-observability/qa-root-receipt-victim')
 """
-        def drop(): os.setgid(10001); os.setuid(10001)
-        result = subprocess.run([sys.executable, '-c', code], preexec_fn=drop,
-                                capture_output=True, text=True, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.fixture.remove()
-        self.assertEqual(victim.read_bytes(), original,
-                         'A collector-owned export entry must not redirect root recovery writes')
+                def drop(): os.setgid(10001); os.setuid(10001)
+                result = subprocess.run([sys.executable, '-c', code], preexec_fn=drop,
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if operation == 'upgrade': self.fixture.install(
+                    PROJECT_PAPER_OBSERVABILITY_IMAGE='registry.invalid/qa@sha256:' + 'b' * 64)
+                else: self.fixture.remove()
+                self.assertEqual(victim.read_bytes(), original,
+                                 'A collector-owned export entry must not redirect root writes')
 
     def test_samples_exports_and_unrelated_files_survive_upgrade_and_rollback(self):
         self.fixture.installed()

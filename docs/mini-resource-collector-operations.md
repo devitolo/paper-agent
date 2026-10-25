@@ -65,3 +65,20 @@ Missing records are `unknown`; unreadable or malformed records are distinct
 `unavailable`/`malformed` states; data older than three collection intervals is
 stale. Host-wide readings remain labeled host scope. No Mini-to-AWS metrics
 transport is implied by this procedure.
+
+
+## Container package transaction recovery
+
+The container installer/remover share `deploy/observability/recovery-common.sh`; retain it with the same checksum-verified release package. Root-owned recovery metadata and immutable backup copies live in `/var/lib/project-paper-observability/mini-production-control`. Do not delete, edit or move those files to collector-writable state.
+
+On an installation error the installer attempts restoration automatically. If that restoration also fails, `PENDING-BACKUP` retains the prepared transaction. Resolve the reported filesystem/permission problem, then run the remover from the same verified package:
+
+```sh
+sudo bash deploy/observability/remove_container_cron.sh
+```
+
+Pending recovery restores the previously active installation and its previous recovery pointer. A root-owned `RECOVERED-PENDING` record makes repeats preserve that installation; the next successful installation clears that record. Ordinary rollback of a successfully installed version restores its predecessor and clears the active pointer, so repeating it is a no-op.
+
+Missing, malformed, incomplete, altered or symlinked recovery inputs cause a nonzero result before restoration starts. Preserve the evidence and reconcile the error; do not force success by deleting the active pointer. File restore and completion cleanup can be retried because backup copies and the original manifest are not consumed.
+
+These paths are tested against injected command/file failures in disposable Linux. They do not establish power-loss/fsync guarantees or replace separate production smoke and actual Docker-daemon cleanup checks.
