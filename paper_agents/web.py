@@ -1295,6 +1295,8 @@ def sync_health_snapshot() -> dict[str, str]:
             if seconds > 48 * 3600:
                 return {**unknown, "time": str(value.get("updated_at", "unknown")), "revision": str(value.get("input_revision", "unknown")), "age": age, "state": "stale"}
         result = str(value.get("overall_result", "unknown"))
+        if not isinstance(updated, str):
+            return {**unknown, "revision": str(value.get("input_revision", "unknown")), "state": "unknown"}
         return {"time": str(value.get("updated_at", "unknown")), "revision": str(value.get("input_revision", "unknown")), "age": age, "size": str(value.get("snapshot_size", "unknown")), "failure": str(value.get("reason", "none"))[:160], "skipped": "yes" if result == "skipped" else "no", "installed": str(value.get("installed_input_revision", value.get("input_revision", "unknown"))), "state": result}
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return {**unknown, "state": "unavailable"}
@@ -1327,6 +1329,7 @@ def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]
             "confidence": confidence,
             "category": category,
             "observed_at": str(warning.get("recorded_at", "unknown")),
+            "diagnostic_href": f"/health/scout-diagnostics/{warning['scout_run_id']}" if isinstance(warning.get("scout_run_id"), int) and warning["scout_run_id"] > 0 else "",
         })
     sync = sync_health_snapshot()
     if sync["state"] != "completed":
@@ -1343,13 +1346,14 @@ def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]
             "recommended_next_action": "Inspect the sync receipt and outbox delivery logs before rerunning a source job.",
             "confidence": "confirmed",
             "observed_at": sync["time"],
+            "diagnostic_href": "",
         })
     for notice in summary.get("profile_maintenance", []):
         message = str(notice.get("message", "Profile maintenance requires attention"))
         items.append({
             "state": "observed",
             "domain": "profile",
-            "severity": "warning",
+            "severity": str(notice.get("level", "warning")),
             "what_happened": message,
             "why_it_matters": "Profile changes may not be reflected in recommendation scoring.",
             "likely_cause": "The profile maintenance record reports unapplied or failed work.",
@@ -1359,6 +1363,7 @@ def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]
             "confidence": "confirmed",
             "category": "profile",
             "observed_at": "unknown",
+            "diagnostic_href": "",
         })
     return items
 
@@ -1366,8 +1371,8 @@ def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]
 def classify_attention_message(message: str) -> tuple[str, str, str, str]:
     text = message.lower()
     rules = (
-        ("configuration", ("missing", "config", "credential", "key"), "A required configuration value may be absent or invalid.", "Check the private production configuration and rerun the affected stage.", "likely"),
         ("rate_limit", ("429", "thrott", "rate limit"), "The provider is rate limiting requests.", "Wait for the provider window to clear and verify backoff/key rotation evidence.", "confirmed"),
+        ("configuration", ("missing", "config", "credential", "api key"), "A required configuration value may be absent or invalid.", "Check the private production configuration and rerun the affected stage.", "likely"),
         ("timeout", ("timeout", "timed out"), "The stage exceeded its configured time limit.", "Inspect the stage event and retry only after checking provider and host health.", "confirmed"),
         ("empty_results", ("0 candidates", "0 eligible", "empty"), "The source returned no usable records or filtering removed them.", "Inspect source diagnostics to distinguish provider emptiness from local filtering.", "confirmed"),
         ("delivery", ("sync", "aws", "outbox", "receipt"), "The delivery stage did not produce a current accepted receipt.", "Inspect the outbox and AWS acceptance receipt; preserve the local result while reconciling.", "likely"),
@@ -1382,18 +1387,23 @@ def render_needs_attention(summary: dict[str, Any]) -> str:
     items = render_needs_attention_items(summary)
     if not items:
         return '<section class="health-section needs-attention"><h2>Needs Attention</h2><p>No deterministic attention items are currently observed.</p></section>'
-    cards = "".join(
-        '<article class="attention-card">'
-        f'<h3>{escape(item["severity"])} · {escape(item["domain"])}</h3>'
-        f'<p><strong>What happened:</strong> {escape(item["what_happened"])}</p>'
-        f'<p><strong>Why it matters:</strong> {escape(item["why_it_matters"])}</p>'
-        f'<p><strong>Likely cause:</strong> {escape(item["likely_cause"])}</p>'
-        f'<p><strong>Evidence:</strong> {escape(item["evidence"])}</p>'
-        f'<p><strong>Scope:</strong> {escape(item["affected_scope"])} · <strong>Next:</strong> {escape(item["recommended_next_action"])}</p>'
-        f'<p><strong>Confidence:</strong> {escape(item["confidence"])} · <strong>Observed:</strong> {escape(item["observed_at"])}</p>'
-        '</article>'
-        for item in items
-    )
+    cards = []
+    for item in items:
+        diagnostic = ""
+        if item.get("diagnostic_href"):
+            diagnostic = f' · <a href="{escape(item["diagnostic_href"])}" target="_blank" rel="noopener">View diagnostics</a>'
+        cards.append(
+            '<article class="attention-card">'
+            f'<h3>{escape(item["severity"])} · {escape(item["domain"])}</h3>'
+            f'<p><strong>What happened:</strong> {escape(item["what_happened"])}</p>'
+            f'<p><strong>Why it matters:</strong> {escape(item["why_it_matters"])}</p>'
+            f'<p><strong>Likely cause:</strong> {escape(item["likely_cause"])}</p>'
+            f'<p><strong>Evidence:</strong> {escape(item["evidence"])}</p>'
+            f'<p><strong>Scope:</strong> {escape(item["affected_scope"])} · <strong>Next:</strong> {escape(item["recommended_next_action"])}{diagnostic}</p>'
+            f'<p><strong>Confidence:</strong> {escape(item["confidence"])} · <strong>Observed:</strong> {escape(item["observed_at"])}</p>'
+            '</article>'
+        )
+    cards = "".join(cards)
     return f'<section class="health-section needs-attention"><h2>Needs Attention</h2>{cards}</section>'
 
 
@@ -1403,8 +1413,10 @@ def render_health_jobs(summary: dict[str, Any]) -> str:
     for event in events:
         status = str(event.get("status", "unknown"))
         processing = "completed" if status in {"completed", "success", "succeeded"} else ("failed" if status in {"failed", "error"} else status)
-        delivery = "accepted" if "push" in str(event.get("message", "")).lower() and status in {"completed", "success", "succeeded"} else "not recorded"
-        rows.append({"recorded_at": event.get("recorded_at", "unknown"), "job": event.get("job", "unknown"), "processing": processing, "delivery": delivery, "message": event.get("message", "")})
+        message = str(event.get("message", ""))
+        lower_message = message.lower()
+        delivery = "accepted" if status in {"completed", "success", "succeeded"} and any(token in lower_message for token in ("receipt applied", "receipt=applied", "delivery accepted", "push applied")) else ("failed" if "push failed" in lower_message else "pending" if "push pending" in lower_message else "not recorded")
+        rows.append({"recorded_at": event.get("recorded_at", "unknown"), "job": event.get("job", "unknown"), "processing": processing, "delivery": delivery, "message": message})
     return '<section class="health-section"><div class="section-heading"><div><h2>Jobs</h2><p>Scheduled operations, with processing and AWS delivery shown separately.</p></div><span class="health-note">Live events · refresh the page to update</span></div>' + render_health_table("Operational job history", rows, ["recorded_at", "job", "processing", "delivery", "message"]) + '</section>'
 
 
@@ -1454,12 +1466,13 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     )
     controls = f"""
       <form method="get" action="/health" class="queue-controls">
+        <input type="hidden" name="tab" value="{escape(tab)}">
         {render_select([("7", "7 days"), ("21", "21 days"), ("30", "30 days"), ("90", "90 days")], "days", str(days), "Range")}
         {render_select(source_choices, "source", source_value, "Source")}
       </form>
     """
 
-    tabs = ''.join(f'<a class="health-tab {"active" if tab == value else ""}" href="/health?tab={value}">{label}</a>' for value, label in (("jobs", "Jobs"), ("infrastructure", "Infrastructure"), ("analytics", "Pipeline analytics")))
+    tabs = ''.join(f'<a class="health-tab {"active" if tab == value else ""}" href="/health?tab={value}&days={days}&source={escape(source_value)}">{label}</a>' for value, label in (("jobs", "Jobs"), ("infrastructure", "Infrastructure"), ("analytics", "Pipeline analytics")))
     tab_content = render_health_jobs(summary) if tab == "jobs" else (render_health_infrastructure(summary) if tab == "infrastructure" else render_health_analytics(summary))
     return f"""<!doctype html>
 <html lang="en">
