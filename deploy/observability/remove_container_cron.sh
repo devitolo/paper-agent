@@ -10,9 +10,24 @@ if [[ -s "$backup_file" ]]; then
   backup=$(cat "$backup_file")
   manifest="$backup/manifest"
   if [[ -s "$manifest" ]]; then
-    while IFS='|' read -r target previous; do
-      rm -f "$target"
-      [[ -f "$previous" ]] && cp -p "$previous" "$target"
+    while IFS='|' read -r target previous present digest mode uid gid; do
+      case "$target" in
+        /usr/local/sbin/project-paper-observability-container|/etc/project-paper-observability/mini-production/mini-production.env|/etc/cron.d/project-paper-observability-mini-production|/var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT) : ;;
+        *) echo 'rollback manifest contains an unmanaged target' >&2; exit 75 ;;
+      esac
+      if [[ "$present" = 1 ]]; then
+        [[ -f "$previous" ]] || { echo 'required rollback copy missing' >&2; exit 75; }
+        [[ "$(sha256sum "$previous" | cut -d' ' -f1)" = "$digest" ]] || { echo 'rollback copy checksum mismatch' >&2; exit 75; }
+      elif [[ "$present" != 0 ]]; then
+        echo 'rollback manifest existence flag invalid' >&2; exit 75
+      fi
+    done < "$manifest"
+    while IFS='|' read -r target previous present digest mode uid gid; do
+      if [[ "$present" = 1 ]]; then
+        cp -p "$previous" "$target"; chmod "$mode" "$target"; chown "$uid:$gid" "$target"
+      else
+        rm -f "$target"
+      fi
     done < "$manifest"
     mv -f "$manifest" "$manifest.restored"
     rm -f "$backup_file"

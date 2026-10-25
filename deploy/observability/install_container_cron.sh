@@ -23,13 +23,21 @@ backup=$(mktemp -d "$control/previous-install-XXXXXX")
 manifest="$backup/manifest"
 for target in /usr/local/sbin/project-paper-observability-container "$config_dir/mini-production.env" /etc/cron.d/project-paper-observability-mini-production "$export_dir/INSTALL-RECEIPT"; do
   previous="$backup/$(basename "$target").previous"
-  printf '%s|%s\n' "$target" "$previous" >> "$manifest"
-  if [ -e "$target" ]; then cp -p "$target" "$previous"; fi
+  if [ -e "$target" ]; then
+    cp -p "$target" "$previous"
+    printf '%s|%s|1|%s|%s|%s|%s\n' "$target" "$previous" "$(sha256sum "$previous" | cut -d' ' -f1)" "$(stat -c %a "$previous")" "$(stat -c %u "$previous")" "$(stat -c %g "$previous")" >> "$manifest"
+  else
+    printf '%s|%s|0|-|-|-|-\n' "$target" "$previous" >> "$manifest"
+  fi
 done
 restore_on_error() {
-  while IFS='|' read -r target previous; do
-    rm -f "$target"
-    [ -f "$previous" ] && mv -f "$previous" "$target"
+  while IFS='|' read -r target previous present digest mode uid gid; do
+    if [ "$present" = 1 ]; then
+      cp -p "$previous" "$target"
+      chmod "$mode" "$target"; chown "$uid:$gid" "$target"
+    else
+      rm -f "$target"
+    fi
   done < "$manifest"
   rm -rf "$backup"
 }
@@ -54,7 +62,8 @@ mv -f "$config_dir/mini-production.env.new" "$config_dir/mini-production.env"
 mv -f /etc/cron.d/project-paper-observability-mini-production.new /etc/cron.d/project-paper-observability-mini-production
 printf 'target=mini-production\nimage=%s\nconfig=%s\n' "$PROJECT_PAPER_OBSERVABILITY_IMAGE" "$config_dir/mini-production.env" > "$export_dir/INSTALL-RECEIPT"
 chown root:root "$export_dir/INSTALL-RECEIPT"; chmod 0644 "$export_dir/INSTALL-RECEIPT"
-printf '%s\n' "$backup" > "$control/CURRENT-BACKUP"
-chown root:root "$control/CURRENT-BACKUP"; chmod 0600 "$control/CURRENT-BACKUP"
+printf '%s\n' "$backup" > "$control/CURRENT-BACKUP.new"
+chown root:root "$control/CURRENT-BACKUP.new"; chmod 0600 "$control/CURRENT-BACKUP.new"
+mv -f "$control/CURRENT-BACKUP.new" "$control/CURRENT-BACKUP"
 echo 'container observability cron installed'
 trap - ERR
