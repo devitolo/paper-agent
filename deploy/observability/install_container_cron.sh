@@ -12,35 +12,49 @@ config_dir=/etc/project-paper-observability/mini-production
 state=/var/lib/project-paper-observability/mini-production
 export_dir=/var/lib/project-paper-observability/mini-production-export
 control=/var/lib/project-paper-observability/mini-production-control
+backup_file="$control/CURRENT-BACKUP"
+pending="$control/PENDING-BACKUP"
+source "$package_root/deploy/observability/recovery-common.sh"
 exec 9>"/run/lock/project-paper-observability.lock"
 /usr/bin/flock -n 9 || { echo 'observability installation already running' >&2; exit 75; }
+[[ ! -L "$control" ]] || { echo "symlink control refused" >&2; exit 75; }
 install -d -o root -g root -m 0755 "$config_dir"
 install -d -o 10001 -g 10001 -m 0755 "$export_dir"
 install -d -o 10001 -g 10001 -m 0700 "$state"
 install -d -o root -g root -m 0700 "$control"
 
+[[ ! -e "$pending" ]] || { echo "pending recovery exists; run remove_container_cron.sh" >&2; exit 75; }
+[[ $(stat -c %d "$export_dir") == $(stat -c %d "$control") ]] || { echo "receipt filesystem differs from control" >&2; exit 75; }
 backup=$(mktemp -d "$control/previous-install-XXXXXX")
 manifest="$backup/manifest"
 for target in /usr/local/sbin/project-paper-observability-container "$config_dir/mini-production.env" /etc/cron.d/project-paper-observability-mini-production "$export_dir/INSTALL-RECEIPT"; do
   previous="$backup/$(basename "$target").previous"
   [[ ! -L "$target" ]] || { echo "managed target is a symlink: $target" >&2; exit 75; }
   if [ -e "$target" ]; then
-    cp -p "$target" "$previous"
+    cp -p --no-dereference "$target" "$previous"
     printf '%s|%s|1|%s|%s|%s|%s\n' "$target" "$previous" "$(sha256sum "$previous" | cut -d' ' -f1)" "$(stat -c %a "$previous")" "$(stat -c %u "$previous")" "$(stat -c %g "$previous")" >> "$manifest"
   else
     printf '%s|%s|0|-|-|-|-\n' "$target" "$previous" >> "$manifest"
   fi
 done
+chmod 0600 "$manifest"
+validate_transaction "$backup"
+if [[ -e "$backup_file" ]]; then
+  previous_current=$(read_pointer "$backup_file")
+  validate_transaction "$previous_current"
+  printf '%s\n' "$previous_current" > "$backup/previous-current"
+  chmod 0600 "$backup/previous-current"
+fi
+write_pointer "$pending" "$backup"
 restore_on_error() {
-  while IFS='|' read -r target previous present digest mode uid gid; do
-    if [ "$present" = 1 ]; then
-      cp -p "$previous" "$target"
-      chmod "$mode" "$target"; chown "$uid:$gid" "$target"
-    else
-      rm -f "$target"
-    fi
-  done < "$manifest"
-  rm -rf "$backup"
+  local failure=$?
+  trap - ERR
+  if recover_pending; then
+    echo 'failed installation restored previous state' >&2
+  else
+    echo "recovery incomplete; evidence retained at $backup; retry remove_container_cron.sh" >&2
+  fi
+  exit "$failure"
 }
 trap restore_on_error ERR
 
@@ -63,9 +77,9 @@ mv -f "$config_dir/mini-production.env.new" "$config_dir/mini-production.env"
 mv -f /etc/cron.d/project-paper-observability-mini-production.new /etc/cron.d/project-paper-observability-mini-production
 printf 'target=mini-production\nimage=%s\nconfig=%s\n' "$PROJECT_PAPER_OBSERVABILITY_IMAGE" "$config_dir/mini-production.env" > "$control/INSTALL-RECEIPT.new"
 chown root:root "$control/INSTALL-RECEIPT.new"; chmod 0644 "$control/INSTALL-RECEIPT.new"
-mv -f "$control/INSTALL-RECEIPT.new" "$export_dir/INSTALL-RECEIPT"
-printf '%s\n' "$backup" > "$control/CURRENT-BACKUP.new"
-chown root:root "$control/CURRENT-BACKUP.new"; chmod 0600 "$control/CURRENT-BACKUP.new"
-mv -f "$control/CURRENT-BACKUP.new" "$control/CURRENT-BACKUP"
-echo 'container observability cron installed'
+mv -f -T "$control/INSTALL-RECEIPT.new" "$export_dir/INSTALL-RECEIPT"
+write_pointer "$backup_file" "$backup"
+rm -f "$control/RECOVERED-PENDING"
+rm -f "$pending"
 trap - ERR
+echo 'container observability cron installed'

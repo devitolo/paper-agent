@@ -280,11 +280,14 @@ else: raise AssertionError('Collector could modify root rollback pointer')
 
     def test_fresh_install_failure_after_cron_publish_removes_all_active_files(self):
         before = self.snapshot()
+        marker = self.root / 'receipt-publish-fault-used'
         fake = self.bin / 'chown'
         fake.write_text('#!/bin/sh\nfor arg do last="$arg"; done\n'
-            'if [ "$last" = "/var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT" ]; then exit 42; fi\n'
+            'case "$last" in /var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT|/var/lib/project-paper-observability/mini-production-control/INSTALL-RECEIPT.new) '
+            'touch "' + str(marker) + '"; exit 42 ;; esac\n'
             'exec /bin/chown "$@"\n'); fake.chmod(0o755)
         failed = self.install()
+        self.assertTrue(marker.exists(), 'Fault must reach the actual receipt metadata operation')
         self.assertNotEqual(failed.returncode, 0)
         self.assertEqual(self.snapshot(), before,
                          'Failed fresh installation left active config/cron/receipt behind')
