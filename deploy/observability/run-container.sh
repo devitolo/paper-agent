@@ -24,10 +24,14 @@ exec /usr/bin/timeout --signal=TERM --kill-after=5s 45s docker run --rm --name p
   -e PROJECT_PAPER_RESOURCE_PROC_ROOT=/host/proc \
   -e PROJECT_PAPER_RESOURCE_SYS_ROOT=/host/sys \
   -e PROJECT_PAPER_RESOURCE_CGROUP_ROOT=/sys/fs/cgroup \
+  -e PROJECT_PAPER_RESOURCE_BOOT_ID_PATH=/host/boot_id \
+  -e PROJECT_PAPER_RESOURCE_DISK_PATH=/host/disk \
   -v "$state:/state:rw" -v "$export_dir:/export:rw" \
   -v /proc/stat:/host/proc/stat:ro \
   -v /proc/meminfo:/host/proc/meminfo:ro \
   -v /proc/vmstat:/host/proc/vmstat:ro \
+  -v /proc/sys/kernel/random/boot_id:/host/boot_id:ro \
+  -v /var/lib:/host/disk:ro \
   -v /sys/class/thermal:/host/sys/class/thermal:ro \
   -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
   "$image"

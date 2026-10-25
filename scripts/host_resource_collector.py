@@ -27,6 +27,13 @@ def proc_path(name: str) -> Path:
 def sys_path(name: str) -> Path:
     return Path(os.environ.get("PROJECT_PAPER_RESOURCE_SYS_ROOT", "/sys")) / name
 
+def boot_id() -> str | None:
+    try:
+        value = Path(os.environ.get("PROJECT_PAPER_RESOURCE_BOOT_ID_PATH", "/proc/sys/kernel/random/boot_id")).read_text().strip()
+        return value if value else None
+    except OSError:
+        return None
+
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
@@ -99,7 +106,7 @@ def sample(root: Path) -> dict[str, Any]:
     stamp = now()
     cpu = read_cpu()
     mem = read_meminfo()
-    record: dict[str, Any] = {"schema": SCHEMA, "collector_version": "2", "observed_at": stamp.isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "memory": {"available_bytes": mem.get("MemAvailable"), "total_bytes": mem.get("MemTotal"), "swap_total_bytes": mem.get("SwapTotal"), "swap_free_bytes": mem.get("SwapFree"), "swap_used_bytes": (mem.get("SwapTotal") - mem.get("SwapFree")) if mem.get("SwapTotal") is not None and mem.get("SwapFree") is not None else None}, "cpu": {"total_jiffies": cpu[0], "idle_jiffies": cpu[1]} if cpu else {"state": "unavailable"}, "containers": containers(), "temperature": temperature()}
+    record: dict[str, Any] = {"schema": SCHEMA, "collector_version": "2", "observed_at": stamp.isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "boot_id": boot_id(), "memory": {"available_bytes": mem.get("MemAvailable"), "total_bytes": mem.get("MemTotal"), "swap_total_bytes": mem.get("SwapTotal"), "swap_free_bytes": mem.get("SwapFree"), "swap_used_bytes": (mem.get("SwapTotal") - mem.get("SwapFree")) if mem.get("SwapTotal") is not None and mem.get("SwapFree") is not None else None}, "cpu": {"total_jiffies": cpu[0], "idle_jiffies": cpu[1]} if cpu else {"state": "unavailable"}, "containers": containers(), "temperature": temperature()}
     previous_path = root / "last-cpu.json"
     if cpu:
         try:
@@ -108,13 +115,15 @@ def sample(root: Path) -> dict[str, Any]:
             idle_delta = cpu[1] - int(previous["idle"])
             elapsed = (stamp - datetime.fromisoformat(previous["observed_at"])).total_seconds()
             record["cpu"]["interval_seconds"] = elapsed
-            if total_delta > 0 and 0 < elapsed <= 90:
+            if previous.get("boot_id") and record.get("boot_id") and previous["boot_id"] != record["boot_id"]:
+                record["cpu"]["state"] = "boot_changed"
+            elif total_delta > 0 and 0 < elapsed <= 90:
                 record["cpu"]["utilization_percent"] = round(max(0.0, min(100.0, (total_delta - idle_delta) * 100 / total_delta)), 2)
             elif elapsed > 90:
                 record["cpu"]["state"] = "gap"
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             pass
-        previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1], "observed_at": stamp.isoformat()}))
+        previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1], "observed_at": stamp.isoformat(), "boot_id": record.get("boot_id")}))
     if stamp.minute % 60 == 0:
         record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
     cgroup = Path(os.environ.get("PROJECT_PAPER_RESOURCE_CGROUP_ROOT", "/sys/fs/cgroup"))
@@ -158,7 +167,7 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
     for row in records:
         try:
             observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
-            if start <= observed.timestamp() < end.timestamp():
+            if start <= observed.timestamp() < end.timestamp() and observed.timestamp() <= (reference or now()).timestamp() + 300:
                 window_records.append(row)
         except (TypeError, ValueError):
             continue
@@ -168,8 +177,8 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
     for row in records:
         deduped[row["observed_at"][:16]] = row
     records = list(deduped.values())
-    cpu = [float(row["cpu"]["utilization_percent"]) for row in records if row.get("cpu", {}).get("utilization_percent") is not None]
-    available = [int(row["memory"]["available_bytes"]) for row in records if row.get("memory", {}).get("available_bytes") is not None]
+    cpu = [float(row["cpu"]["utilization_percent"]) for row in records if isinstance(row.get("cpu"), dict) and isinstance(row["cpu"].get("utilization_percent"), (int, float))]
+    available = [int(row["memory"]["available_bytes"]) for row in records if isinstance(row.get("memory"), dict) and isinstance(row["memory"].get("available_bytes"), (int, float))]
     timestamps = []
     for row in records:
         try: timestamps.append(datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp())
