@@ -21,6 +21,12 @@ from typing import Any
 DEFAULT_ROOT = Path("/var/lib/project-paper-observability/mini-nonprod")
 SCHEMA = "project-paper.resource-status.v1"
 
+def proc_path(name: str) -> Path:
+    return Path(os.environ.get("PROJECT_PAPER_RESOURCE_PROC_ROOT", "/proc")) / name
+
+def sys_path(name: str) -> Path:
+    return Path(os.environ.get("PROJECT_PAPER_RESOURCE_SYS_ROOT", "/sys")) / name
+
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
@@ -29,7 +35,7 @@ def now() -> datetime:
 def read_meminfo() -> dict[str, int]:
     values: dict[str, int] = {}
     try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
+        for line in proc_path("meminfo").read_text().splitlines():
             key, _, value = line.partition(":")
             parts = value.strip().split()
             if parts and parts[0].isdigit():
@@ -41,7 +47,7 @@ def read_meminfo() -> dict[str, int]:
 
 def read_cpu() -> tuple[int, int] | None:
     try:
-        fields = Path("/proc/stat").read_text().splitlines()[0].split()[1:]
+        fields = proc_path("stat").read_text().splitlines()[0].split()[1:]
         numbers = [int(value) for value in fields[:8]]
         return sum(numbers), numbers[3] + (numbers[4] if len(numbers) > 4 else 0)
     except (OSError, IndexError, ValueError):
@@ -63,7 +69,7 @@ def filesystem(path: Path) -> dict[str, Any]:
 
 
 def temperature() -> dict[str, Any]:
-    for path in sorted(Path("/sys/class/thermal").glob("thermal_zone*/temp")):
+    for path in sorted(sys_path("class/thermal").glob("thermal_zone*/temp")):
         try:
             return {"celsius": round(int(path.read_text().strip()) / 1000, 1), "source": str(path)}
         except (OSError, ValueError):
@@ -111,7 +117,7 @@ def sample(root: Path) -> dict[str, Any]:
         previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1], "observed_at": stamp.isoformat()}))
     if stamp.minute % 60 == 0:
         record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
-    cgroup = Path("/sys/fs/cgroup")
+    cgroup = Path(os.environ.get("PROJECT_PAPER_RESOURCE_CGROUP_ROOT", "/sys/fs/cgroup"))
     try:
         record["cgroup"] = {"memory_current_bytes": int((cgroup / "memory.current").read_text().strip()), "memory_max_bytes": (lambda value: None if value == "max" else int(value))((cgroup / "memory.max").read_text().strip())}
     except (OSError, ValueError):

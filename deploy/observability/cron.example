@@ -1,0 +1,1 @@
+* * * * * root flock -n /run/lock/project-paper-observability.lock /usr/local/sbin/project-paper-observability-container
