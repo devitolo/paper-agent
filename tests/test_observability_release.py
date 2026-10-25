@@ -36,6 +36,14 @@ class ObservabilityReleaseContractTests(unittest.TestCase):
         self.assertIn("write_state failed", text)
         self.assertIn("timeout --signal=TERM", text)
 
+    def test_installer_owns_failure_cleanup_and_rollback_is_idempotent(self):
+        installer = (ROOT / "scripts/install_resource_collector_cron.sh").read_text()
+        rollback = (ROOT / "scripts/remove_resource_collector_cron.sh").read_text()
+        self.assertIn("restore_on_error()", installer)
+        self.assertIn("trap restore_on_error ERR", installer)
+        self.assertIn("INSTALL-MANIFEST.restored", rollback)
+        self.assertIn("required in", installer)
+
 
 if __name__ == "__main__":
     unittest.main()
