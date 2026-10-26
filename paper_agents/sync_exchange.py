@@ -89,9 +89,12 @@ def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.'), *, max_bytes=MA
 def build_routine_snapshot(db_path=DEFAULT_DB_PATH, root=Path('.'), *, max_bytes=ROUTINE_MAX_EXPANDED_BYTES):
     """Build the bounded business-data snapshot served to routine Mini sync."""
     root = Path(root)
-    config = {name: (root / name).read_text(encoding='utf-8')
-              for name in ('config/topics.yaml', 'config/industry.json')}
+    def read_config():
+        return {name: (root / name).read_text(encoding='utf-8')
+                for name in ('config/topics.yaml', 'config/industry.json')}
+    config = read_config()
     with connect_db(db_path) as c:
+        c.execute('BEGIN')
         c.row_factory = sqlite3.Row
         papers = _rows(c, 'papers')
         sources = [dict(row) for row in c.execute(
@@ -110,6 +113,8 @@ def build_routine_snapshot(db_path=DEFAULT_DB_PATH, root=Path('.'), *, max_bytes
             ORDER BY sf.id''')]
         saved = [dict(row) for row in c.execute('SELECT p.canonical_key,s.created_at FROM saved_papers s JOIN papers p ON p.id=s.paper_id')]
         excluded = [dict(row) for row in c.execute('SELECT p.canonical_key,e.created_at FROM excluded_papers e JOIN papers p ON p.id=e.paper_id')]
+    if config != read_config():
+        raise ValueError('configuration changed during routine snapshot')
     payload = {'schema': ROUTINE_SCHEMA, 'kind': 'routine_snapshot', 'config': config,
                'profile': profile, 'papers': papers, 'paper_sources': sources,
                'feedback': feedback, 'feedback_watermark': watermark,

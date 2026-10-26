@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import hashlib
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -51,6 +52,7 @@ from paper_agents.topics import (
 )
 
 ASSET_DIR = Path(__file__).with_name("assets")
+LOGGER = logging.getLogger(__name__)
 LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
 LOGO_ASSET_VERSION = "20260829"
 
@@ -140,16 +142,24 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
                 if not verify_request(self.headers, b"", "GET", parsed.path):
                     self.send_error(HTTPStatus.UNAUTHORIZED); return
                 import gzip
+                stage = 'export'; expanded_bytes = 0; compressed_bytes = 0
                 try:
                     from paper_agents.sync_exchange import ROUTINE_MAX_EXPANDED_BYTES, build_routine_snapshot, register_routine_revision
                     snapshot = build_routine_snapshot(db_path, sync_root, max_bytes=ROUTINE_MAX_EXPANDED_BYTES)
+                    expanded_bytes = len(encoded(snapshot)); stage = 'register'
                     register_routine_revision(db_path, snapshot)
+                    stage = 'compress'
                     body = gzip.compress(encoded(snapshot), compresslevel=9)
+                    compressed_bytes = len(body)
                     if len(body) > MAX_BODY_BYTES: raise ValueError('routine snapshot exceeds compressed limit')
                     self.send_response(HTTPStatus.OK); self.send_header('Content-Type', 'application/json+gzip')
                     self.send_header('Cache-Control', 'no-store'); self.send_header('Content-Length', str(len(body)))
                     self.end_headers(); self.wfile.write(body)
-                except (OSError, ValueError, sqlite3.Error):
+                except (OSError, ValueError, sqlite3.Error) as error:
+                    if isinstance(error, ValueError) and 'configuration changed' in str(error): stage = 'config-race'
+                    elif isinstance(error, ValueError) and 'too large' in str(error): stage = 'size-limit'
+                    elif isinstance(error, sqlite3.Error): stage = 'database'
+                    LOGGER.warning('routine_snapshot_failed stage=%s error_type=%s expanded_bytes=%d compressed_bytes=%d', stage, type(error).__name__, expanded_bytes, compressed_bytes)
                     self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, 'Routine snapshot unavailable')
                 return
             if parsed.path == "/sync/backup":
