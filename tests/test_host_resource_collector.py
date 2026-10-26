@@ -8,6 +8,18 @@ from scripts import host_resource_collector as collector
 
 
 class HostResourceCollectorTests(unittest.TestCase):
+    def test_rapid_retries_preserve_distinct_intervals_in_one_minute(self):
+        rows = [
+            {"observed_at": "2026-10-26T14:14:10+00:00", "cpu": {"utilization_percent": 10, "interval_seconds": 850}},
+            {"observed_at": "2026-10-26T14:14:50+00:00", "cpu": {"utilization_percent": 40, "interval_seconds": 40}},
+            {"observed_at": "2026-10-26T14:15:00+00:00", "cpu": {"utilization_percent": 70, "interval_seconds": 10}},
+        ]
+        result = self.summarize_rows(rows, collector.datetime.fromisoformat(rows[-1]["observed_at"]))
+        self.assertEqual(result["sample_count"], 3)
+        self.assertEqual(result["coverage_seconds"], 900)
+        self.assertEqual(result["cpu"]["average_percent"], 12)
+        self.assertTrue(result["window"]["complete"])
+
     def summarize_rows(self, rows, reference):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

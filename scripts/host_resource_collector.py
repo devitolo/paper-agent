@@ -180,7 +180,7 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
     records.sort(key=lambda row: row["observed_at"])
     deduped = {}
     for row in records:
-        deduped[row["observed_at"][:16]] = row
+        deduped[row["observed_at"]] = row
     records = list(deduped.values())
     available = [int(row["memory"]["available_bytes"]) for row in records if isinstance(row.get("memory"), dict) and isinstance(row["memory"].get("available_bytes"), (int, float)) and math.isfinite(float(row["memory"]["available_bytes"]))]
     latest = records[-1] if records else {}
