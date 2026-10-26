@@ -15,17 +15,17 @@ class ObservabilityReleaseContractTests(unittest.TestCase):
         self.assertIn("observability-mini-production", text)
         self.assertIn("observability-aws-production", text)
         self.assertIn("cancel-in-progress: false", text)
-        self.assertIn("project-paper-observability-deploy --package-dir", text)
+        self.assertIn("project-paper-observability-deploy --image", text)
         self.assertNotIn("sudo -n env PROJECT_PAPER_OBSERVABILITY_IMAGE", text)
 
     def test_root_helper_rejects_untrusted_arguments(self):
         text = (ROOT / "deploy/observability/project-paper-observability-deploy").read_text()
-        self.assertIn('package_dir" == /tmp/project-paper-observability-extracted', text)
+        self.assertIn('[[ $# -eq 4 && $1 == --image && $3 == --target ]]', text)
         self.assertIn("immutable observability image required", text)
         self.assertIn("aws-production|mini-production", text)
         self.assertIn("project-paper-observability-container", text)
         sudoers = (ROOT / "deploy/observability/sudoers.project-paper-observability").read_text()
-        self.assertIn("/usr/local/sbin/project-paper-observability-deploy *", sudoers)
+        self.assertIn("/usr/local/sbin/project-paper-observability-deploy --image", sudoers)
         self.assertNotIn("/bin/bash", sudoers)
 
     def test_installer_has_unique_manifest_backups_and_fail_closed_target(self):

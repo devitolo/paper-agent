@@ -130,19 +130,5 @@ jobs:
           expected='${{ needs.package.outputs.sha256 }}'
           actual=$(sha256sum "$archive" | cut -d' ' -f1)
           test "$actual" = "$expected"
-          sudo -n rm -rf /tmp/project-paper-observability-extracted
-          sudo -n install -d -o root -g root -m 0755 /tmp/project-paper-observability-extracted
-          sudo -n tar -xzf "$archive" -C /tmp/project-paper-observability-extracted
-          sudo -n chown -R root:root /tmp/project-paper-observability-extracted
-          sudo -n find /tmp/project-paper-observability-extracted -type d -exec chmod 0755 {} +
-          sudo -n find /tmp/project-paper-observability-extracted -type f -exec chmod 0644 {} +
-          sudo -n chmod 0755 /tmp/project-paper-observability-extracted/deploy/observability/*.sh
-          cd /tmp/project-paper-observability-extracted
-          case "$GITHUB_REF_NAME" in
-            observability-mini) target=mini-production ;;
-            observability-aws) target=aws-production ;;
-            *) echo 'invalid target tag' >&2; exit 64 ;;
-          esac
-          export target
           image='${{ needs.package.outputs.image }}@${{ needs.package.outputs.image_digest }}'
-          sudo -n /usr/local/sbin/project-paper-observability-deploy --package-dir /tmp/project-paper-observability-extracted --image "$image" --target "$target"
+          sudo -n /usr/local/sbin/project-paper-observability-deploy --image "$image" --target "$target"
