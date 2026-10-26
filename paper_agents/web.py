@@ -1438,7 +1438,7 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
     }
     mini = {
         "Mini CPU": f"{mini_cpu['average_percent']}% interval avg · {mini_cpu.get('max_observed_percent', 'unknown')}% sampled max" if mini_cpu.get('average_percent') is not None else f"unknown · {mini_status.get('state', 'unknown')} · no valid interval",
-        "Mini memory": metric(mini_status, "memory") if not mini_memory.get("available_average_bytes") else f"{mini_memory['available_average_bytes']} bytes available avg · {mini_memory.get('available_max_bytes', 'unknown')} bytes max",
+        "Mini memory": f"{mini_memory['available_average_bytes']} bytes available avg · {mini_memory.get('available_max_bytes') if mini_memory.get('available_max_bytes') is not None else 'unknown'} bytes max observed" if mini_memory.get("available_average_bytes") is not None else f"unknown · {mini_status.get('state', 'unknown')} · no memory observation",
         "Mini disk": "observed · see collector snapshot" if mini_status.get("latest", {}).get("disk") else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
         "Mini container": str(mini_status.get("containers", {}).get("state", mini_status.get("state", "unknown"))) if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
         "Mini telemetry freshness": f"{mini_status.get('state', 'unknown')} · {mini_status.get('age_seconds') if mini_status.get('age_seconds') is not None else 'unknown'}s old" if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} · age unknown",
