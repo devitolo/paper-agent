@@ -14,19 +14,22 @@ allowlist of production container state. Container observations may include
 health, restart/OOM state, image identity, and revision labels. It stores raw
 samples for seven days and complete UTC-aligned summaries for 90 days.
 
-The package does not install host files, install a cron entry, grant Docker access,
-change Compose, mount the status file into the UI, or configure Mini-to-AWS
-transport. Those are deliberate host/operator steps.
+The release workflow does not execute package scripts with root privileges. SRE
+provisions the fixed root-owned launcher and deployment helper once; subsequent
+releases pass only the immutable image digest and target to that helper. Do not
+run the bare launcher or an extracted package as an operator command.
 
 ## Manual host steps
 
 SRE must perform these steps on the Mini production host using the approved
 host-install path. Do not run them against AWS during this phase.
 
-1. Install the standalone host package with
-   `scripts/install_resource_collector_cron.sh --apply`. It installs the
-   collector script, locked cron wrapper, and environment file as
-   root-owned files. Keep the script immutable to the cron user.
+1. Provision the fixed root-owned launcher at
+   `/usr/local/sbin/project-paper-observability-container` and the fixed
+   `/usr/local/sbin/project-paper-observability-deploy` helper. The supported
+   release operation is only:
+   `sudo /usr/local/sbin/project-paper-observability-deploy --image IMAGE@sha256:DIGEST --target mini-production`.
+   The helper owns configuration, cron, locking, health, and rollback.
 2. Create `/var/lib/project-paper-observability/mini-production` with ownership and
    mode that permit only the collector to write and the UI consumer to read the
    sanitized status file.
@@ -40,14 +43,19 @@ host-install path. Do not run them against AWS during this phase.
    observability mount. Do not mount the
    Docker socket, `/proc`, `/sys`, environment files, secrets, or raw sample
    logs into the web container.
-5. Add the dedicated fifteen-minute cron entry from
-   `/etc/cron.d/project-paper-resource-collector`. Verify the `flock` lock,
-   cron cadence, state ownership, and the fixed production container allowlist.
+5. Let the fixed helper create the dedicated fifteen-minute cron entry. Verify
+   the `flock` lock, cron cadence, state ownership, and the fixed production
+   container allowlist.
    Cron must remain separate from Paper discovery jobs.
 6. Observe at least one raw sample and one complete 15-minute summary. Verify
    restart persistence, bounded file growth, atomic replacement, correct
    `mini-production` identity, and stale/unknown behavior after an interrupted
    collection.
+
+Bare launcher invocation is not a supported operator contract. Use the fixed
+helper's transactional deployment and retain the target-specific environment
+and lock files. Direct launcher tests must provide explicit target
+configuration.
 
 ## Rollback
 
