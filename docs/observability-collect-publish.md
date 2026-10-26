@@ -44,3 +44,22 @@ network-none disposable Linux container with synthetic config/key and a fake
 Docker CLI. Native acceptance must separately observe the next natural cron
 run, fresh Mini observed_at and matching authenticated AWS state/receipt. No
 forced pipeline run is a substitute for that scheduled evidence.
+
+## Release package integration
+
+The standalone observability release archive includes `collect-publish.sh`,
+`install_collect_publish.sh`, and the target-checked `install_package.sh`
+entrypoint alongside the existing collector helper. Release CI runs the pipeline
+behavioral tests and checks archive contents, source hashes and target rejection.
+The entrypoint updates the existing Mini cron; it does not add a schedule or
+change application cron jobs. AWS cannot invoke this Mini publication installer.
+
+**Activation boundary:** the currently provisioned passwordless helper accepts
+only a collector image and target. It does not install archive contents. Adding
+files to an archive therefore does not activate this change on an existing host.
+The protected deployment must first gain an explicitly reviewed package-install
+capability through host provisioning; do not execute arbitrary downloaded scripts
+via sudo or broaden the runner's sudo permissions. No such capability is installed
+by this change. After the wrapper/helper are provisioned, ordinary image releases
+retain collect-then-publish automatically with no manual cron edits. Credentials
+are neither requested nor transmitted by the package.

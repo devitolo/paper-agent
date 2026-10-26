@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - name: Validate standalone package
         run: |
-          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container tests.test_observability_aws_p1 -v
+          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container tests.test_observability_aws_p1 tests.test_observability_collect_publish tests.test_observability_package -v
           bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/observability/*.sh
           test -s deploy/observability/Dockerfile
           test -s deploy/observability/entrypoint.sh
@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME:-observability-${GITHUB_SHA}}"
           archive="project-paper-observability-${tag}.tar.gz"
-          tar -czf "$archive" scripts/host_resource_collector.py deploy/observability/Dockerfile deploy/observability/entrypoint.sh deploy/observability/run-container.sh deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/recovery-common.sh deploy/observability/cron.example deploy/observability/project-paper-observability-deploy deploy/observability/sudoers.project-paper-observability docs/mini-resource-collector-operations.md
+          tar -czf "$archive" scripts/host_resource_collector.py deploy/observability/Dockerfile deploy/observability/entrypoint.sh deploy/observability/run-container.sh deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/recovery-common.sh deploy/observability/cron.example deploy/observability/project-paper-observability-deploy deploy/observability/sudoers.project-paper-observability deploy/observability/collect-publish.sh deploy/observability/install_collect_publish.sh deploy/observability/install_package.sh docs/observability-collect-publish.md docs/mini-resource-collector-operations.md
           sha=$(sha256sum "$archive" | cut -d' ' -f1)
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
