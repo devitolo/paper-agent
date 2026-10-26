@@ -112,6 +112,7 @@ jobs:
             *) echo 'tag must be exactly observability-mini or observability-aws' >&2; exit 64 ;;
           esac
           echo "target=$target"
+          echo "target=$target" >> "$GITHUB_ENV"
       - name: Check host resources and prerequisites
         shell: bash
         run: |

@@ -223,6 +223,7 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
     latest_disk = latest_field("disk")
     interval_coverage = [float(row.get("cpu", {}).get("interval_seconds")) for row in records if isinstance(row.get("cpu"), dict) and isinstance(row["cpu"].get("interval_seconds"), (int, float)) and row["cpu"].get("utilization_percent") is not None and math.isfinite(float(row["cpu"]["interval_seconds"])) and float(row["cpu"]["interval_seconds"]) > 0]
     coverage = max(interval_coverage, default=(max(timestamps) - min(timestamps) if len(timestamps) >= 2 else 0))
+    coverage = min(900, sum(interval_coverage)) if interval_coverage else coverage
     complete = bool(cpu) and gaps == 0 and coverage >= 900
     summary = {"schema": SCHEMA, "collector_version": "4", "state": "observed" if complete else "warming", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 900, "complete": complete, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": round(min(900, coverage)), "cpu": {"average_percent": round(cpu_average, 2) if cpu_average is not None else None, "max_observed_percent": max(cpu) if cpu else None, "peak_sustained_5m_percent": None, "max_one_minute_percent": None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_max_bytes": max(available) if available else None, "available_min_bytes": min(available) if available else None}, "disk": latest_disk, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_disk, "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup"), "observation_times": {name: (entry.get("observed_at") if isinstance(entry, dict) else None) for name, entry in observations.items()}}, "errors": []}
     return summary
@@ -256,21 +257,13 @@ def collect(root: Path) -> None:
             observations[field] = {"observed_at": current["observed_at"], "value": current[field]}
     publish(root / "last-observations.json", observations, mode=0o600)
     current_time = datetime.fromisoformat(current["observed_at"])
-    if current_time.minute % 15 == 0:
-        summary = summarize(root, reference=current_time)
-        append_bounded(root / "summaries.jsonl", summary, 8640)
-        publish(root / "status.json", summary)
-        export_dir = os.environ.get("PROJECT_PAPER_RESOURCE_EXPORT_DIR")
-        if export_dir:
-            Path(export_dir).mkdir(parents=True, exist_ok=True, mode=0o755)
-            publish(Path(export_dir) / "status.json", summary, mode=0o644)
-    elif not (root / "status.json").exists():
-        warming = {**summarize(root), "state": "warming"}
-        publish(root / "status.json", warming)
-        export_dir = os.environ.get("PROJECT_PAPER_RESOURCE_EXPORT_DIR")
-        if export_dir:
-            Path(export_dir).mkdir(parents=True, exist_ok=True, mode=0o755)
-            publish(Path(export_dir) / "status.json", warming, mode=0o644)
+    summary = summarize(root, reference=current_time)
+    append_bounded(root / "summaries.jsonl", summary, 8640)
+    publish(root / "status.json", summary)
+    export_dir = os.environ.get("PROJECT_PAPER_RESOURCE_EXPORT_DIR")
+    if export_dir:
+        Path(export_dir).mkdir(parents=True, exist_ok=True, mode=0o755)
+        publish(Path(export_dir) / "status.json", summary, mode=0o644)
 
 
 def main() -> None:

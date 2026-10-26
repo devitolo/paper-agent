@@ -50,14 +50,30 @@ cat > "$cron_path.new" <<CRON
 CRON
 install -o root -g root -m 0644 "$cron_path.new" "$cron_path"
 rm -f "$cron_path.new"
+before_observed=$(python3 - "$export_dir/status.json" <<'PY'
+import json, pathlib, sys
+try:
+    print(json.loads(pathlib.Path(sys.argv[1]).read_text()).get('observed_at') or '')
+except (OSError, ValueError):
+    print('')
+PY
+)
+set -a
+. "$env_path"
+set +a
 "$launcher"
 test -f "$export_dir/status.json"
-python3 - "$target" <<'PY'
+python3 - "$target" "$before_observed" <<'PY'
+import datetime
 import json, pathlib, sys
 value=json.loads(pathlib.Path(f'/var/lib/project-paper-observability/{sys.argv[1]}-export/status.json').read_text())
 assert value.get('schema') == 'project-paper.resource-status.v1'
 assert value.get('environment') == sys.argv[1]
 assert value.get('scope') == 'host'
+observed=value.get('observed_at')
+assert isinstance(observed, str) and observed and observed != sys.argv[2]
+when=datetime.datetime.fromisoformat(observed.replace('Z','+00:00'))
+assert abs((datetime.datetime.now(datetime.timezone.utc)-when).total_seconds()) <= 300
 PY
 printf 'target=%s\nimage=%s\nconfig=%s\n' "$target" "$image" "$env_path" > "$control/INSTALL-RECEIPT"
 chown root:root "$control/INSTALL-RECEIPT"; chmod 0644 "$control/INSTALL-RECEIPT"
