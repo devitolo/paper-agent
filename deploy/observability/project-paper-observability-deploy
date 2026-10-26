@@ -10,6 +10,14 @@ case "$target" in aws-production|mini-production) ;; *) echo 'unsupported target
 launcher=/usr/local/sbin/project-paper-observability-container
 [[ -f "$launcher" && ! -L "$launcher" && $(stat -c %u "$launcher") -eq 0 ]] || { echo 'fixed root-owned launcher missing' >&2; exit 66; }
 launcher_mode=$(stat -c %a "$launcher"); [[ $((8#$launcher_mode & 022)) -eq 0 ]] || { echo 'launcher is writable by non-root' >&2; exit 75; }
+cron_launcher=$launcher
+pipeline=/usr/local/sbin/project-paper-observability-collect-publish
+if [[ $target == mini-production && -e $pipeline ]]; then
+  [[ -f $pipeline && ! -L $pipeline && $(stat -c %u "$pipeline") -eq 0 ]] || { echo 'untrusted pipeline wrapper' >&2; exit 75; }
+  pipeline_mode=$(stat -c %a "$pipeline")
+  [[ $((8#$pipeline_mode & 022)) -eq 0 ]] || { echo 'pipeline wrapper is writable by non-root' >&2; exit 75; }
+  cron_launcher=$pipeline
+fi
 exec 9>/run/lock/project-paper-observability-deploy.lock
 /usr/bin/flock -n 9 || { echo 'observability deployment already running' >&2; exit 75; }
 exec 8>/run/lock/project-paper-observability.lock
@@ -57,7 +65,7 @@ ENV
 install -o root -g root -m 0640 "$env_path.new" "$env_path"
 rm -f "$env_path.new"
 cat > "$cron_path.new" <<CRON
-*/15 * * * * root . $env_path; export PROJECT_PAPER_OBSERVABILITY_IMAGE PROJECT_PAPER_RESOURCE_ROOT PROJECT_PAPER_RESOURCE_EXPORT_DIR PROJECT_PAPER_RESOURCE_ENVIRONMENT PROJECT_PAPER_RESOURCE_HOST PROJECT_PAPER_RESOURCE_ENV_FILE; /usr/bin/flock -n /run/lock/project-paper-observability.lock $launcher >>$state/collector.log 2>&1
+*/15 * * * * root . $env_path; export PROJECT_PAPER_OBSERVABILITY_IMAGE PROJECT_PAPER_RESOURCE_ROOT PROJECT_PAPER_RESOURCE_EXPORT_DIR PROJECT_PAPER_RESOURCE_ENVIRONMENT PROJECT_PAPER_RESOURCE_HOST PROJECT_PAPER_RESOURCE_ENV_FILE; /usr/bin/flock -n /run/lock/project-paper-observability.lock $cron_launcher >>$state/collector.log 2>&1
 CRON
 install -o root -g root -m 0644 "$cron_path.new" "$cron_path"
 rm -f "$cron_path.new"
