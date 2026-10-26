@@ -1,6 +1,6 @@
 """Versioned, bounded exchange; never execute SQL supplied by a peer."""
 from __future__ import annotations
-import hashlib, hmac, json, math, os, time, sqlite3
+import hashlib, hmac, json, math, os, time, sqlite3, tempfile
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from email.message import Message
@@ -10,6 +10,9 @@ MAX_BODY_BYTES = 8 * 1024 * 1024
 MAX_TIMESTAMP_SKEW = 300
 SOURCES = ('arxiv', 'openalex', 'semantic_scholar', 'core', 'zenml')
 USER_TABLES = ('raw_feedback','feedback_parse_attempts','structured_feedback','profile_versions','feedback_profile_applications','feedback_profile_apply_attempts','feedback','summary_field_feedback','summary_field_quality_signals')
+_COMPACTED_REVISION_SCHEMA = 1
+ROUTINE_SCHEMA = 2
+ROUTINE_MAX_EXPANDED_BYTES = 64 * 1024 * 1024
 
 @contextmanager
 def connect_db(path):
@@ -83,6 +86,165 @@ def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.')):
         if len(encoded(payload))>MAX_BODY_BYTES:raise ValueError('snapshot too large; pagination required')
         c.execute('INSERT OR IGNORE INTO sync_snapshot_revisions VALUES(?,?)',(payload['revision'],encoded(payload).decode()));c.commit()
     return payload
+
+def build_routine_snapshot(db_path=DEFAULT_DB_PATH, root=Path('.'), *, max_bytes=ROUTINE_MAX_EXPANDED_BYTES):
+    """Build the bounded business-data snapshot used by routine Mini sync."""
+    root = Path(root)
+    config = {name: (root / name).read_text(encoding='utf-8')
+              for name in ('config/topics.yaml', 'config/industry.json')}
+    with connect_db(db_path) as c:
+        c.row_factory = sqlite3.Row
+        papers = _rows(c, 'papers')
+        sources = [dict(row) for row in c.execute(
+            'SELECT ps.source,ps.source_id,ps.url,ps.pdf_url,ps.discovered_at,ps.metadata_json,p.canonical_key '
+            'FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id ORDER BY ps.id')]
+        profile = c.execute(
+            'SELECT version,profile_json FROM profile_versions WHERE active=1 ORDER BY version DESC LIMIT 1').fetchone()
+        if profile is None:
+            profile = {'version': 0, 'profile_json': (root / 'data/profile.json').read_text(encoding='utf-8')}
+        else:
+            profile = dict(profile)
+        feedback = []
+        feedback_watermark = c.execute('SELECT COALESCE(MAX(id),0) FROM structured_feedback').fetchone()[0]
+        for row in c.execute('''SELECT sf.id,sf.decision,sf.score,sf.observations_json,
+                sf.preference_signals_json,sf.created_at,p.canonical_key,ps.source
+                FROM structured_feedback sf LEFT JOIN papers p ON p.id=sf.paper_id
+                LEFT JOIN paper_sources ps ON ps.paper_id=sf.paper_id
+                WHERE (ps.id IS NULL OR ps.id=(SELECT MIN(id) FROM paper_sources WHERE paper_id=sf.paper_id))
+                  AND (sf.id IN (SELECT id FROM structured_feedback ORDER BY id DESC LIMIT 12)
+                       OR NOT EXISTS (SELECT 1 FROM feedback_profile_applications fpa
+                                      WHERE fpa.structured_feedback_id=sf.id))
+                ORDER BY sf.id'''):
+            feedback.append(dict(row))
+        saved = [dict(row) for row in c.execute(
+            'SELECT p.canonical_key,s.created_at FROM saved_papers s JOIN papers p ON p.id=s.paper_id')]
+        excluded = [dict(row) for row in c.execute(
+            'SELECT p.canonical_key,e.created_at FROM excluded_papers e JOIN papers p ON p.id=e.paper_id')]
+    payload = {'schema': ROUTINE_SCHEMA, 'kind': 'routine_snapshot', 'config': config,
+               'profile': profile, 'papers': papers, 'paper_sources': sources,
+               'feedback': feedback, 'feedback_watermark': feedback_watermark,
+               'saved': saved, 'excluded': excluded}
+    payload['revision'] = _digest(encoded(payload))
+    if max_bytes is not None and len(encoded(payload)) > max_bytes:
+        raise ValueError('routine snapshot too large')
+    return payload
+
+
+def register_routine_revision(db_path, snapshot):
+    """Record the exact served revision for result and retry validation."""
+    if not isinstance(snapshot, dict) or type(snapshot.get('schema')) is not int or snapshot.get('schema') != ROUTINE_SCHEMA:
+        raise ValueError('unsupported routine snapshot')
+    with connect_db(db_path) as c:
+        _setup(c)
+        marker = {'schema': ROUTINE_SCHEMA, 'kind': 'routine_revision',
+                  'revision': snapshot['revision'], 'feedback_watermark': snapshot.get('feedback_watermark', 0)}
+        c.execute('INSERT OR REPLACE INTO sync_snapshot_revisions VALUES(?,?)',
+                  (snapshot['revision'], encoded(marker).decode()))
+
+
+def apply_routine_snapshot(db_path, snapshot, root):
+    """Apply only the routine business-data allowlist; Mini cursors stay local."""
+    expected = {'schema','kind','config','profile','papers','paper_sources','feedback','feedback_watermark','saved','excluded','revision'}
+    if not isinstance(snapshot, dict) or set(snapshot) != expected or type(snapshot.get('schema')) is not int or snapshot.get('schema') != ROUTINE_SCHEMA or snapshot.get('kind') != 'routine_snapshot':
+        raise ValueError('unsupported routine snapshot')
+    revision = snapshot.get('revision')
+    unsigned = dict(snapshot); unsigned.pop('revision', None)
+    if not isinstance(revision, str) or _digest(encoded(unsigned)) != revision:
+        raise ValueError('routine snapshot revision mismatch')
+    config = snapshot.get('config')
+    profile = snapshot.get('profile')
+    if not isinstance(config, dict) or set(config) != {'config/topics.yaml', 'config/industry.json'}:
+        raise ValueError('incomplete routine configuration')
+    if not isinstance(profile, dict) or type(profile.get('version')) is not int:
+        raise ValueError('invalid routine profile')
+    if type(snapshot.get('feedback_watermark')) is not int or snapshot['feedback_watermark'] < 0:
+        raise ValueError('invalid routine feedback watermark')
+    if set(profile) != {'version','profile_json'}:
+        raise ValueError('invalid routine profile')
+    for row in snapshot.get('papers', []):
+        if not isinstance(row, dict) or set(row) - {'id','canonical_key','title','abstract','published','updated','doi','arxiv_id','authors_json','categories_json','first_discovered_at','last_discovered_at'}:
+            raise ValueError('unknown routine paper field')
+    for row in snapshot.get('paper_sources', []):
+        if not isinstance(row, dict) or set(row) - {'source','source_id','url','pdf_url','discovered_at','metadata_json','canonical_key'}:
+            raise ValueError('unknown routine source field')
+    for row in snapshot.get('feedback', []):
+        if not isinstance(row, dict) or set(row) != {'id','decision','score','observations_json','preference_signals_json','created_at','canonical_key','source'}:
+            raise ValueError('unknown routine feedback field')
+    for section in ('saved', 'excluded'):
+        for row in snapshot.get(section, []):
+            if not isinstance(row, dict) or set(row) != {'canonical_key','created_at'}:
+                raise ValueError('unknown routine decision field')
+    from .topics import parse_topics_yaml
+    parse_topics_yaml(config['config/topics.yaml']); json.loads(config['config/industry.json'])
+    profile_value = json.loads(profile['profile_json'])
+    if not isinstance(profile_value, dict): raise ValueError('invalid routine profile JSON')
+    root = Path(root)
+    files = {**config, 'data/profile.json': encoded(profile_value).decode()}
+    previous_files = {name: (root / name).read_bytes() for name in files if (root / name).is_file()}
+    temps = []
+    with tempfile.NamedTemporaryFile(prefix='.routine-before-', suffix='.db', dir=Path(db_path).parent, delete=False) as handle:
+        before_db = Path(handle.name)
+    try:
+        with sqlite3.connect(db_path) as current, sqlite3.connect(before_db) as saved:
+            current.backup(saved)
+        with connect_db(db_path) as c:
+            c.execute('BEGIN IMMEDIATE')
+            paper_ids = {}
+            for row in snapshot.get('papers', []):
+                key = row['canonical_key']
+                if key in paper_ids: raise ValueError('duplicate routine paper identity')
+                paper_ids[key] = _paper(c, row)
+            for row in snapshot.get('paper_sources', []):
+                key = row.get('canonical_key')
+                if key not in paper_ids: raise ValueError('routine source paper missing')
+                _source(c, paper_ids[key], row)
+            for row in snapshot.get('feedback', []):
+                key = row.get('canonical_key'); pid = paper_ids.get(key)
+                if key is not None and pid is None:
+                    raise ValueError('routine feedback paper missing')
+                marker = 'routine:' + _digest(encoded(row))
+                raw = c.execute('SELECT id FROM raw_feedback WHERE content_hash=?', (marker,)).fetchone()
+                raw_id = raw[0] if raw else c.execute(
+                    'INSERT INTO raw_feedback(paper_id,content,content_hash) VALUES(?,?,?)',
+                    (pid, '[routine feedback redacted]', marker)).lastrowid
+                attempt = c.execute('SELECT id FROM feedback_parse_attempts WHERE raw_feedback_id=?', (raw_id,)).fetchone()
+                attempt_id = attempt[0] if attempt else c.execute(
+                    "INSERT INTO feedback_parse_attempts(raw_feedback_id,parser_name,parser_version,status) VALUES(?,?,?,?)",
+                    (raw_id, 'routine-sync', '1', 'succeeded')).lastrowid
+                if not c.execute('SELECT 1 FROM structured_feedback WHERE parse_attempt_id=?', (attempt_id,)).fetchone():
+                    c.execute('''INSERT INTO structured_feedback(parse_attempt_id,paper_id,decision,score,observations_json,
+                                 preference_signals_json,created_at) VALUES(?,?,?,?,?,?,?)''',
+                              (attempt_id, pid, row.get('decision'), row.get('score'), row.get('observations_json','[]'),
+                               row.get('preference_signals_json','[]'), row.get('created_at')))
+            c.execute('UPDATE profile_versions SET active=0')
+            c.execute('''INSERT INTO profile_versions(version,profile_json,active)
+                         VALUES(?,?,1) ON CONFLICT(version) DO UPDATE SET profile_json=excluded.profile_json,active=1''',
+                      (profile['version'], encoded(profile_value).decode()))
+            for table, key in (('saved_papers', 'saved'), ('excluded_papers', 'excluded')):
+                c.execute('DELETE FROM ' + table)
+                for row in snapshot.get(key, []):
+                    key = row.get('canonical_key')
+                    if key not in paper_ids: raise ValueError('routine decision paper missing')
+                    c.execute('INSERT INTO ' + table + '(paper_id,created_at) VALUES(?,?)',
+                              (paper_ids[key], row.get('created_at')))
+            for name, text in files.items():
+                target = root / name; target.parent.mkdir(parents=True, exist_ok=True)
+                tmp = target.with_name(target.name + '.routine-tmp'); temps.append(tmp); tmp.write_text(text, encoding='utf-8'); tmp.replace(target)
+    except Exception:
+        with sqlite3.connect(before_db) as saved, sqlite3.connect(db_path) as current:
+            saved.backup(current)
+        for name, value in previous_files.items():
+            target = root / name; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(value)
+        for name in files:
+            if name not in previous_files:
+                (root / name).unlink(missing_ok=True)
+        for tmp in temps: tmp.unlink(missing_ok=True)
+        raise
+    finally:
+        before_db.unlink(missing_ok=True)
+    return revision
+
+
 
 def register_backup_snapshot(db_path, backup):
     manifest_path=Path(backup)/'manifest.json'

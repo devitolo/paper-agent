@@ -2,7 +2,7 @@
 A failed publish retries the saved payload; a crashed inference is never blindly rerun.
 """
 from __future__ import annotations
-import argparse, contextlib, fcntl, json, os, pathlib, time, urllib.request, urllib.parse, uuid, sqlite3
+import argparse, contextlib, fcntl, gzip, json, os, pathlib, time, urllib.request, urllib.parse, uuid, sqlite3
 from .sync_exchange import MAX_BODY_BYTES, SOURCES, apply_input_snapshot, encoded, signature
 from .sync_backup import validate_backup
 from .sync_exchange import connect_db
@@ -18,10 +18,13 @@ def request(url,method,body,secret,path,key=''):
     if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.query or parsed.fragment or parsed.path not in ('','/'):
         raise ValueError('AWS URL must be an HTTPS origin')
     if len(body)>MAX_BODY_BYTES:raise ValueError('request too large')
+    wire_body = gzip.compress(body, compresslevel=9, mtime=0) if path == '/sync/pipeline-results' and method.upper() == 'POST' else body
+    if len(wire_body)>MAX_BODY_BYTES:raise ValueError('request too large')
     if secret!=os.environ.get('PAPER_AGENT_SYNC_SHARED_SECRET',''):raise ValueError('secret mismatch')
-    ts=str(time.time());headers={'Content-Type':'application/json','X-Paper-Sync-Timestamp':ts,'X-Paper-Sync-Signature':signature(method,path,ts,body,key)}
+    ts=str(time.time());headers={'Content-Type':'application/json','X-Paper-Sync-Timestamp':ts,'X-Paper-Sync-Signature':signature(method,path,ts,wire_body,key)}
+    if wire_body is not body: headers['Content-Encoding']='gzip'
     if key:headers['X-Paper-Sync-Idempotency']=key
-    req=urllib.request.Request(url.rstrip('/')+path,data=body if method!='GET' else None,headers=headers,method=method)
+    req=urllib.request.Request(url.rstrip('/')+path,data=wire_body if method!='GET' else None,headers=headers,method=method)
     # Do not follow a redirect with authentication credentials.
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self,*args,**kwargs):return None

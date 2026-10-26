@@ -2,6 +2,8 @@
 from __future__ import annotations
 from contextlib import closing
 import hashlib
+import gzip
+import zlib
 import json
 import shutil
 import sqlite3
@@ -216,3 +218,48 @@ def download_backup(base_url: str, destination: Path, *, allow_http_loopback: bo
         final = destination / ('backup-' + str(time.time_ns()))
         extracted.rename(final)
         return final
+
+
+def download_routine_snapshot(base_url: str, *, allow_http_loopback: bool = False) -> dict:
+    """Fetch and validate the bounded canonical JSON routine snapshot."""
+    from .sync_exchange import encoded, signature, ROUTINE_SCHEMA, ROUTINE_MAX_EXPANDED_BYTES, _digest
+    parsed = urllib.parse.urlparse(base_url)
+    loopback_test = allow_http_loopback and parsed.scheme == 'http' and parsed.hostname in {'127.0.0.1', 'localhost'}
+    if (parsed.scheme != 'https' and not loopback_test) or not parsed.hostname or parsed.username or parsed.path not in {'', '/'} or parsed.query or parsed.fragment:
+        raise ValueError('Snapshot URL must be an HTTPS origin')
+    path = '/sync/routine'; timestamp = str(time.time())
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs): return None
+    request = urllib.request.Request(base_url.rstrip('/') + path, headers={
+        'Accept': 'application/json+gzip', 'X-Paper-Sync-Timestamp': timestamp,
+        'X-Paper-Sync-Signature': signature('GET', path, timestamp, b''),
+    })
+    with urllib.request.build_opener(NoRedirect).open(request, timeout=120) as response:
+        compressed = response.read(MAX_ARCHIVE_BYTES + 1)
+    if len(compressed) > MAX_ARCHIVE_BYTES:
+        raise ValueError('Routine snapshot exceeds compressed size limit')
+    try:
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS); expanded = bytearray()
+        for offset in range(0, len(compressed), 65536):
+            expanded.extend(decoder.decompress(compressed[offset:offset + 65536], ROUTINE_MAX_EXPANDED_BYTES + 1 - len(expanded)))
+            if len(expanded) > ROUTINE_MAX_EXPANDED_BYTES: raise ValueError('Routine snapshot exceeds expanded size limit')
+        expanded.extend(decoder.flush(ROUTINE_MAX_EXPANDED_BYTES + 1 - len(expanded)))
+        if len(expanded) > ROUTINE_MAX_EXPANDED_BYTES or not decoder.eof or decoder.unused_data:
+            raise ValueError('Invalid compressed routine snapshot')
+        body = bytes(expanded)
+    except (zlib.error, EOFError) as error:
+        raise ValueError('Invalid compressed routine snapshot') from error
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result: raise ValueError('duplicate routine JSON key')
+            result[key] = value
+        return result
+    try: payload = json.loads(body.decode('utf-8'), object_pairs_hook=unique)
+    except (UnicodeDecodeError, ValueError) as error: raise ValueError('Invalid routine snapshot') from error
+    if not isinstance(payload, dict) or type(payload.get('schema')) is not int or payload.get('schema') != ROUTINE_SCHEMA or payload.get('kind') != 'routine_snapshot':
+        raise ValueError('Unsupported routine snapshot')
+    revision = payload.get('revision'); unsigned = dict(payload); unsigned.pop('revision', None)
+    if not isinstance(revision, str) or _digest(encoded(unsigned)) != revision:
+        raise ValueError('Routine snapshot revision mismatch')
+    return payload

@@ -17,8 +17,8 @@ import tempfile
 import uuid
 from urllib.error import HTTPError
 
-from .sync_backup import download_backup, validate_backup
-from .sync_exchange import encoded, connect_db
+from .sync_backup import download_backup, download_routine_snapshot, prune_superseded_backups, validate_backup
+from .sync_exchange import apply_routine_snapshot, encoded, connect_db
 from .sync_worker import atomic_json, lock, request
 
 CURSOR_TABLES = tuple(f'{source}_{suffix}' for source in
@@ -50,8 +50,8 @@ def pull(db_path, root, state, backup):
         raise ValueError('existing intended Mini database required')
     manifest=json.loads((backup/'manifest.json').read_text())
     manifest_revision=manifest.get('snapshot_revision')
-    if not isinstance(manifest_revision, str) or len(manifest_revision) != 64:
-        raise ValueError('backup missing canonical snapshot_revision')
+    if not isinstance(manifest_revision, str) or len(manifest_revision) != 64 or any(ch not in '0123456789abcdef' for ch in manifest_revision):
+        raise ValueError('snapshot revision required')
     revision=manifest_revision
     state.mkdir(parents=True,exist_ok=True)
     cycle={'batch_id':uuid.uuid4().hex,'input_revision':revision,'stage':'restoring'}
@@ -91,6 +91,30 @@ def pull(db_path, root, state, backup):
     cycle.update(stage='running',baseline=baseline(db_path))
     atomic_json(state/'active-cycle.json',cycle)
     return {'status':'snapshot-restored','input_revision':revision}
+
+
+def pull_routine(db_path, root, state, snapshot):
+    """Apply a validated JSON routine snapshot while preserving Mini cursors."""
+    db_path, root, state = map(Path, (db_path, root, state))
+    if (state/'pipeline-outbox.json').exists() or (state/'active-cycle.json').exists():
+        raise ValueError('unfinished cycle blocks pull; recover/publish first')
+    revision = snapshot['revision']; state.mkdir(parents=True, exist_ok=True)
+    cycle = {'batch_id': uuid.uuid4().hex, 'input_revision': revision, 'stage': 'restoring'}
+    atomic_json(state/'active-cycle.json', cycle)
+    file_state = {name: (root / name).read_bytes() for name in ('config/topics.yaml', 'config/industry.json', 'data/profile.json') if (root / name).is_file()}
+    saved_path = state / ('mini-before-' + cycle['batch_id'] + '.db')
+    with closing(sqlite3.connect(db_path)) as current, closing(sqlite3.connect(saved_path)) as saved:
+        current.backup(saved)
+    try:
+        apply_routine_snapshot(db_path, snapshot, root)
+    except Exception:
+        with closing(sqlite3.connect(saved_path)) as saved, closing(sqlite3.connect(db_path)) as current:
+            saved.backup(current)
+        for name, value in file_state.items():
+            target = root / name; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(value)
+        raise
+    cycle.update(stage='running', baseline=baseline(db_path)); atomic_json(state/'active-cycle.json', cycle)
+    return {'status': 'routine-snapshot-restored', 'input_revision': revision}
 
 
 def export_delta(db_path, root, state):
@@ -227,8 +251,16 @@ def main(argv=None):
         elif a.command=='pull':
             if (a.state_dir/'pipeline-outbox.json').exists() or (a.state_dir/'active-cycle.json').exists():
                 raise ValueError('unfinished cycle blocks pull; recover/publish first')
-            backup=download_backup(a.aws_url,a.state_dir/'snapshots',endpoint='/sync/backup')
-            result=pull(a.db_path,a.root,a.state_dir,backup)
+            if os.environ.get('PAPER_AGENT_ROUTINE_SYNC') == '1':
+                result=pull_routine(a.db_path, a.root, a.state_dir, download_routine_snapshot(a.aws_url))
+            else:
+                backup=download_backup(a.aws_url,a.state_dir/'snapshots',endpoint='/sync/backup')
+                try:
+                    result=pull(a.db_path,a.root,a.state_dir,backup)
+                except Exception:
+                    shutil.rmtree(backup, ignore_errors=True)
+                    raise
+                prune_superseded_backups(a.state_dir/'snapshots', backup)
         else: result=push(a.db_path,a.root,a.state_dir,a.aws_url)
     print(json.dumps(result,sort_keys=True)); return 0
 
