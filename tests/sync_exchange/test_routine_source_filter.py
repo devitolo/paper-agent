@@ -7,7 +7,7 @@ from paper_agents.db import init_db
 
 
 class RoutineSourceFilterTests(unittest.TestCase):
-    def test_unsupported_legacy_source_is_excluded_from_routine_rows(self):
+    def test_ssrn_is_allowed_in_routine_rows(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); (root / 'config').mkdir(); (root / 'data').mkdir()
             (root / 'config/topics.yaml').write_text('topics: []\n')
@@ -18,7 +18,7 @@ class RoutineSourceFilterTests(unittest.TestCase):
                 c.execute("INSERT INTO paper_sources(paper_id,source,source_id) VALUES(?,?,?)", (paper, 'ssrn', '7265684'))
                 c.execute("INSERT INTO paper_sources(paper_id,source,source_id) VALUES(?,?,?)", (paper, 'zenml', 'z-1'))
             snapshot = exchange.build_routine_snapshot(db, root)
-            self.assertEqual([row['source'] for row in snapshot['paper_sources']], ['zenml'])
+            self.assertEqual([row['source'] for row in snapshot['paper_sources']], ['ssrn', 'zenml'])
             self.assertEqual(snapshot['papers'][0]['canonical_key'], 'legacy')
 
 

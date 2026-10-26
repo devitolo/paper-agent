@@ -10,7 +10,7 @@ MAX_BODY_BYTES = 8 * 1024 * 1024
 ROUTINE_SCHEMA = 2
 ROUTINE_MAX_EXPANDED_BYTES = 64 * 1024 * 1024
 MAX_TIMESTAMP_SKEW = 300
-SOURCES = ('arxiv', 'openalex', 'semantic_scholar', 'core', 'zenml')
+SOURCES = ('arxiv', 'openalex', 'semantic_scholar', 'core', 'zenml', 'ssrn')
 USER_TABLES = ('raw_feedback','feedback_parse_attempts','structured_feedback','profile_versions','feedback_profile_applications','feedback_profile_apply_attempts','feedback','summary_field_feedback','summary_field_quality_signals')
 
 @contextmanager
@@ -97,10 +97,9 @@ def build_routine_snapshot(db_path=DEFAULT_DB_PATH, root=Path('.'), *, max_bytes
         c.execute('BEGIN')
         c.row_factory = sqlite3.Row
         papers = _rows(c, 'papers')
-        placeholders = ','.join('?' for _ in SOURCES)
         sources = [dict(row) for row in c.execute(
             'SELECT ps.source,ps.source_id,ps.url,ps.pdf_url,ps.discovered_at,ps.metadata_json,p.canonical_key '
-            f'FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id WHERE ps.source IN ({placeholders}) ORDER BY ps.id', SOURCES)]
+            'FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id ORDER BY ps.id')]
         profile = c.execute('SELECT version,profile_json FROM profile_versions WHERE active=1 ORDER BY version DESC LIMIT 1').fetchone()
         profile = dict(profile) if profile is not None else {'version': 0, 'profile_json': (root / 'data/profile.json').read_text()}
         watermark = c.execute('SELECT COALESCE(MAX(id),0) FROM structured_feedback').fetchone()[0]
