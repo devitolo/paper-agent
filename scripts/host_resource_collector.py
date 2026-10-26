@@ -180,39 +180,9 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
     records.sort(key=lambda row: row["observed_at"])
     deduped = {}
     for row in records:
-        deduped[row["observed_at"][:16]] = row
+        deduped[row["observed_at"]] = row
     records = list(deduped.values())
-    cpu = [float(row["cpu"]["utilization_percent"]) for row in records if isinstance(row.get("cpu"), dict) and isinstance(row["cpu"].get("utilization_percent"), (int, float)) and math.isfinite(float(row["cpu"]["utilization_percent"]))]
-    weighted_cpu = [(float(row["cpu"]["utilization_percent"]), float(row["cpu"].get("interval_seconds"))) for row in records if isinstance(row.get("cpu"), dict) and isinstance(row["cpu"].get("utilization_percent"), (int, float)) and isinstance(row["cpu"].get("interval_seconds"), (int, float)) and float(row["cpu"].get("interval_seconds")) > 0 and math.isfinite(float(row["cpu"]["utilization_percent"])) and math.isfinite(float(row["cpu"].get("interval_seconds")))]
-    cpu_average = (sum(value * seconds for value, seconds in weighted_cpu) / sum(seconds for _, seconds in weighted_cpu)) if weighted_cpu else (sum(cpu) / len(cpu) if cpu else None)
     available = [int(row["memory"]["available_bytes"]) for row in records if isinstance(row.get("memory"), dict) and isinstance(row["memory"].get("available_bytes"), (int, float)) and math.isfinite(float(row["memory"]["available_bytes"]))]
-    timestamps = []
-    for row in records:
-        try: timestamps.append(datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp())
-        except (TypeError, ValueError): pass
-    gaps = sum(1 for left, right in zip(sorted(timestamps), sorted(timestamps)[1:]) if right - left > 15 * 60)
-    segments = []
-    segment = []
-    for row in records:
-        value = row.get("cpu", {}).get("utilization_percent") if isinstance(row.get("cpu"), dict) else None
-        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-            value = None
-        if not segment:
-            segment = [float(value)] if value is not None else []
-            continue
-        try:
-            delta = (datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")) - datetime.fromisoformat(records[records.index(row)-1]["observed_at"].replace("Z", "+00:00"))).total_seconds()
-        except (TypeError, ValueError):
-            delta = 999
-        if delta > 15 * 60 or value is None:
-            if segment: segments.append(segment)
-            segment = [float(value)] if value is not None else []
-        else:
-            segment.append(float(value))
-    if segment: segments.append(segment)
-    five = []
-    for values in segments:
-        five.extend(sum(values[i:i + 5]) / 5 for i in range(len(values) - 4))
     latest = records[-1] if records else {}
     try: observations = json.loads((root / "last-observations.json").read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError): observations = {}
@@ -223,30 +193,56 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         entry = observations.get(name)
         return entry.get("value") if isinstance(entry, dict) else entry
     latest_disk = latest_field("disk")
-    interval_coverage = [float(row.get("cpu", {}).get("interval_seconds")) for row in records if isinstance(row.get("cpu"), dict) and isinstance(row["cpu"].get("interval_seconds"), (int, float)) and row["cpu"].get("utilization_percent") is not None and math.isfinite(float(row["cpu"]["interval_seconds"])) and float(row["cpu"]["interval_seconds"]) > 0]
+    # CPU deltas describe intervals ending at observed_at. Clip both the
+    # weighting and coverage to the declared window, even for a late cron run.
     intervals = []
+    window_start = datetime.fromtimestamp(start, timezone.utc)
+    window_microseconds = 900 * 1_000_000
     for row in records:
         cpu_row = row.get("cpu") if isinstance(row.get("cpu"), dict) else {}
         seconds = cpu_row.get("interval_seconds")
-        if cpu_row.get("utilization_percent") is None or not isinstance(seconds, (int, float)) or seconds <= 0 or not math.isfinite(float(seconds)):
+        value = cpu_row.get("utilization_percent")
+        if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in (seconds, value)):
+            continue
+        # Bound native JSON numbers before float conversion or microsecond
+        # scaling. Corrupt huge integers/finite floats must not stop export.
+        if not 0 < seconds <= 1200 or not 0 <= value <= 100:
+            continue
+        if not math.isfinite(float(seconds)) or not math.isfinite(float(value)):
             continue
         try:
-            observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp()
+            stamp = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
+            observed = round((stamp - window_start).total_seconds() * 1_000_000)
         except (KeyError, TypeError, ValueError):
             continue
-        left = max(start, observed - float(seconds))
-        right = min(effective_end, observed)
+        left = max(0, observed - round(float(seconds) * 1_000_000))
+        right = min(window_microseconds, observed)
         if right > left:
-            intervals.append((left, right))
-    intervals.sort()
+            intervals.append((left, right, float(value), observed))
+    boundaries = sorted({edge for left, right, _, _ in intervals for edge in (left, right)})
+    coverage = 0
+    weighted_total = 0.0
     merged = []
-    for left, right in intervals:
+    cpu = []
+    for left, right in zip(boundaries, boundaries[1:]):
+        covering = [interval for interval in intervals if interval[0] <= left and interval[1] >= right]
+        if not covering:
+            continue
+        # Overlapping retries count once; the most recently ended observation
+        # supplies the value for that segment.
+        chosen = max(covering, key=lambda interval: interval[3])
+        duration = right - left
+        coverage += duration
+        weighted_total += chosen[2] * duration
+        cpu.append(chosen[2])
         if merged and left <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], right))
+            merged[-1] = (merged[-1][0], right)
         else:
             merged.append((left, right))
-    coverage = min(900, sum(right - left for left, right in merged)) if merged else (max(timestamps) - min(timestamps) if len(timestamps) >= 2 else 0)
-    complete = bool(cpu) and gaps == 0 and coverage >= 900
+    cpu_average = weighted_total / coverage if coverage else None
+    coverage /= 1_000_000
+    gaps = max(0, len(merged) - 1)
+    complete = bool(cpu) and coverage == 900
     summary = {"schema": SCHEMA, "collector_version": "4", "state": "observed" if complete else "warming", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 900, "complete": complete, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": round(min(900, coverage)), "cpu": {"average_percent": round(cpu_average, 2) if cpu_average is not None else None, "max_observed_percent": max(cpu) if cpu else None, "peak_sustained_5m_percent": None, "max_one_minute_percent": None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_max_bytes": max(available) if available else None, "available_min_bytes": min(available) if available else None}, "disk": latest_disk, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_disk, "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup"), "observation_times": {name: (entry.get("observed_at") if isinstance(entry, dict) else None) for name, entry in observations.items()}}, "errors": []}
     return summary
 
