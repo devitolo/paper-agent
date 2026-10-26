@@ -11,6 +11,9 @@ PAPER_AGENT_SYNC_EXPLICIT_PRODUCTION=1
 PAPER_AGENT_SYNC_AWS_URL=https://paper-prod.tail5fc461.ts.net
 PAPER_AGENT_SYNC_PRODUCER=mini-production
 PAPER_AGENT_SYNC_ENVIRONMENT=production
+# Controlled routine JSON/gzip exchange activation after the disabled-default
+# image preflight. The wrapper still owns source pull/process/push sequencing.
+PAPER_AGENT_ROUTINE_SYNC=1
 
 # Installed by scripts/install_project_paper_cron.sh.
 

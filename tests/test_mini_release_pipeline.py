@@ -128,6 +128,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("PAPER_AGENT_SYNC_AWS_URL=https://paper-prod.tail5fc461.ts.net", template)
         self.assertIn("PAPER_AGENT_SYNC_PRODUCER=mini-production", template)
         self.assertIn("PAPER_AGENT_SYNC_ENVIRONMENT=production", template)
+        self.assertIn("PAPER_AGENT_ROUTINE_SYNC=1", template)
         self.assertIn("PAPER_MIGRATION_EXTRA_COMPOSE_FILES=/home/devitolo/paper-mini-rehearsal/production-cutover/docker-compose.production.yml", template)
         self.assertIn("PAPER_MIGRATION_DEPLOY_LOCK_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock", template)
         self.assertNotIn("docker-compose.mini-rehearsal.yml", template)
