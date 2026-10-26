@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() { echo 'usage: project-paper-observability-deploy --package-dir /tmp/project-paper-observability-extracted --image IMAGE@sha256:DIGEST --target aws-production|mini-production' >&2; exit 64; }
+[[ ${EUID:-$(id -u)} -eq 0 ]] || { echo 'must run as root' >&2; exit 77; }
+[[ $# -eq 6 && $1 == --package-dir && $3 == --image && $5 == --target ]] || usage
+package_dir=$2; image=$4; target=$6
+[[ "$package_dir" == /tmp/project-paper-observability-extracted ]] || { echo 'package directory rejected' >&2; exit 64; }
+[[ -d "$package_dir" && ! -L "$package_dir" ]] || { echo 'package directory missing' >&2; exit 66; }
+[[ "$image" =~ ^ghcr\.io/devitolo/paper-agent/observability:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || { echo 'immutable observability image required' >&2; exit 64; }
+case "$target" in aws-production|mini-production) ;; *) echo 'unsupported target' >&2; exit 64 ;; esac
+for file in deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/run-container.sh; do
+  [[ -f "$package_dir/$file" && ! -L "$package_dir/$file" ]] || { echo "package file missing: $file" >&2; exit 66; }
+done
+exec 9>/run/lock/project-paper-observability.lock
+/usr/bin/flock -n 9 || { echo 'observability deployment already running' >&2; exit 75; }
+export PROJECT_PAPER_OBSERVABILITY_IMAGE="$image" PROJECT_PAPER_OBSERVABILITY_TARGET="$target"
+transaction_started=0
+rollback() {
+  local failure=$?
+  trap - ERR
+  if (( transaction_started )); then
+    bash "$package_dir/deploy/observability/remove_container_cron.sh" --target="$target" || true
+  fi
+  exit "$failure"
+}
+trap rollback ERR
+bash "$package_dir/deploy/observability/install_container_cron.sh" --apply --target="$target"
+transaction_started=1
+test -f "/etc/cron.d/project-paper-observability-$target"
+test -f "/var/lib/project-paper-observability/${target}-export/INSTALL-RECEIPT"
+/usr/local/sbin/project-paper-observability-container
+test -f "/var/lib/project-paper-observability/${target}-export/status.json"
+python3 - "$target" <<'PY'
+import json, pathlib, sys
+target = sys.argv[1]
+value = json.loads(pathlib.Path(f'/var/lib/project-paper-observability/{target}-export/status.json').read_text())
+assert value.get('schema') == 'project-paper.resource-status.v1'
+assert value.get('environment') == target
+assert value.get('scope') == 'host'
+PY
+trap - ERR
+echo 'observability deployment complete'
