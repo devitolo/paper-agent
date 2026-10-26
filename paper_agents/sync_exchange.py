@@ -8,7 +8,7 @@ from pathlib import Path
 from .db import connect_db as _connect_db, DEFAULT_DB_PATH
 MAX_BODY_BYTES = 8 * 1024 * 1024
 MAX_TIMESTAMP_SKEW = 300
-SOURCES = ('arxiv', 'openalex', 'semantic_scholar', 'core', 'zenml')
+SOURCES = ('arxiv', 'openalex', 'semantic_scholar', 'core', 'zenml', 'ssrn')
 USER_TABLES = ('raw_feedback','feedback_parse_attempts','structured_feedback','profile_versions','feedback_profile_applications','feedback_profile_apply_attempts','feedback','summary_field_feedback','summary_field_quality_signals')
 _COMPACTED_REVISION_SCHEMA = 1
 ROUTINE_SCHEMA = 2
