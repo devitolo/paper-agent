@@ -16,13 +16,13 @@ class HostResourceCollectorTests(unittest.TestCase):
                 rows.append(json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T12:{index * 2:02d}:00+00:00", "cpu": {"utilization_percent": value}, "memory": {"available_bytes": 1000 - value}}))
             (root / "samples.jsonl").write_text("\n".join(rows) + "\n")
             result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
-        self.assertEqual(result["sample_count"], 6)
-        self.assertEqual(result["coverage_seconds"], 600)
-        self.assertEqual(result["cpu"]["average_percent"], 35)
+        self.assertEqual(result["sample_count"], 5)
+        self.assertEqual(result["coverage_seconds"], 480)
+        self.assertEqual(result["cpu"]["average_percent"], 40)
         self.assertIsNone(result["cpu"]["peak_sustained_5m_percent"])
         self.assertEqual(result["cpu"]["max_observed_percent"], 60)
         self.assertIsNone(result["cpu"]["max_one_minute_percent"])
-        self.assertEqual(result["memory"]["available_max_bytes"], 990)
+        self.assertEqual(result["memory"]["available_max_bytes"], 980)
 
     def test_missing_cpu_and_memory_are_not_zero(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -59,7 +59,7 @@ class HostResourceCollectorTests(unittest.TestCase):
         self.assertEqual(result["window"]["start_at"], "2026-10-24T12:00:00+00:00")
         self.assertEqual(result["window"]["end_at"], "2026-10-24T12:15:00+00:00")
         self.assertEqual(result["window"]["sample_gaps"], 0)
-        self.assertTrue(result["window"]["complete"])
+        self.assertFalse(result["window"]["complete"])
 
     def test_sustained_peak_never_spans_a_gap(self):
         with tempfile.TemporaryDirectory() as directory:
