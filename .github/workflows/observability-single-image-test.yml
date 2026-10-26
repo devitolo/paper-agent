@@ -1,0 +1,72 @@
+name: Observability Single Image Candidate
+
+on:
+  push:
+    branches:
+      - codex/observability-single-image
+    paths:
+      - .github/workflows/observability-single-image-test.yml
+      - deploy/observability/**
+      - paper_agents/observability_*.py
+      - scripts/host_resource_collector.py
+      - tests/test_observability_*.py
+
+permissions: {}
+concurrency:
+  group: observability-single-image-test
+  cancel-in-progress: false
+
+jobs:
+  build-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Test collector, publisher and isolation contracts
+        run: |
+          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_container tests.test_observability_aws_p1 tests.test_observability_collect_publish tests.test_observability_transport -v
+          bash -n deploy/observability/collect-publish.sh deploy/observability/publish.sh deploy/observability/entrypoint.sh deploy/observability/run-container.sh
+          git diff --check
+      - name: Build and publish immutable AMD64 candidate
+        env:
+          CR_PAT: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$CR_PAT" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/observability:single-image-$GITHUB_SHA"
+          docker buildx build --platform linux/amd64 --push -f deploy/observability/Dockerfile -t "$image" .
+          digest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "IMAGE=$image@$digest" >> "$GITHUB_ENV"
+          printf 'source_sha=%s\nimage=%s@%s\ndeployment=none\n' "$GITHUB_SHA" "$image" "$digest" > single-image-evidence.txt
+      - name: Smoke both isolated roles from the same digest
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE"
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /state:rw,nosuid,uid=10001,gid=10001 --tmpfs /export:rw,nosuid,uid=10001,gid=10001 \
+            -e PROJECT_PAPER_RESOURCE_ROOT=/state -e PROJECT_PAPER_RESOURCE_EXPORT_DIR=/export \
+            -e PROJECT_PAPER_RESOURCE_ENVIRONMENT=mini-production -e PROJECT_PAPER_RESOURCE_HOST=mini-production \
+            "$IMAGE"
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --user=10002:10002 --entrypoint=/opt/project-paper-observability/publish.sh \
+            "$IMAGE" --help > publisher-help.txt
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --user=10002:10002 --entrypoint=/opt/project-paper-observability/publish.sh \
+            "$IMAGE" --status-file /absent --state-file /absent --url https://example.invalid/observability/v1/mini-status --key-file /absent > publisher-disabled.txt
+          grep -q '"state": "disabled"' publisher-disabled.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: observability-single-image-${{ github.sha }}
+          path: |
+            single-image-evidence.txt
+            publisher-help.txt
+            publisher-disabled.txt
+          if-no-files-found: error
+          retention-days: 14
