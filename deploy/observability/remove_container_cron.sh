@@ -2,8 +2,9 @@
 set -euo pipefail
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo 'must run as root' >&2; exit 77; }
 package_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-target=${1#--target=}
-[[ "$1" == --target=* ]] || target=${PROJECT_PAPER_OBSERVABILITY_TARGET:-mini-production}
+arg=${1:-}
+target=${arg#--target=}
+[[ "$arg" == --target=* ]] || target=${PROJECT_PAPER_OBSERVABILITY_TARGET:-mini-production}
 case "$target" in aws-production|mini-production) ;; *) echo 'unsupported target' >&2; exit 64 ;; esac
 export PROJECT_PAPER_OBSERVABILITY_TARGET="$target"
 control=/var/lib/project-paper-observability/${target}-control
