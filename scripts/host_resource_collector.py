@@ -228,7 +228,9 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         coverage += duration
         weighted_total += chosen[2] * duration
         cpu.append(chosen[2])
-        if merged and left <= merged[-1][1]:
+        # Timestamp subtraction can differ by less than one microsecond when
+        # reconstructing adjacent intervals from fractional Unix seconds.
+        if merged and left <= merged[-1][1] + 0.000001:
             merged[-1] = (merged[-1][0], right)
         else:
             merged.append((left, right))

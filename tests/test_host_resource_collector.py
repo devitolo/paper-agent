@@ -8,6 +8,16 @@ from scripts import host_resource_collector as collector
 
 
 class HostResourceCollectorTests(unittest.TestCase):
+    def test_fractional_adjacent_intervals_do_not_report_rounding_as_a_gap(self):
+        rows = [
+            {"observed_at": "2026-10-26T17:45:06.100000+00:00", "cpu": {"utilization_percent": 20, "interval_seconds": 900}},
+            {"observed_at": "2026-10-26T18:00:06.200000+00:00", "cpu": {"utilization_percent": 50, "interval_seconds": 900.1}},
+        ]
+        result = self.summarize_rows(rows, collector.datetime.fromisoformat(rows[-1]["observed_at"]))
+        self.assertEqual(result["window"]["sample_gaps"], 0)
+        self.assertTrue(result["window"]["complete"])
+        self.assertEqual(result["cpu"]["average_percent"], 49.8)
+
     def test_rapid_retries_preserve_distinct_intervals_in_one_minute(self):
         rows = [
             {"observed_at": "2026-10-26T14:14:10+00:00", "cpu": {"utilization_percent": 10, "interval_seconds": 850}},
