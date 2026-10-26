@@ -61,7 +61,6 @@ cat > "$cron_path.new" <<CRON
 CRON
 install -o root -g root -m 0644 "$cron_path.new" "$cron_path"
 rm -f "$cron_path.new"
-flock -u 8
 before_status=$(python3 - "$export_dir/status.json" <<'PY'
 import json, pathlib, sys
 try:
