@@ -7,11 +7,20 @@ usage() { echo 'usage: project-paper-observability-deploy --package-dir /tmp/pro
 package_dir=$2; image=$4; target=$6
 [[ "$package_dir" == /tmp/project-paper-observability-extracted ]] || { echo 'package directory rejected' >&2; exit 64; }
 [[ -d "$package_dir" && ! -L "$package_dir" ]] || { echo 'package directory missing' >&2; exit 66; }
+# The host helper must never execute a runner-writable package as root.
+package_mode=$(stat -c %a "$package_dir")
+package_perm=$((package_mode % 100))
+[[ $(stat -c %u "$package_dir") -eq 0 && $((package_perm & 22)) -eq 0 ]] || { echo 'package directory must be root-owned and not group/world writable' >&2; exit 75; }
+for required in deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/run-container.sh; do
+  path="$package_dir/$required"
+  [[ -f "$path" && ! -L "$path" ]] || { echo "package file missing: $required" >&2; exit 66; }
+  [[ $(stat -c %u "$path") -eq 0 ]] || { echo "package file must be root-owned: $required" >&2; exit 75; }
+  mode=$(stat -c %a "$path")
+  perm=$((mode % 100))
+  [[ $((perm & 22)) -eq 0 ]] || { echo "package file is writable by non-root: $required" >&2; exit 75; }
+done
 [[ "$image" =~ ^ghcr\.io/devitolo/paper-agent/observability:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || { echo 'immutable observability image required' >&2; exit 64; }
 case "$target" in aws-production|mini-production) ;; *) echo 'unsupported target' >&2; exit 64 ;; esac
-for file in deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/run-container.sh; do
-  [[ -f "$package_dir/$file" && ! -L "$package_dir/$file" ]] || { echo "package file missing: $file" >&2; exit 66; }
-done
 exec 9>/run/lock/project-paper-observability-deploy.lock
 /usr/bin/flock -n 9 || { echo 'observability deployment already running' >&2; exit 75; }
 export PROJECT_PAPER_OBSERVABILITY_IMAGE="$image" PROJECT_PAPER_OBSERVABILITY_TARGET="$target"
