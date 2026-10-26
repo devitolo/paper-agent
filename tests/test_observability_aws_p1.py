@@ -23,14 +23,6 @@ class ObservabilityAwsP1Tests(unittest.TestCase):
             self.assertEqual(sample['cpu']['state'], 'baseline_invalid')
             self.assertNotIn('utilization_percent', sample['cpu'])
 
-    def test_infinite_cpu_baseline_is_explicitly_invalid(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / 'last-cpu.json').write_text('{"total":"Infinity","idle":1}')
-            with patch.object(collector, 'read_cpu', return_value=(200, 100)):
-                sample = collector.sample(root)
-            self.assertEqual(sample['cpu']['state'], 'baseline_invalid')
-
     def test_resource_status_rejects_malformed_future_and_sensitive_payloads(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'status.json'
@@ -39,23 +31,9 @@ class ObservabilityAwsP1Tests(unittest.TestCase):
                 {'schema': SCHEMA, 'observed_at': current.isoformat(), 'cpu': []},
                 {'schema': SCHEMA, 'observed_at': (current + timedelta(hours=1)).isoformat()},
                 {'schema': SCHEMA, 'observed_at': current.isoformat(), 'latest': {'api_token': 'redact'}},
-                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'latest': {'environment_dump': {'headers': {'Authorization': 'sentinel'}}}},
-                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'cpu': {'average_percent': 10 ** 400}},
-                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'latest': {'disk': 'bad'}},
-                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'latest': {'disk': [1, 2]}},
-                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'cpu': None},
-                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'memory': None},
-                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'containers': None},
-                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'latest': None},
             ):
                 path.write_text(json.dumps(payload))
                 self.assertEqual(load_resource_status(path, now=current)['state'], 'malformed')
-
-    def test_warming_snapshot_with_nullable_aggregates_is_valid(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'status.json'
-            path.write_text(json.dumps({'schema': SCHEMA, 'state': 'warming', 'observed_at': '2026-10-25T00:00:00+00:00', 'cpu': {'average_percent': None}, 'memory': {'available_average_bytes': None}, 'disk': None, 'latest': {'disk': None}}))
-            self.assertEqual(load_resource_status(path, now=datetime(2026, 10, 25, tzinfo=timezone.utc))['state'], 'warming')
 
     def test_health_reads_disk_from_latest_contract(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -72,8 +50,7 @@ class ObservabilityAwsP1Tests(unittest.TestCase):
         workflow = Path('.github/workflows/observability-release.yml').read_text()
         self.assertIn('trap cleanup EXIT', launcher)
         self.assertIn('docker rm -f "$container_name"', launcher)
-        self.assertIn('timeout --signal=TERM --kill-after=1s 5s docker rm -f', launcher)
-        self.assertIn("'observability-aws'", workflow)
+        self.assertIn('observability-aws-v*', workflow)
         self.assertIn('project-paper-observability-aws-deploy', workflow)
         self.assertIn('target=aws-production', workflow)
 

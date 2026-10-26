@@ -1439,7 +1439,7 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
     mini = {
         "Mini CPU": metric(mini_status, "cpu") if not mini_cpu.get("average_percent") else f"{mini_cpu['average_percent']}% avg · {mini_cpu.get('peak_sustained_5m_percent', 'unknown')}% peak sustained",
         "Mini memory": metric(mini_status, "memory") if not mini_memory.get("available_average_bytes") else f"{mini_memory['available_average_bytes']} bytes available avg",
-        "Mini disk": "observed · see collector snapshot" if mini_status.get("disk") else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
+        "Mini disk": "observed · see collector snapshot" if mini_status.get("latest", {}).get("disk") else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
         "Mini container": str(mini_status.get("containers", {}).get("state", mini_status.get("state", "unknown"))) if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
         "Mini telemetry freshness": f"{mini_status.get('state', 'unknown')} · {mini_status.get('age_seconds') if mini_status.get('age_seconds') is not None else 'unknown'}s old" if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} · age unknown",
     }
@@ -1447,7 +1447,7 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
         "AWS delivery state": sync["state"],
         "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
         "AWS CPU / memory": f"{aws_cpu.get('average_percent', 'unknown')}% avg CPU · {aws_memory.get('available_average_bytes', 'unknown')} bytes available" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
-        "AWS disk / service": "observed · see collector snapshot" if aws_status.get("disk") else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
+        "AWS disk / service": "observed · see collector snapshot" if aws_status.get("latest", {}).get("disk") else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
         "AWS telemetry freshness": f"{aws_status.get('state', 'unknown')} · {aws_status.get('age_seconds') if aws_status.get('age_seconds') is not None else 'unknown'}s old" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} · age unknown",
     }
     badge = "SANITIZED COLLECTOR DATA" if mini_status.get("state") == "observed" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · COLLECTOR NOT CONNECTED"

@@ -2,11 +2,12 @@
 # Host-only recovery helpers. Backups remain immutable until manually retired.
 validate_transaction() {
   python3 - "$control" "$1" <<'PY'
-import hashlib, pathlib, re, stat, sys
+import hashlib, os, pathlib, re, stat, sys
 try:
     c = pathlib.Path(sys.argv[1])
     b = pathlib.Path(sys.argv[2])
-    targets = {'/usr/local/sbin/project-paper-observability-container', '/etc/project-paper-observability/mini-production/mini-production.env', '/etc/cron.d/project-paper-observability-mini-production', '/var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT'}
+    target = os.environ.get('PROJECT_PAPER_OBSERVABILITY_TARGET', 'mini-production')
+    targets = {'/usr/local/sbin/project-paper-observability-container', f'/etc/project-paper-observability/{target}/{target}.env', f'/etc/cron.d/project-paper-observability-{target}', f'/var/lib/project-paper-observability/{target}-export/INSTALL-RECEIPT'}
     for p in (c, b):
         s = p.lstat()
         if not (stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and (stat.S_IMODE(s.st_mode) == 0o700)):
@@ -74,7 +75,7 @@ restore_files() {
   while IFS='|' read -r target previous present digest mode uid gid; do
     if [[ "$present" == 1 ]]; then
       parent=$(dirname "$target")
-      if [[ "$target" == /var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT ]]; then
+      if [[ "$target" == /var/lib/project-paper-observability/${PROJECT_PAPER_OBSERVABILITY_TARGET:-mini-production}-export/INSTALL-RECEIPT ]]; then
         [[ $(stat -c %d "$parent") == $(stat -c %d "$control") ]] || { echo 'receipt and control filesystem differ' >&2; return 75; }
         temporary=$(mktemp "$control/restore-XXXXXX") || return
       else

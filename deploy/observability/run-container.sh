@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
-env_file="${PROJECT_PAPER_RESOURCE_ENV_FILE:-/etc/project-paper-observability/mini-production/mini-production.env}"
+env_file="${PROJECT_PAPER_RESOURCE_ENV_FILE:-/etc/project-paper-observability/aws-production/aws-production.env}"
 if [ -r "$env_file" ]; then . "$env_file"; fi
 image="${PROJECT_PAPER_OBSERVABILITY_IMAGE:?image digest is required}"
 case "$image" in *[!A-Za-z0-9_./:@-]*) echo 'immutable image digest is required' >&2; exit 64 ;; esac
 printf '%s' "$image" | /usr/bin/grep -Eq '^[^@[:space:]]+@sha256:[0-9a-f]{64}$' || { echo 'immutable image digest is required' >&2; exit 64; }
+container_name="project-paper-observability-collector"
 state="${PROJECT_PAPER_RESOURCE_ROOT:?state path is required}"
 export_dir="${PROJECT_PAPER_RESOURCE_EXPORT_DIR:?export path is required}"
 mkdir -p "$state" "$export_dir"
@@ -14,7 +15,9 @@ if [ -f "$log" ] && [ "$(wc -c <"$log")" -gt 1048576 ]; then
   tail -c 524288 "$log" > "$log.1"
   : > "$log"
 fi
-exec /usr/bin/timeout --signal=TERM --kill-after=5s 45s docker run --rm --name project-paper-observability-collector \
+cleanup() { rc=$?; if [ "$rc" -ne 0 ]; then docker rm -f "$container_name" >/dev/null 2>&1 || true; fi; exit "$rc"; }
+trap cleanup EXIT
+/usr/bin/timeout --signal=TERM --kill-after=5s 45s docker run --rm --name "$container_name" \
   --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
   --memory 64m --cpus 0.10 --pids-limit 32 --tmpfs /tmp:rw,noexec,nosuid,size=8m \
   -e PROJECT_PAPER_RESOURCE_ROOT=/state \

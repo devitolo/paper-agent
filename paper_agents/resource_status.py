@@ -6,9 +6,36 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+import math
 
 
 SCHEMA = "project-paper.resource-status.v1"
+FUTURE_SKEW_SECONDS = 300
+
+
+def _safe_status(value: Any) -> bool:
+    sensitive = ("secret", "token", "password", "credential", "api_key", "private_key")
+    def walk(node: Any, key: str = "") -> bool:
+        if any(part in key.lower() for part in sensitive):
+            return False
+        if isinstance(node, dict):
+            return all(isinstance(k, str) and walk(v, k) for k, v in node.items())
+        if isinstance(node, list):
+            return all(walk(v, key) for v in node)
+        if isinstance(node, float):
+            return math.isfinite(node)
+        return node is None or isinstance(node, (str, int, bool))
+    if not isinstance(value, dict) or not walk(value):
+        return False
+    for key in ("cpu", "memory", "latest", "containers", "disk"):
+        if key in value and not isinstance(value[key], dict):
+            return False
+    cpu = value.get("cpu")
+    if isinstance(cpu, dict):
+        for key in ("average_percent", "peak_sustained_5m_percent", "max_one_minute_percent", "utilization_percent"):
+            if key in cpu and (not isinstance(cpu[key], (int, float)) or not math.isfinite(float(cpu[key]))):
+                return False
+    return True
 
 
 def load_resource_status(path: Path | None = None, *, now: datetime | None = None) -> dict[str, Any]:
@@ -18,12 +45,15 @@ def load_resource_status(path: Path | None = None, *, now: datetime | None = Non
         value = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return {**unknown, "state": "unavailable"}
-    if not isinstance(value, dict) or value.get("schema") != SCHEMA or not isinstance(value.get("observed_at"), str):
+    if not isinstance(value, dict) or value.get("schema") != SCHEMA or not isinstance(value.get("observed_at"), str) or not _safe_status(value):
         return {**unknown, "state": "malformed"}
     current = now or datetime.now(timezone.utc)
     try:
         observed = datetime.fromisoformat(value["observed_at"].replace("Z", "+00:00"))
-        age = max(0, int((current - observed).total_seconds()))
+        delta = (current - observed).total_seconds()
+        if delta < -FUTURE_SKEW_SECONDS:
+            return {**unknown, "state": "malformed"}
+        age = max(0, int(delta))
     except (TypeError, ValueError):
         return {**unknown, "state": "malformed"}
     state = str(value.get("state", "observed"))
