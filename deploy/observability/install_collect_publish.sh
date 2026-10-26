@@ -4,7 +4,7 @@ set -Eeuo pipefail
 [[ $EUID == 0 && $# == 0 ]] || { echo 'run with sudo; no arguments allowed' >&2; exit 64; }
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 [[ ! -L "$source_dir/collect-publish.sh" && ! -L "$source_dir/project-paper-observability-deploy" ]] || exit 75
-printf '%s  %s\n' effd533529bb0f0db5fadfd212a88079ac36c43b08f068861c1bba68772ff20d "$source_dir/collect-publish.sh" fcb7b7c60a45f5b64b4294468c6b667a8e571612bbdf209d2109e8ce447ff0db "$source_dir/project-paper-observability-deploy" | sha256sum --check --status
+printf '%s  %s\n' a71fca685759cb8a02f9a319e77c0b07ed0d3d9938894d81dba2c4414bfd504d "$source_dir/collect-publish.sh" 8bbd81d9a970efce24ee234b44fbbdb72219bb243d2c75f5fe021a442b782e6e "$source_dir/project-paper-observability-deploy" | sha256sum --check --status
 for path in /etc/cron.d /usr/local/sbin /etc/project-paper-observability/mini-production /var/lib/project-paper-observability; do
   [[ -d $path && ! -L $path && $(stat -c %u "$path") == 0 ]] || exit 75
   mode=$(stat -c %a "$path"); [[ $((8#$mode & 022)) == 0 ]] || exit 75

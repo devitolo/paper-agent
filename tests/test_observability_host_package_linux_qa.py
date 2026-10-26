@@ -37,7 +37,7 @@ class HostPackageTests(unittest.TestCase):
         self.previous = {}
         for destination in self.m.FILES.values():
             path = self.root / destination.lstrip('/')
-            path.write_bytes(b'#!/bin/sh\necho previous\n');path.chmod(0o755)
+            path.write_bytes(b'#!/bin/sh\n# host-package-pending-guard-v1\necho previous\n');path.chmod(0o755)
             self.previous[path] = path.read_bytes()
         self.cron = self.root / self.m.CRON.lstrip('/')
         self.cron.write_text('*/15 * * * * root /usr/local/sbin/project-paper-observability-collect-publish\n')
@@ -56,7 +56,7 @@ assert args[args.index('--cert-identity')+1]=='https://github.com/devitolo/paper
 assert args[args.index('--predicate-type')+1]=='https://slsa.dev/provenance/v1'
 assert digest==claims[subject.name]
 ''');verifier.chmod(0o755)
-        self.files = {name:b'#!/bin/sh\necho new\n' for name in self.m.FILES}
+        self.files = {name:b'#!/bin/sh\n# host-package-pending-guard-v1\necho new\n' for name in self.m.FILES}
         self.now = time.time()
 
     def bundle(self, *, change=None, member_change=None):
@@ -142,6 +142,14 @@ assert digest==claims[subject.name]
         with self.assertRaises(ValueError):self.install(digest)
         self.unchanged()
 
+    def test_sticky_upload_parent_works_but_nonsticky_write_is_rejected(self):
+        digest,_=self.bundle()
+        inbox=self.root/self.m.INCOMING.lstrip('/')
+        inbox.chmod(0o1770)
+        self.install(digest)
+        inbox.chmod(0o770)
+        with self.assertRaises(ValueError):self.install(digest)
+
     def test_health_failure_restores_all_files(self):
         digest,_=self.bundle()
         def fail(*_):raise RuntimeError('qualification failed')
@@ -166,6 +174,40 @@ assert digest==claims[subject.name]
         (self.control/audit['transaction']/'0.before').write_bytes(b'corrupt')
         with self.assertRaises(ValueError):self.m.recover(self.root,check_health=lambda *_:None)
         self.assertTrue(pending.exists())
+
+    def test_crash_after_each_replace_blocks_all_entrypoints_until_recovery(self):
+        from unittest.mock import patch
+        for index, destination in enumerate(self.m.FILES.values()):
+            digest,_=self.bundle()
+            target=self.root/destination.lstrip('/')
+            original=self.m.atomic
+            def crash(path,data,mode):
+                original(path,data,mode)
+                if path==target:raise KeyboardInterrupt()
+            with patch.object(self.m,'atomic',side_effect=crash):
+                with self.assertRaises(KeyboardInterrupt):self.install(digest)
+            for name in ('collect-publish.sh','project-paper-observability-deploy','run-container.sh'):
+                body=Path('/qa-source/deploy/observability',name).read_text()
+                for prefix in ('/usr/local/sbin','/var/lib/project-paper-observability','/run/lock','/etc/project-paper-observability'):
+                    body=body.replace(prefix,str(self.root/prefix.lstrip('/')))
+                command=['bash','-c',body]
+                if name=='project-paper-observability-deploy':
+                    command+=['qa','--image','ghcr.io/devitolo/paper-agent/observability:qa@sha256:'+'a'*64,'--target','mini-production']
+                env={'PATH':os.environ['PATH'],'PROJECT_PAPER_RESOURCE_ENVIRONMENT':'mini-production','PROJECT_PAPER_RESOURCE_ENV_FILE':'/nonexistent'}
+                result=subprocess.run(command,env=env,capture_output=True,text=True,timeout=5)
+                self.assertEqual(result.returncode,75,(index,name,result.stderr))
+            self.m.recover(self.root,check_health=lambda *_:None)
+            self.unchanged()
+
+    def test_success_history_is_bounded_and_failure_evidence_survives(self):
+        for index in range(25):
+            path=self.control/('host-package-'+str(index));path.mkdir()
+            (path/'result.json').write_text('{"result":"ready"}')
+        failure=self.control/'host-package-failed';failure.mkdir()
+        (failure/'result.json').write_text('{"result":"rolled_back"}')
+        self.m.prune_successes(self.control,'none')
+        self.assertTrue(failure.exists())
+        self.assertEqual(len(list(self.control.glob('host-package-*'))),21)
 
     def test_older_release_rejected(self):
         digest,_=self.bundle();self.install(digest)

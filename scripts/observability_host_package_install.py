@@ -90,6 +90,14 @@ def trusted(path, *, directory=False):
             raise ValueError('regular file required')
 
 
+def sync_directory(path):
+    fd = os.open(path, os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def atomic(path, data, mode):
     fd, temporary = tempfile.mkstemp(prefix='.package-', dir=path.parent)
     try:
@@ -135,7 +143,11 @@ def snapshot_inputs(root, bundle):
     # Open every component with dir_fd + NOFOLLOW: a runner may replace inbox
     # files but cannot redirect root reads outside the fixed inbox.
     inbox = root / INCOMING.lstrip('/')
-    trusted(inbox, directory=True)
+    trusted(inbox.parent, directory=True)
+    info = inbox.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+            or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX)):
+        raise ValueError('untrusted incoming directory')
     parent = os.open(inbox, os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         directory = os.open(bundle, os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
@@ -206,7 +218,8 @@ def verify(root, bundle, source_sha, inputs, staging, now):
                     or member.size > 131072 or member.mode != 0o755 or member.uid != 0 or member.gid != 0):
                 raise ValueError('invalid archive member')
             data = package.extractfile(member).read(131073)
-            if len(data) > 131072 or sha(data) != expected[member.name]:
+            if (len(data) > 131072 or sha(data) != expected[member.name]
+                    or b'host-package-pending-guard-v1' not in data):
                 raise ValueError('file digest mismatch')
             content[member.name] = data
     if set(content) != set(expected):
@@ -216,6 +229,7 @@ def verify(root, bundle, source_sha, inputs, staging, now):
 
 def health(root, started):
     env = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin',
+           'PROJECT_PAPER_HOST_PACKAGE_QUALIFY': '1',
            'PROJECT_PAPER_RESOURCE_ENV_FILE': '/etc/project-paper-observability/mini-production/mini-production.env'}
     # Collector-only qualification. Never force publication during host updates.
     subprocess.run([str(root / 'usr/local/sbin/project-paper-observability-container')],
@@ -265,7 +279,13 @@ def install(root, bundle, source_sha, *, check_health=health, now=None):
             if (cron.count(b'*/15 * * * * root ') != 1
                     or cron.count(b'/usr/local/sbin/project-paper-observability-collect-publish') != 1):
                 raise ValueError('combined cron prerequisite missing')
+            # A trusted bootstrap must install guards in all entrypoints BEFORE
+            # this installer is enabled; never create a first mixed-version window.
+            for destination in destinations[:-1]:
+                if b'host-package-pending-guard-v1' not in destination.read_bytes():
+                    raise ValueError('pending guard bootstrap missing')
             transaction = Path(tempfile.mkdtemp(prefix='host-package-', dir=control))
+            sync_directory(control)
             before = []
             for index, destination in enumerate(destinations + [receipt]):
                 if destination.exists():
@@ -288,6 +308,8 @@ def install(root, bundle, source_sha, *, check_health=health, now=None):
                 atomic(receipt, json.dumps(audit, sort_keys=True).encode(), 0o600)
                 atomic(transaction / 'result.json', json.dumps(audit, sort_keys=True).encode(), 0o600)
                 pending.unlink()
+                sync_directory(control)
+                prune_successes(control, transaction.name)
                 return audit
             except Exception:
                 # If restoration fails the durable pending marker remains and all
@@ -303,7 +325,39 @@ def install(root, bundle, source_sha, *, check_health=health, now=None):
                         atomic(destination, data, item['mode'])
                 atomic(transaction / 'result.json', b'{"result":"rolled_back"}', 0o600)
                 pending.unlink()
+                sync_directory(control)
                 raise
+
+
+def prune_successes(control, current):
+    """Keep 20 successful transactions; never prune failures or pending evidence."""
+    candidates = []
+    try:
+        for path in control.glob('host-package-*'):
+            trusted(path, directory=True)
+            result = path / 'result.json'
+            if not result.exists():
+                continue
+            trusted(result)
+            if decode(result.read_bytes()).get('result') == 'ready':
+                candidates.append(path)
+        older = sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)[20:]
+        for path in older:
+            if path.name == current:
+                continue
+            children = list(path.iterdir())
+            if any(not re.fullmatch(r'[0-4]\.before|transaction\.json|result\.json', child.name) for child in children):
+                continue
+            for child in children:
+                trusted(child)
+            for child in children:
+                child.unlink()
+            path.rmdir()
+        sync_directory(control)
+    except (OSError, ValueError):
+        # Pruning cannot invalidate a committed healthy transaction. Failed or
+        # unfamiliar evidence stays available for administrative inspection.
+        return
 
 
 def recover(root, *, check_health=health):
@@ -355,6 +409,7 @@ def recover(root, *, check_health=health):
         check_health(root, time.time())
         atomic(transaction / 'result.json', b'{"result":"recovered"}', 0o600)
         pending.unlink()
+        sync_directory(control)
         return {'result': 'recovered', 'target': TARGET, 'transaction': name}
 
 

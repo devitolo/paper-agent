@@ -20,7 +20,10 @@ Reference: https://cli.github.com/manual/gh_attestation_verify
 
 The runner stages three bounded files under the fixed root-owned incoming
 parent `/var/lib/project-paper-observability/mini-production-incoming/<sha256>`.
-The bundle directory may be runner-owned. Directory-relative NOFOLLOW opens
+The incoming parent is root-owned with a sticky group-writable mode (1770,
+group devitolo) provisioned by the administrator so the runner can create
+bundles; its ancestors must not be writable. The bundle directory may be
+runner-owned. Directory-relative NOFOLLOW opens
 snapshot regular-file bytes; no tar extraction is performed. Root-owned staging
 holds the snapshot during verification. The manifest is not trusted until its
 own attestation passes. Strict schema, target, source commit, timestamps,
@@ -56,3 +59,15 @@ verifier binary, incoming parent and narrow sudo rule must first be provisioned
 through an independently authorized administrative mechanism. Neither a runner
 script nor Docker host mounts may bootstrap that authority. The existing
 collect-publish cron remains active without this upgrade mechanism.
+
+SRE crash review: the trusted bootstrap must install pending guards in the cron
+wrapper, collector launcher and image-only deployment helper before enabling the
+package installer. Both existing and packaged entrypoints require guard version
+v1. While pending, scheduled runs and image deployments refuse with exit 75.
+The fixed installer uses an explicit clean environment for collector-only health
+qualification; only that root-controlled invocation sets the qualification flag.
+The narrow sudo rule has no SETENV permission. Recovery uses the same locks.
+Crash-after-each-file-replacement tests execute the entrypoint guards and verify
+refusal until recovery completes. Successful audit history is bounded to 20
+transactions; failed and pending evidence is never pruned. Control-directory
+fsync makes transaction creation and pending-marker removal durable.

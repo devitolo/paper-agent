@@ -22,6 +22,9 @@ exec 9>/run/lock/project-paper-observability-deploy.lock
 /usr/bin/flock -n 9 || { echo 'observability deployment already running' >&2; exit 75; }
 exec 8>/run/lock/project-paper-observability.lock
 /usr/bin/flock -n 8 || { echo 'collector is running; deployment refused' >&2; exit 75; }
+# host-package-pending-guard-v1 (both locks held)
+pending=/var/lib/project-paper-observability/$target-control/HOST-PACKAGE-PENDING.json
+[[ ! -e $pending && ! -L $pending ]] || { echo 'host package recovery pending' >&2; exit 75; }
 config_dir=/etc/project-paper-observability/$target
 state=/var/lib/project-paper-observability/$target
 export_dir=/var/lib/project-paper-observability/${target}-export
