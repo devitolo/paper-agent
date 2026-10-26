@@ -166,14 +166,13 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         pass
     current_reference = reference or now()
     end = aligned_end(current_reference)
-    if current_reference > end:
-        end = end.replace(minute=end.minute + 15) if end.minute < 45 else end.replace(hour=end.hour + 1, minute=0)
+    effective_end = end.timestamp() + 300
     start = end.timestamp() - 15 * 60
     window_records = []
     for row in records:
         try:
             observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
-            if start < observed.timestamp() <= end.timestamp() and observed.timestamp() <= (reference or now()).timestamp() + 300:
+            if start < observed.timestamp() <= effective_end and observed.timestamp() <= current_reference.timestamp() + 300:
                 window_records.append(row)
         except (TypeError, ValueError):
             continue
@@ -236,7 +235,7 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         except (KeyError, TypeError, ValueError):
             continue
         left = max(start, observed - float(seconds))
-        right = min(end.timestamp(), observed)
+        right = min(effective_end, observed)
         if right > left:
             intervals.append((left, right))
     intervals.sort()
