@@ -1,0 +1,2 @@
+# Installed by host provisioning; keep the runner identity explicit.
+paper-deploy ALL=(root) NOPASSWD: /usr/local/sbin/project-paper-observability-deploy *

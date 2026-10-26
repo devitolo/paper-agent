@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME:-observability-${GITHUB_SHA}}"
           archive="project-paper-observability-${tag}.tar.gz"
-          tar -czf "$archive" scripts/host_resource_collector.py deploy/observability/Dockerfile deploy/observability/entrypoint.sh deploy/observability/run-container.sh deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/recovery-common.sh deploy/observability/cron.example docs/mini-resource-collector-operations.md
+          tar -czf "$archive" scripts/host_resource_collector.py deploy/observability/Dockerfile deploy/observability/entrypoint.sh deploy/observability/run-container.sh deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/recovery-common.sh deploy/observability/cron.example deploy/observability/project-paper-observability-deploy deploy/observability/sudoers.project-paper-observability docs/mini-resource-collector-operations.md
           sha=$(sha256sum "$archive" | cut -d' ' -f1)
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
@@ -141,25 +141,5 @@ jobs:
             *) echo 'invalid target tag' >&2; exit 64 ;;
           esac
           export target
-          transaction_started=0
-          rollback() { [[ "$transaction_started" -eq 1 ]] && sudo -n env PROJECT_PAPER_OBSERVABILITY_TARGET="$target" bash deploy/observability/remove_container_cron.sh --target="$target" || true; }
-          trap rollback ERR
           image='${{ needs.package.outputs.image }}@${{ needs.package.outputs.image_digest }}'
-          sudo -n env PROJECT_PAPER_OBSERVABILITY_IMAGE="$image" PROJECT_PAPER_OBSERVABILITY_TARGET="$target" bash deploy/observability/install_container_cron.sh --apply --target="$target"
-          transaction_started=1
-          test -f "/etc/cron.d/project-paper-observability-$target"
-          test -f "/var/lib/project-paper-observability/${target}-export/INSTALL-RECEIPT"
-          sudo -n env PROJECT_PAPER_OBSERVABILITY_TARGET="$target" /usr/local/sbin/project-paper-observability-container
-          test -f "/var/lib/project-paper-observability/${target}-export/status.json"
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          import os
-          target=os.environ['target']
-          value=json.loads(Path(f'/var/lib/project-paper-observability/{target}-export/status.json').read_text())
-          assert value['schema'] == 'project-paper.resource-status.v1'
-          assert value['environment'] == target
-          assert value['scope'] == 'host'
-          print('collector_status_schema_ok=yes')
-          PY
-          echo 'Installation complete; verify sample and complete UTC window before enabling UI consumption.'
+          sudo -n /usr/local/sbin/project-paper-observability-deploy --package-dir /tmp/project-paper-observability-extracted --image "$image" --target "$target"
