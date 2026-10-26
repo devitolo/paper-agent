@@ -14,7 +14,7 @@ FUTURE_SKEW_SECONDS = 300
 
 
 def _safe_status(value: Any) -> bool:
-    sensitive = ("secret", "token", "password", "credential", "api_key", "private_key")
+    sensitive = ("secret", "token", "password", "credential", "api_key", "private_key", "authorization", "cookie", "environment_dump")
     def walk(node: Any, key: str = "") -> bool:
         if any(part in key.lower() for part in sensitive):
             return False
@@ -28,13 +28,36 @@ def _safe_status(value: Any) -> bool:
     if not isinstance(value, dict) or not walk(value):
         return False
     for key in ("cpu", "memory", "latest", "containers", "disk"):
-        if key in value and not isinstance(value[key], dict):
+        if key in value and value[key] is not None and not isinstance(value[key], dict):
             return False
     cpu = value.get("cpu")
     if isinstance(cpu, dict):
         for key in ("average_percent", "peak_sustained_5m_percent", "max_one_minute_percent", "utilization_percent"):
-            if key in cpu and (not isinstance(cpu[key], (int, float)) or not math.isfinite(float(cpu[key]))):
+            if key in cpu and cpu[key] is not None:
+                if isinstance(cpu[key], bool) or not isinstance(cpu[key], (int, float)):
+                    return False
+                try:
+                    if not math.isfinite(float(cpu[key])):
+                        return False
+                except (OverflowError, ValueError):
+                    return False
+    for container in (value.get("latest", {}).get("disk"), value.get("disk")):
+        if container is None:
+            continue
+        if not isinstance(container, dict):
+            return False
+        for key in ("capacity_bytes", "available_bytes"):
+            if key in container and (isinstance(container[key], bool) or not isinstance(container[key], int) or container[key] < 0):
                 return False
+        for key in ("used_percent", "inode_used_percent"):
+            if key in container and container[key] is not None:
+                if isinstance(container[key], bool) or not isinstance(container[key], (int, float)):
+                    return False
+                try:
+                    if not math.isfinite(float(container[key])) or not 0 <= float(container[key]) <= 100:
+                        return False
+                except (OverflowError, ValueError):
+                    return False
     return True
 
 
