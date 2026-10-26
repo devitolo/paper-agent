@@ -19,6 +19,7 @@ fi
 # or put the HMAC secret in host process arguments.
 "${compose[@]}" exec -T app env PAPER_AGENT_SYNC_ENABLED=1 \
   PAPER_AGENT_SYNC_EXPLICIT_PRODUCTION=1 \
+  PAPER_AGENT_ROUTINE_SYNC="${PAPER_AGENT_ROUTINE_SYNC:-0}" \
   PAPER_AGENT_SYNC_PRODUCER="${PAPER_AGENT_SYNC_PRODUCER:-mini-production}" \
   PAPER_AGENT_SYNC_ENVIRONMENT="${PAPER_AGENT_SYNC_ENVIRONMENT:-production}" \
   python -m paper_agents.whole_cycle_exchange "$1" \

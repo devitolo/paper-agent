@@ -142,12 +142,18 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertNotIn("scripts/openalex_pipeline.sh", template)
         self.assertNotIn("scripts/nightly_pipeline.sh", template)
         self.assertNotIn("scripts/semantic_scholar_pipeline.sh", template)
+        self.assertIn("PAPER_AGENT_ROUTINE_SYNC=0", (ROOT / "deploy/mini-migration.env.example").read_text())
         update = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         self.assertIn('python3 - "$RELEASE_DIR/crontab.current" "$RELEASE_DIR/crontab.next" "$OVERLAY" "$ENV_FILE" "$DEPLOY_LOCK_FILE"', update)
         self.assertIn('PAPER_MIGRATION_ENV_FILE={env_file}', update)
         self.assertIn('PAPER_MIGRATION_DEPLOY_LOCK_FILE={deploy_lock_file}', update)
         self.assertIn('Missing or invalid PAPER_AGENT_SYNC_SHARED_SECRET in production env file', update)
         self.assertIn("verification_zenml_cron", update)
+
+    def test_routine_sync_is_explicitly_passed_to_app_and_defaults_off(self):
+        script = (ROOT / "scripts/mini_sync_exchange.sh").read_text()
+        self.assertIn('PAPER_AGENT_ROUTINE_SYNC="${PAPER_AGENT_ROUTINE_SYNC:-0}"', script)
+        self.assertIn("PAPER_AGENT_ROUTINE_SYNC=0", (ROOT / "deploy/mini-migration.env.example").read_text())
 
     def test_release_scripts_are_shell_syntax_valid(self):
         for name in (

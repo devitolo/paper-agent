@@ -1,6 +1,8 @@
 # Daily Mini exchange (implementation awaiting production review)
 
-The default remains off. No cron installation or deployment is part of this change.
+The default remains off. Set `PAPER_AGENT_ROUTINE_SYNC=1` only after the routine
+contract has been qualified; otherwise the legacy SQLite recovery pull remains in
+use. No cron installation or deployment is part of this change.
 The host wrapper runs `mini_sync_exchange.sh pull`, the existing OpenAlex, arXiv,
 Semantic Scholar, CORE and profile jobs, then `mini_sync_exchange.sh push` when
 both explicit activation flags are provisioned. The helper uses the same Compose
@@ -12,6 +14,10 @@ host requires an HTTPS origin, `PAPER_AGENT_SYNC_ENABLED=1` and
 `PAPER_AGENT_SYNC_EXPLICIT_PRODUCTION=1`. The CLI enforces activation independently.
 The wrapper holds the shared deploy lock throughout an enabled cycle. Each
 exchange operation takes the existing runtime and exclusive scheduled-job lease.
+The host helper passes the routine flag explicitly into the app container, so a
+host setting cannot be mistaken for an app setting. Enabling routine exchange is
+a separate reviewed environment change and does not alter cron timing or job
+ownership.
 
 ## Restore ownership
 

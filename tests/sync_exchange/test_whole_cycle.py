@@ -197,6 +197,11 @@ sys.exit(subprocess.call(args))
         self.assertNotEqual(result.returncode,0)
         self.assertFalse(self.state.exists())
 
+    def test_routine_flag_is_passed_into_app_container_and_defaults_off(self):
+        self.shell('pull')
+        argv = json.loads((self.root/'docker-args.jsonl').read_text().splitlines()[0])
+        self.assertIn('PAPER_AGENT_ROUTINE_SYNC=0', argv)
+
     def test_malformed_batch_rejected_without_database_writes(self):
         self.shell('pull'); self.stages()
         from paper_agents.sync_worker import request
