@@ -5,6 +5,13 @@ from paper routine sync, discovery, the application SQLite database, and the
 collector's network-isolated container. The network-isolated collector remains
 unchanged. A separate bounded publisher reads its sanitized export.
 
+Implementation scope update: the backend publisher/HTTP ingest/atomic storage
+preview is implemented behind default-off flags. Per the current coordination
+scope, UI integration and independent tester review are deferred. The Health
+section below is the proposed consumer contract, not an enabled application
+feature. See observability-transport-operations.md for manual rollout gates and
+current limits, including the optional event-file input without a job adapter.
+
 ## Endpoint and activation
 
 AWS exposes `POST /observability/v1/mini-status` only when

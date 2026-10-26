@@ -251,6 +251,10 @@ def make_handler(db_path: Path) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/observability/v1/mini-status":
+                from paper_agents.observability_transport import handle_post
+                handle_post(self)
+                return
             if parsed.path in {"/sync/results", "/sync/profile-proposals"}:
                 raw_length = self.headers.get("Content-Length", "")
                 if not raw_length.isdecimal() or self.headers.get("Transfer-Encoding"):
