@@ -139,7 +139,7 @@ def locks(root):
             os.close(fd)
 
 
-def snapshot_inputs(root, bundle):
+def snapshot_inputs(root, bundle, source_sha):
     # Open every component with dir_fd + NOFOLLOW: a runner may replace inbox
     # files but cannot redirect root reads outside the fixed inbox.
     inbox = root / INCOMING.lstrip('/')
@@ -150,7 +150,7 @@ def snapshot_inputs(root, bundle):
         raise ValueError('untrusted incoming directory')
     parent = os.open(inbox, os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        directory = os.open(bundle, os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        directory = os.open(bundle + '-' + source_sha, os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
         try:
             result = []
             for name, size in (('manifest.json', 16384), ('attestation.jsonl', 524288), ('artifact.tar', LIMIT)):
@@ -261,7 +261,7 @@ def install(root, bundle, source_sha, *, check_health=health, now=None):
             raise ValueError('pending transaction requires trusted recovery')
         with tempfile.TemporaryDirectory(prefix='package-verify-', dir=control) as directory:
             stage = Path(directory)
-            manifest, files = verify(root, bundle, source_sha, snapshot_inputs(root, bundle), stage, now)
+            manifest, files = verify(root, bundle, source_sha, snapshot_inputs(root, bundle, source_sha), stage, now)
             if receipt.exists() or receipt.is_symlink():
                 trusted(receipt)
                 if stat.S_IMODE(receipt.stat().st_mode) != 0o600:
@@ -284,6 +284,10 @@ def install(root, bundle, source_sha, *, check_health=health, now=None):
             for destination in destinations[:-1]:
                 if b'host-package-pending-guard-v1' not in destination.read_bytes():
                     raise ValueError('pending guard bootstrap missing')
+            if receipt.exists() and all((root / FILES[name].lstrip('/')).read_bytes() == data for name, data in files.items()):
+                previous = decode(receipt.read_bytes())
+                if previous.get('artifact_sha256') == bundle and previous.get('result') == 'ready':
+                    return {**previous, 'result': 'already_ready'}
             transaction = Path(tempfile.mkdtemp(prefix='host-package-', dir=control))
             sync_directory(control)
             before = []

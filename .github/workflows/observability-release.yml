@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - name: Validate standalone package
         run: |
-          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container tests.test_observability_aws_p1 tests.test_observability_collect_publish tests.test_observability_package -v
+          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container tests.test_observability_aws_p1 tests.test_observability_collect_publish tests.test_observability_package tests.test_observability_host_package_build -v
           bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/observability/*.sh
           test -s deploy/observability/Dockerfile
           test -s deploy/observability/entrypoint.sh
@@ -38,11 +38,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     outputs:
       archive: ${{ steps.archive.outputs.archive }}
       sha256: ${{ steps.archive.outputs.sha256 }}
       image: ${{ steps.image.outputs.image }}
       image_digest: ${{ steps.image.outputs.digest }}
+      host_digest: ${{ steps.host.outputs.digest }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -60,6 +63,25 @@ jobs:
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
           printf 'package=%s\nsha256=%s\nrevision=%s\n' "$archive" "$sha" "$GITHUB_SHA" > observability-release-evidence.txt
+      - id: host
+        name: Build bounded Mini host package
+        if: github.ref_name == 'observability-mini'
+        run: |
+          set -euo pipefail
+          digest=$(python3 scripts/build_observability_host_package.py --source-sha "$GITHUB_SHA" --output-directory host-package)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - id: attest_host
+        if: github.ref_name == 'observability-mini'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: |
+            host-package/artifact.tar
+            host-package/manifest.json
+      - name: Preserve host attestation bundle
+        if: github.ref_name == 'observability-mini'
+        env:
+          BUNDLE_PATH: ${{ steps.attest_host.outputs.bundle-path }}
+        run: cp "$BUNDLE_PATH" host-package/attestation.jsonl
       - id: image
         name: Build and publish immutable AMD64 image
         shell: bash
@@ -81,6 +103,7 @@ jobs:
           path: |
             ${{ steps.archive.outputs.archive }}
             observability-release-evidence.txt
+            host-package/
           if-no-files-found: error
           retention-days: 14
 
@@ -122,6 +145,36 @@ jobs:
           command -v flock >/dev/null
           df -Pk /var/lib /opt /etc
           free -b || true
+      - name: Require independently provisioned Mini host upgrade capability
+        if: github.ref_name == 'observability-mini'
+        run: |
+          set -euo pipefail
+          for path in /usr/local/sbin/project-paper-observability-package-install /usr/local/libexec/project-paper-observability/gh; do
+            test -f "$path" && test ! -L "$path" && test -x "$path"
+            test "$(stat -c %u "$path")" = 0
+            mode=$(stat -c %a "$path")
+            (( (8#$mode & 022) == 0 ))
+          done
+          test -d /var/lib/project-paper-observability/mini-production-incoming
+      - name: Upgrade Mini host code through fixed attestation verifier
+        if: github.ref_name == 'observability-mini'
+        env:
+          HOST_DIGEST: ${{ needs.package.outputs.host_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$HOST_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          package=/tmp/project-paper-observability-package/host-package
+          test "$(sha256sum "$package/artifact.tar" | cut -d' ' -f1)" = "$HOST_DIGEST"
+          inbox=/var/lib/project-paper-observability/mini-production-incoming
+          staged=$(mktemp -d "$inbox/.upload-XXXXXXXX")
+          trap 'rm -rf -- "$staged"' EXIT
+          install -m 0600 "$package/artifact.tar" "$package/manifest.json" "$package/attestation.jsonl" "$staged/"
+          # Never overwrite an existing inbox: a retained bundle requires audit.
+          test ! -e "$inbox/$HOST_DIGEST-$GITHUB_SHA" && test ! -L "$inbox/$HOST_DIGEST-$GITHUB_SHA"
+          mv -T "$staged" "$inbox/$HOST_DIGEST-$GITHUB_SHA"
+          trap - EXIT
+          sudo -n /usr/local/sbin/project-paper-observability-package-install --target mini-production --bundle "$HOST_DIGEST" --source-sha "$GITHUB_SHA"
+          rm -rf -- "$inbox/$HOST_DIGEST-$GITHUB_SHA"
       - name: Deploy package through host installer
         shell: bash
         run: |

@@ -19,7 +19,7 @@ read or managed. A root-provisioned GitHub CLI verifier is required at
 Reference: https://cli.github.com/manual/gh_attestation_verify
 
 The runner stages three bounded files under the fixed root-owned incoming
-parent `/var/lib/project-paper-observability/mini-production-incoming/<sha256>`.
+parent `/var/lib/project-paper-observability/mini-production-incoming/<sha256>-<source-sha>`.
 The incoming parent is root-owned with a sticky group-writable mode (1770,
 group devitolo) provisioned by the administrator so the runner can create
 bundles; its ancestors must not be writable. The bundle directory may be
@@ -84,3 +84,31 @@ The repository visibility API reports public; artifact-attestation eligibility i
 therefore not blocked by private-repository plan restrictions. No repository
 visibility setting was changed. A real hosted positive/negative attestation test
 is still required; fixture verification is not a replacement.
+
+
+The inbox entry includes both digest and source commit so unchanged host content
+can be attested by a later approved release without overwriting a prior bundle.
+Once a signed package is verified, matching installed files plus a successful
+receipt make the operation a no-op; image-only releases do not rewrite or
+requalify unchanged host code. The candidate release workflow removes its own
+inbox directory only after a successful fixed-installer result. Failed inputs
+remain for audit. This production workflow candidate is not merged or activated.
+
+## Hosted verification evidence
+
+Run `40404108157` succeeded on source
+`c752a795c6e20a5d5e811e55c70cc81a8c8b7af9` using GitHub CLI 2.102.0.
+Artifact SHA256 was
+`b9e497d6c464b1576d34e3f9f88891b3ed34067946da548d83a4b5db936abd2a`.
+Both archive and manifest verified; wrong source commit, tampered bytes and the
+test workflow claiming production identity were rejected. This workflow has no
+deployment job. Its branch identity is intentionally rejected by the production
+installer's exact tag/workflow certificate policy.
+
+An additional local verification of that real downloaded bundle succeeded with
+an empty HOME/GH_CONFIG_DIR and a clean environment without GH_TOKEN, proving
+that this public bundle can be verified without root reading runner credentials.
+The initial run `40403910614` exposed mutually exclusive CLI selectors. The fix
+retains exact certificate identity (which pins workflow and ref) and removes the
+redundant `--signer-workflow` flag. The issuer, repository, source/signer commit,
+source ref, predicate and hosted-runner checks remain enforced.

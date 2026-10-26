@@ -69,7 +69,7 @@ assert digest==claims[subject.name]
         archive = data.getvalue();digest=self.m.sha(archive)
         manifest={'schema':self.m.SCHEMA,'target':'mini-production','source_sha':'a'*40,'artifact_sha256':digest,'installer_version':1,'created_at':self.m.datetime.fromtimestamp(self.now,self.m.timezone.utc).isoformat(),'files':[{'path':name,'sha256':self.m.sha(body),'mode':'0755','owner':'root:root'} for name,body in self.files.items()]}
         if change:change(manifest)
-        folder=self.root/self.m.INCOMING.lstrip('/')/digest
+        folder=self.root/self.m.INCOMING.lstrip('/')/(digest+'-'+'a'*40)
         folder.mkdir(exist_ok=True)
         (folder/'artifact.tar').write_bytes(archive)
         (folder/'manifest.json').write_text(json.dumps(manifest,sort_keys=True))
@@ -93,6 +93,15 @@ assert digest==claims[subject.name]
             self.assertEqual(path.stat().st_mode&0o777,0o755)
         self.assertTrue((self.control/'HOST-PACKAGE-RECEIPT.json').exists())
         self.assertFalse((self.control/'HOST-PACKAGE-PENDING.json').exists())
+
+    def test_unchanged_signed_package_does_not_rewrite_or_requalify(self):
+        digest,_=self.bundle();self.install(digest)
+        receipt=self.control/'HOST-PACKAGE-RECEIPT.json'
+        before=receipt.read_bytes()
+        def unexpected(*_):raise RuntimeError('must not run qualification')
+        result=self.install(digest,health=unexpected)
+        self.assertEqual(result['result'],'already_ready')
+        self.assertEqual(receipt.read_bytes(),before)
 
     def test_signature_tamper_rejected_before_mutation(self):
         digest,folder=self.bundle();(folder/'manifest.json').write_text('{}')
