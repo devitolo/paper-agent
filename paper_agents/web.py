@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.resource_status import load_resource_status
+from paper_agents.observability_transport import health_status as mini_telemetry_health
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.pdf_links import looks_like_direct_pdf_url
 from paper_agents.topic_inventory import scout_topic_inventory
@@ -1502,28 +1503,48 @@ def render_health_jobs(summary: dict[str, Any]) -> str:
     return '<section class="health-section"><div class="section-heading"><div><h2>Jobs</h2><p>Scheduled operations, with processing and AWS delivery shown separately.</p></div><span class="health-note">Live events · refresh the page to update</span></div>' + render_health_table("Operational job history", rows, ["recorded_at", "job", "processing", "delivery", "message"]) + '</section>'
 
 
+def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
+    """Presentation of validated received telemetry; stale numbers stay hidden."""
+    freshness = status.get("freshness", "unavailable")
+    rows = {
+        "Source": "Mini",
+        "Mini telemetry freshness": freshness,
+        "Observed at (UTC)": status.get("observed_at") or "unknown",
+        "Received by AWS (UTC)": status.get("received_at") or "unknown",
+    }
+    if freshness != "fresh":
+        for label in ("Mini CPU (15 minutes)", "Mini memory", "Mini disk", "Collection status", "Publish status"):
+            rows[label] = f"placeholder · {freshness}"
+        rows["Telemetry error"] = status.get("error") or "Mini telemetry is unavailable."
+        return rows
+    def amount(value: Any, unit: str = "%") -> str:
+        return "unavailable" if value is None else f"{value:g}{unit}"
+    def gib(value: Any) -> str:
+        return "unavailable" if value is None else f"{value / (1024 ** 3):.2f} GiB"
+    cpu, memory = status["cpu"], status["memory"]
+    disk = status["latest"].get("disk") or {}
+    rows.update({
+        "Mini CPU (15 minutes)": f"{amount(cpu.get('average_percent'))} average · {amount(cpu.get('max_observed_percent'))} maximum observed",
+        "Mini memory": f"{gib(memory.get('available_average_bytes'))} available average · {gib(memory.get('available_min_bytes'))} minimum available",
+        "Mini disk": f"{amount(disk.get('used_percent'))} used · {gib(disk.get('available_bytes'))} available · {gib(disk.get('capacity_bytes'))} capacity",
+        "Collection status": "complete · 15-minute window" if status["window"]["complete"] else f"warming · {status['coverage_seconds']}/900 seconds covered · {status['window']['sample_gaps']} gaps",
+        "Publish status": "last delivery accepted by AWS · subsequent attempts unknown",
+        "Mini container": status["latest"]["containers"]["state"],
+    })
+    return rows
+
+
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
     sync = sync_health_snapshot()
-    mini_status = load_resource_status(Path(os.environ.get("PAPER_AGENT_MINI_RESOURCE_STATUS_FILE", os.environ.get("PAPER_AGENT_RESOURCE_STATUS_FILE", "data/resource-status.json"))))
+    mini_status = mini_telemetry_health()
     aws_status = load_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
-    def metric(status: dict[str, Any], key: str, suffix: str = "") -> str:
-        value = status.get(key)
-        return f"{value}{suffix} observed" if value is not None else f"placeholder · {status.get('state', 'unknown')} unavailable"
-    mini_cpu = mini_status.get("cpu", {})
-    mini_memory = mini_status.get("memory", {})
     aws_cpu = aws_status.get("cpu", {})
     aws_memory = aws_status.get("memory", {})
     database = {
         "Database integrity": str(summary["db"]["integrity"]),
         "Database path": str(summary["db"]["path"]),
     }
-    mini = {
-        "Mini CPU": metric(mini_status, "cpu") if not mini_cpu.get("average_percent") else f"{mini_cpu['average_percent']}% avg · {mini_cpu.get('peak_sustained_5m_percent', 'unknown')}% peak sustained",
-        "Mini memory": metric(mini_status, "memory") if not mini_memory.get("available_average_bytes") else f"{mini_memory['available_average_bytes']} bytes available avg",
-        "Mini disk": "observed · see collector snapshot" if mini_status.get("disk") else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
-        "Mini container": str(mini_status.get("containers", {}).get("state", mini_status.get("state", "unknown"))) if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
-        "Mini telemetry freshness": f"{mini_status.get('state', 'unknown')} · {mini_status.get('age_seconds') if mini_status.get('age_seconds') is not None else 'unknown'}s old" if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} · age unknown",
-    }
+    mini = mini_telemetry_rows(mini_status)
     aws = {
         "AWS delivery state": sync["state"],
         "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
@@ -1531,8 +1552,8 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
         "AWS disk / service": "observed · see collector snapshot" if aws_status.get("disk") else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
         "AWS telemetry freshness": f"{aws_status.get('state', 'unknown')} · {aws_status.get('age_seconds') if aws_status.get('age_seconds') is not None else 'unknown'}s old" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} · age unknown",
     }
-    badge = "SANITIZED COLLECTOR DATA" if mini_status.get("state") == "observed" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · COLLECTOR NOT CONNECTED"
-    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked observed, stale, unknown, or unavailable. The web process only reads the status files.</p></section>'
+    badge = "SANITIZED COLLECTOR DATA" if mini_status.get("freshness") == "fresh" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · NO FRESH OBSERVATIONS"
+    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked fresh, stale, unknown, or unavailable. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>'
 
 
 def render_health_job_charts(summary: dict[str, Any]) -> str:

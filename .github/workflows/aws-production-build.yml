@@ -29,7 +29,7 @@ jobs:
           python3 -m unittest discover -s tests/aws_build -v
           python3 -m unittest discover -s tests/aws_deploy -v
           python3 -m unittest tests.sync_exchange.test_http_serving -v
-          python3 -m unittest tests.test_observability_transport -v
+          python3 -m unittest tests.test_observability_transport tests.test_health_mini_telemetry -v
 
   build:
     if: github.ref == 'refs/heads/aws-production'
