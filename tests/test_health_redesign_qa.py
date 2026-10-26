@@ -130,7 +130,7 @@ class HealthRedesignQA(unittest.TestCase):
         self.assertNotIn('Operational job history', [t['heading'] for t in dom.tables])
         self.assertIn('PLACEHOLDER TELEMETRY', html)
         for name, value in dom.definitions:
-            if name.startswith(('Mini ', 'Aws Cpu', 'Aws Disk', 'Telemetry Freshness')):
+            if name.startswith(('Mini Cpu', 'Mini Memory', 'Mini Disk', 'Aws Cpu', 'Aws Disk', 'Telemetry Freshness')):
                 self.assertIn('placeholder', value.lower(), name)
         self.assertEqual(dict(dom.definitions)['Database Integrity'], 'ok')
 
