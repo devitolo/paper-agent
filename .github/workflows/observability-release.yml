@@ -3,8 +3,8 @@ name: Project Paper Observability Release
 on:
   push:
     tags:
-      - 'observability-mini'
-      - 'observability-aws'
+      - 'observability-mini-v*'
+      - 'observability-aws-v*'
   workflow_dispatch:
 
 permissions: {}
@@ -87,10 +87,10 @@ jobs:
 
   deploy:
     needs: package
-    if: needs.package.result == 'success' && github.event_name == 'push' && (github.ref_name == 'observability-mini' || github.ref_name == 'observability-aws')
+    if: needs.package.result == 'success' && github.event_name == 'push' && (startsWith(github.ref_name, 'observability-mini-v') || startsWith(github.ref_name, 'observability-aws-v'))
     environment:
-      name: ${{ github.ref_name == 'observability-mini' && 'observability-mini-production' || 'observability-aws-production' }}
-    runs-on: ${{ github.ref_name == 'observability-mini' && fromJSON('["self-hosted","linux","x64","project-paper-observability-mini-deploy"]') || fromJSON('["self-hosted","linux","x64","project-paper-observability-aws-deploy"]') }}
+      name: ${{ startsWith(github.ref_name, 'observability-mini-v') && 'observability-mini-production' || 'observability-aws-production' }}
+    runs-on: ${{ startsWith(github.ref_name, 'observability-mini-v') && fromJSON('["self-hosted","linux","x64","project-paper-observability-mini-deploy"]') || fromJSON('["self-hosted","linux","x64","project-paper-observability-aws-deploy"]') }}
     timeout-minutes: 20
     permissions: {}
     steps:
@@ -108,9 +108,9 @@ jobs:
           set -euo pipefail
           [[ "$GITHUB_REF_TYPE" = tag ]] || { echo 'observability deploy requires a target-specific tag' >&2; exit 64; }
           case "$GITHUB_REF_NAME" in
-            observability-mini) target=mini-production ;;
-            observability-aws) target=aws-production ;;
-            *) echo 'tag must be exactly observability-mini or observability-aws' >&2; exit 64 ;;
+            observability-mini-v*) target=mini-production ;;
+            observability-aws-v*) target=aws-production ;;
+            *) echo 'tag must be observability-mini-v* or observability-aws-v*' >&2; exit 64 ;;
           esac
           echo "target=$target"
       - name: Check host resources and prerequisites
@@ -136,8 +136,8 @@ jobs:
           tar -xzf "$archive" -C /tmp/project-paper-observability-extracted
           cd /tmp/project-paper-observability-extracted
           case "$GITHUB_REF_NAME" in
-            observability-mini) target=mini-production ;;
-            observability-aws) target=aws-production ;;
+            observability-mini-v*) target=mini-production ;;
+            observability-aws-v*) target=aws-production ;;
             *) echo 'invalid target tag' >&2; exit 64 ;;
           esac
           export target
