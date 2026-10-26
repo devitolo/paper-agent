@@ -54,7 +54,7 @@ behavioral tests and checks archive contents, source hashes and target rejection
 The entrypoint updates the existing Mini cron; it does not add a schedule or
 change application cron jobs. AWS cannot invoke this Mini publication installer.
 
-**Activation boundary:** the currently provisioned passwordless helper accepts
+**General host-code upgrade boundary:** the passwordless helper accepts
 only a collector image and target. It does not install archive contents. Adding
 files to an archive therefore does not activate this change on an existing host.
 The protected deployment must first gain an explicitly reviewed package-install
@@ -63,3 +63,35 @@ via sudo or broaden the runner's sudo permissions. No such capability is install
 by this change. After the wrapper/helper are provisioned, ordinary image releases
 retain collect-then-publish automatically with no manual cron edits. Credentials
 are neither requested nor transmitted by the package.
+
+## Production reconciliation: 2026-10-26
+
+Read-only inspection at 14:01 PDT found that the reviewed installation had
+already been applied at 13:54:11 PDT. The installer actor has not yet been
+established; Architect was asked to reconcile that audit record. Do not repeat
+installation based on the earlier collection-only handoff.
+
+Installed root-owned 0755 wrapper SHA256:
+`effd533529bb0f0db5fadfd212a88079ac36c43b08f068861c1bba68772ff20d`.
+Installed helper SHA256:
+`fcb7b7c60a45f5b64b4294468c6b667a8e571612bbdf209d2109e8ce447ff0db`.
+The existing root cron invokes the combined wrapper every 15 minutes under the
+collector lock. No additional cron or broader sudo permission is required for
+this installed flow. Future image deployments through the existing helper retain
+that combined launcher.
+
+The natural 14:00 PDT run produced Mini observed_at
+`2026-10-26T21:00:07.135024+00:00`; AWS stored the matching observation at
+`2026-10-26T21:00:15.501858+00:00`. Receipt count increased from one to two.
+Stored and independently calculated canonical payload SHA256 both equaled
+`9c49b9b8a845684a3a4d5555f240fefe20bf7d7f2987362007ec4c8430aec430`.
+Producer and status environment were both mini-production. These checks made no
+host changes and did not force collection or publication.
+
+Four additional disposable Linux tests execute the fixed deployment helper:
+repeated Mini image upgrades retain the pipeline; AWS keeps collector-only;
+collection-only installations retain that behavior; writable pipeline wrappers
+are rejected. Qualification uses a synthetic collector and never invokes the
+publisher. Tests use temporary container filesystems, with no production mounts.
+General future host-code upgrades remain a separate capability; successful image
+updates do not imply arbitrary package scripts can execute as root.
