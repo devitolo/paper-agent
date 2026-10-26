@@ -180,7 +180,7 @@ def verify(root, bundle, source_sha, inputs, staging, now):
     for name in ('artifact.tar', 'manifest.json'):
         subprocess.run([str(verifier), 'attestation', 'verify', str(staging / name),
                         '--bundle', str(staging / 'attestation.jsonl'),
-                        '--repo', REPOSITORY, '--signer-workflow', WORKFLOW,
+                        '--repo', REPOSITORY,
                         '--source-digest', source_sha, '--signer-digest', source_sha,
                         '--source-ref', SOURCE_REF, '--deny-self-hosted-runners',
                         '--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',

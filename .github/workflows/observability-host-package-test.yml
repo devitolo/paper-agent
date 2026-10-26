@@ -62,7 +62,6 @@ jobs:
           verify() {
             gh attestation verify "$1" --bundle host-package/attestation.jsonl \
               --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/observability-host-package-test.yml" \
               --source-digest "$2" --signer-digest "$GITHUB_SHA" \
               --source-ref "$GITHUB_REF" --deny-self-hosted-runners \
               --cert-oidc-issuer https://token.actions.githubusercontent.com \

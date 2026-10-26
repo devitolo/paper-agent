@@ -49,7 +49,7 @@ class HostPackageTests(unittest.TestCase):
 import hashlib,json,pathlib,sys
 args=sys.argv[1:]; subject=pathlib.Path(args[2]);bundle=pathlib.Path(args[args.index('--bundle')+1])
 claims=json.loads(bundle.read_bytes());digest=hashlib.sha256(subject.read_bytes()).hexdigest()
-for flag,expected in [('--repo','devitolo/paper-agent'),('--source-ref','refs/tags/observability-mini'),('--source-digest','a'*40),('--signer-digest','a'*40),('--cert-oidc-issuer','https://token.actions.githubusercontent.com'),('--signer-workflow','devitolo/paper-agent/.github/workflows/observability-release.yml')]:
+for flag,expected in [('--repo','devitolo/paper-agent'),('--source-ref','refs/tags/observability-mini'),('--source-digest','a'*40),('--signer-digest','a'*40),('--cert-oidc-issuer','https://token.actions.githubusercontent.com')]:
     assert args[args.index(flag)+1]==expected
 assert '--deny-self-hosted-runners' in args
 assert args[args.index('--cert-identity')+1]=='https://github.com/devitolo/paper-agent/.github/workflows/observability-release.yml@refs/tags/observability-mini'
