@@ -16,6 +16,7 @@ config_dir=/etc/project-paper-observability/$target
 state=/var/lib/project-paper-observability/$target
 export_dir=/var/lib/project-paper-observability/${target}-export
 control=/var/lib/project-paper-observability/${target}-control
+receipt=$control/INSTALL-RECEIPT
 env_path=$config_dir/$target.env
 cron_path=/etc/cron.d/project-paper-observability-$target
 install -d -o root -g root -m 0755 "$config_dir"
@@ -23,11 +24,17 @@ install -d -o 10001 -g 10001 -m 0755 "$export_dir"
 install -d -o 10001 -g 10001 -m 0700 "$state"
 install -d -o root -g root -m 0700 "$control"
 backup=$(mktemp -d "$control/previous-install-XXXXXX")
+backup_ready=0
 rollback() {
   local rc=$?
   trap - EXIT
+  if (( ! backup_ready )); then
+    rm -rf "$backup"
+    exit "$rc"
+  fi
   if [[ -f "$backup/env.previous" ]]; then install -o root -g root -m 0640 "$backup/env.previous" "$env_path"; else rm -f "$env_path"; fi
   if [[ -f "$backup/cron.previous" ]]; then install -o root -g root -m 0644 "$backup/cron.previous" "$cron_path"; else rm -f "$cron_path"; fi
+  if [[ -f "$backup/receipt.previous" ]]; then install -o root -g root -m 0644 "$backup/receipt.previous" "$receipt"; else rm -f "$receipt"; fi
   rm -rf "$backup"
   exit "$rc"
 }
@@ -35,6 +42,8 @@ trap rollback ERR
 [[ ! -L "$env_path" && ! -L "$cron_path" ]] || { echo 'managed path is a symlink' >&2; exit 75; }
 [[ ! -e "$env_path" ]] || cp -p --no-dereference "$env_path" "$backup/env.previous"
 [[ ! -e "$cron_path" ]] || cp -p --no-dereference "$cron_path" "$backup/cron.previous"
+[[ ! -e "$receipt" ]] || cp -p --no-dereference "$receipt" "$backup/receipt.previous"
+backup_ready=1
 cat > "$env_path.new" <<ENV
 PROJECT_PAPER_OBSERVABILITY_IMAGE=$image
 PROJECT_PAPER_RESOURCE_ROOT=$state
@@ -80,8 +89,9 @@ assert path.stat().st_mtime_ns > int(sys.argv[3])
 when=datetime.datetime.fromisoformat(observed.replace('Z','+00:00'))
 assert abs((datetime.datetime.now(datetime.timezone.utc)-when).total_seconds()) <= 300
 PY
-printf 'target=%s\nimage=%s\nconfig=%s\n' "$target" "$image" "$env_path" > "$control/INSTALL-RECEIPT"
-chown root:root "$control/INSTALL-RECEIPT"; chmod 0644 "$control/INSTALL-RECEIPT"
+printf 'target=%s\nimage=%s\nconfig=%s\n' "$target" "$image" "$env_path" > "$receipt.new"
+install -o root -g root -m 0644 "$receipt.new" "$receipt"
+rm -f "$receipt.new"
 rm -rf "$backup"
 trap - ERR
 echo 'observability deployment complete'
