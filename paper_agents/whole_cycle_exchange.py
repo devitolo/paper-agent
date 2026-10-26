@@ -17,7 +17,7 @@ import tempfile
 import uuid
 from urllib.error import HTTPError
 
-from .sync_backup import download_backup, download_routine_snapshot, prune_superseded_backups, validate_backup
+from .sync_backup import download_backup, download_routine_snapshot, validate_backup
 from .sync_exchange import apply_routine_snapshot, encoded, connect_db
 from .sync_worker import atomic_json, lock, request
 
@@ -260,7 +260,6 @@ def main(argv=None):
                 except Exception:
                     shutil.rmtree(backup, ignore_errors=True)
                     raise
-                prune_superseded_backups(a.state_dir/'snapshots', backup)
         else: result=push(a.db_path,a.root,a.state_dir,a.aws_url)
     print(json.dumps(result,sort_keys=True)); return 0
 
