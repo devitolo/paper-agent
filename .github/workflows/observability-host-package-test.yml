@@ -1,0 +1,93 @@
+name: Observability Host Package Attestation Test
+
+on:
+  push:
+    branches:
+      - codex/observability-host-package-upgrade
+    paths:
+      - .github/workflows/observability-host-package-test.yml
+      - scripts/build_observability_host_package.py
+      - scripts/observability_host_package_install.py
+      - tests/test_observability_host_package_linux_qa.py
+      - tests/test_observability_host_package_build.py
+      - deploy/observability/**
+
+permissions: {}
+concurrency:
+  group: observability-host-package-test
+  cancel-in-progress: false
+
+jobs:
+  attest-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Test fixed transaction in disposable Linux
+        run: |
+          docker run --rm --platform linux/amd64 --user 0:0 --network none --read-only \
+            --tmpfs /tmp:rw,nosuid --tmpfs /qa-state:rw,exec,nosuid \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/qa-source,readonly" \
+            -e PAPER_OBSERVABILITY_QA_ISOLATED=1 -e PYTHONDONTWRITEBYTECODE=1 \
+            --entrypoint python3 \
+            python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 \
+            -m unittest discover -s /qa-source/tests -p test_observability_host_package_linux_qa.py -v
+      - name: Build Mini-only test artifact
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_observability_host_package_build -v
+          python3 scripts/build_observability_host_package.py --source-sha "$GITHUB_SHA" --output-directory host-package
+      - id: attest
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: |
+            host-package/artifact.tar
+            host-package/manifest.json
+      - name: Verify real attestations and reject wrong identities and bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION: ${{ steps.attest.outputs.bundle-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$ATTESTATION" host-package/attestation.jsonl
+          gh --version > host-package/verifier-version.txt
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/observability-host-package-test.yml@$GITHUB_REF"
+          verify() {
+            gh attestation verify "$1" --bundle host-package/attestation.jsonl \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/observability-host-package-test.yml" \
+              --source-digest "$2" --signer-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" --deny-self-hosted-runners \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --cert-identity "$3" --predicate-type https://slsa.dev/provenance/v1
+          }
+          verify host-package/artifact.tar "$GITHUB_SHA" "$identity" > host-package/archive-verification.txt 2>&1
+          verify host-package/manifest.json "$GITHUB_SHA" "$identity" > host-package/manifest-verification.txt 2>&1
+          if verify host-package/artifact.tar 0000000000000000000000000000000000000000 "$identity" > host-package/rejected-commit.txt 2>&1; then
+            echo 'wrong commit unexpectedly accepted' >&2; exit 1
+          fi
+          cp host-package/artifact.tar host-package/tampered.tar
+          printf tamper >> host-package/tampered.tar
+          if verify host-package/tampered.tar "$GITHUB_SHA" "$identity" > host-package/rejected-bytes.txt 2>&1; then
+            echo 'tampered artifact unexpectedly accepted' >&2; exit 1
+          fi
+          production_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/observability-release.yml@refs/tags/observability-mini"
+          if verify host-package/artifact.tar "$GITHUB_SHA" "$production_identity" > host-package/rejected-production-identity.txt 2>&1; then
+            echo 'test workflow unexpectedly accepted as production' >&2; exit 1
+          fi
+          rm host-package/tampered.tar
+          printf 'source_sha=%s\npositive=archive,manifest\nnegative=commit,bytes,production-identity\ndeployment=none\n' "$GITHUB_SHA" > host-package/test-evidence.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: host-package-attestation-test-${{ github.sha }}
+          path: host-package/
+          if-no-files-found: error
+          retention-days: 14
