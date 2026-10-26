@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - name: Validate standalone package
         run: |
-          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container -v
+          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container tests.test_observability_aws_p1 -v
           bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/observability/*.sh
           test -s deploy/observability/Dockerfile
           test -s deploy/observability/entrypoint.sh
@@ -85,7 +85,7 @@ jobs:
 
   deploy:
     needs: package
-    if: needs.package.result == 'success' && github.event_name == 'push' && startsWith(github.ref_name, 'observability-v')
+    if: needs.package.result == 'success' && github.event_name == 'push' && (startsWith(github.ref_name, 'observability-mini-v') || startsWith(github.ref_name, 'observability-aws-v'))
     environment:
       name: ${{ startsWith(github.ref_name, 'observability-mini-v') && 'observability-mini-production' || 'observability-aws-production' }}
     runs-on: ${{ startsWith(github.ref_name, 'observability-mini-v') && fromJSON('["self-hosted","linux","x64","project-paper-observability-mini-deploy"]') || fromJSON('["self-hosted","linux","x64","project-paper-observability-aws-deploy"]') }}
@@ -132,27 +132,30 @@ jobs:
           mkdir -p /tmp/project-paper-observability-extracted
           tar -xzf "$archive" -C /tmp/project-paper-observability-extracted
           cd /tmp/project-paper-observability-extracted
-          transaction_started=0
-          rollback() { [[ "$transaction_started" -eq 1 ]] && sudo -n bash deploy/observability/remove_container_cron.sh || true; }
-          trap rollback ERR
-          image='${{ needs.package.outputs.image }}@${{ needs.package.outputs.image_digest }}'
           case "$GITHUB_REF_NAME" in
             observability-mini-v*) target=mini-production ;;
             observability-aws-v*) target=aws-production ;;
             *) echo 'invalid target tag' >&2; exit 64 ;;
           esac
-          sudo -n env PROJECT_PAPER_OBSERVABILITY_IMAGE="$image" bash deploy/observability/install_container_cron.sh --apply --target="$target"
+          export target
+          transaction_started=0
+          rollback() { [[ "$transaction_started" -eq 1 ]] && sudo -n env PROJECT_PAPER_OBSERVABILITY_TARGET="$target" bash deploy/observability/remove_container_cron.sh --target="$target" || true; }
+          trap rollback ERR
+          image='${{ needs.package.outputs.image }}@${{ needs.package.outputs.image_digest }}'
+          sudo -n env PROJECT_PAPER_OBSERVABILITY_IMAGE="$image" PROJECT_PAPER_OBSERVABILITY_TARGET="$target" bash deploy/observability/install_container_cron.sh --apply --target="$target"
           transaction_started=1
-          test -f /etc/cron.d/project-paper-observability-mini-production
-          test -f /var/lib/project-paper-observability/mini-production-export/INSTALL-RECEIPT
-          sudo -n /usr/local/sbin/project-paper-observability-container
-          test -f /var/lib/project-paper-observability/mini-production-export/status.json
+          test -f "/etc/cron.d/project-paper-observability-$target"
+          test -f "/var/lib/project-paper-observability/${target}-export/INSTALL-RECEIPT"
+          sudo -n env PROJECT_PAPER_OBSERVABILITY_TARGET="$target" /usr/local/sbin/project-paper-observability-container
+          test -f "/var/lib/project-paper-observability/${target}-export/status.json"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          value=json.loads(Path('/var/lib/project-paper-observability/mini-production-export/status.json').read_text())
+          import os
+          target=os.environ['target']
+          value=json.loads(Path(f'/var/lib/project-paper-observability/{target}-export/status.json').read_text())
           assert value['schema'] == 'project-paper.resource-status.v1'
-          assert value['environment'] == 'mini-production'
+          assert value['environment'] == target
           assert value['scope'] == 'host'
           print('collector_status_schema_ok=yes')
           PY

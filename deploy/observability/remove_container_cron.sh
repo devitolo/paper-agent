@@ -2,7 +2,11 @@
 set -euo pipefail
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo 'must run as root' >&2; exit 77; }
 package_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-control=/var/lib/project-paper-observability/mini-production-control
+target=${1#--target=}
+[[ "$1" == --target=* ]] || target=${PROJECT_PAPER_OBSERVABILITY_TARGET:-mini-production}
+case "$target" in aws-production|mini-production) ;; *) echo 'unsupported target' >&2; exit 64 ;; esac
+export PROJECT_PAPER_OBSERVABILITY_TARGET="$target"
+control=/var/lib/project-paper-observability/${target}-control
 backup_file="$control/CURRENT-BACKUP"
 pending="$control/PENDING-BACKUP"
 source "$package_root/deploy/observability/recovery-common.sh"

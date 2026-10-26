@@ -118,12 +118,14 @@ def sample(root: Path) -> dict[str, Any]:
             record["cpu"]["interval_seconds"] = elapsed
             if previous.get("boot_id") and record.get("boot_id") and previous["boot_id"] != record["boot_id"]:
                 record["cpu"]["state"] = "boot_changed"
-            elif total_delta > 0 and 0 < elapsed <= 90:
+            elif total_delta > 0 and idle_delta >= 0 and idle_delta <= total_delta and 0 < elapsed <= 90:
                 record["cpu"]["utilization_percent"] = round(max(0.0, min(100.0, (total_delta - idle_delta) * 100 / total_delta)), 2)
             elif elapsed > 90:
                 record["cpu"]["state"] = "gap"
-        except (OSError, ValueError, KeyError, json.JSONDecodeError):
-            pass
+            else:
+                record["cpu"]["state"] = "baseline_invalid"
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            record["cpu"]["state"] = "baseline_invalid"
         previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1], "observed_at": stamp.isoformat(), "boot_id": record.get("boot_id")}))
     if stamp.minute % 60 == 0:
         record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
@@ -216,7 +218,8 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
                 return row.get(name)
         entry = observations.get(name)
         return entry.get("value") if isinstance(entry, dict) else entry
-    summary = {"schema": SCHEMA, "collector_version": "3", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 60, "complete": len(records) == 15 and gaps == 0, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(five), 2) if five else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_field("disk"), "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup"), "observation_times": {name: (entry.get("observed_at") if isinstance(entry, dict) else None) for name, entry in observations.items()}}, "errors": []}
+    latest_disk = latest_field("disk")
+    summary = {"schema": SCHEMA, "collector_version": "3", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 60, "complete": len(records) == 15 and gaps == 0, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": max(0, (len(records) - 1) * 60), "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "peak_sustained_5m_percent": round(max(five), 2) if five else None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_min_bytes": min(available) if available else None}, "disk": latest_disk, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_disk, "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup"), "observation_times": {name: (entry.get("observed_at") if isinstance(entry, dict) else None) for name, entry in observations.items()}}, "errors": []}
     return summary
 
 

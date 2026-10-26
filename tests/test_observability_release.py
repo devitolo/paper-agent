@@ -12,7 +12,7 @@ class ObservabilityReleaseContractTests(unittest.TestCase):
         self.assertIn("actions/download-artifact", text)
         self.assertIn("actual=$(sha256sum", text)
         self.assertIn("test \"$actual\" = \"$expected\"", text)
-        self.assertIn("environment: observability-production", text)
+        self.assertIn("observability-aws-production", text)
         self.assertIn("cancel-in-progress: false", text)
 
     def test_installer_has_unique_manifest_backups_and_fail_closed_target(self):
@@ -41,8 +41,8 @@ class ObservabilityReleaseContractTests(unittest.TestCase):
         rollback = (ROOT / "scripts/remove_resource_collector_cron.sh").read_text()
         self.assertIn("restore_on_error()", installer)
         self.assertIn("trap restore_on_error ERR", installer)
-        self.assertIn("INSTALL-MANIFEST.restored", rollback)
-        self.assertIn("required in", installer)
+        self.assertIn("manifest.restored", rollback)
+        self.assertIn("PROJECT_PAPER_OBSERVABILITY_IMAGE", (ROOT / "deploy/observability/install_container_cron.sh").read_text())
 
 
 if __name__ == "__main__":
