@@ -8,16 +8,43 @@ from scripts import host_resource_collector as collector
 
 
 class HostResourceCollectorTests(unittest.TestCase):
+    def summarize_rows(self, rows, reference):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "samples.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+            return collector.summarize(root, reference=reference)
+
+    def test_late_intervals_weight_only_their_overlap_with_declared_window(self):
+        rows = [
+            {"observed_at": "2026-10-26T14:00:06+00:00", "cpu": {"utilization_percent": 80, "interval_seconds": 900}},
+            {"observed_at": "2026-10-26T14:15:06+00:00", "cpu": {"utilization_percent": 20, "interval_seconds": 900}},
+        ]
+        result = self.summarize_rows(rows, collector.datetime.fromisoformat(rows[-1]["observed_at"]))
+        self.assertEqual(result["cpu"]["average_percent"], 20.4)
+        self.assertEqual(result["coverage_seconds"], 900)
+        self.assertTrue(result["window"]["complete"])
+        self.assertEqual(result["window"]["sample_gaps"], 0)
+
+    def test_jitter_does_not_create_a_gap_in_contiguous_cpu_intervals(self):
+        rows = [
+            {"observed_at": "2026-10-26T14:00:06.835892+00:00", "cpu": {"utilization_percent": 80, "interval_seconds": 900}},
+            {"observed_at": "2026-10-26T14:15:07.271252+00:00", "cpu": {"utilization_percent": 20, "interval_seconds": 900.43536}},
+        ]
+        result = self.summarize_rows(rows, collector.datetime.fromisoformat(rows[-1]["observed_at"]))
+        self.assertEqual(result["window"]["sample_gaps"], 0)
+        self.assertEqual(result["coverage_seconds"], 900)
+        self.assertTrue(result["window"]["complete"])
+
     def test_summary_preserves_counts_and_window_statistics(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             rows = []
             for index, value in enumerate((10, 20, 30, 40, 50, 60)):
-                rows.append(json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T12:{index * 2:02d}:00+00:00", "cpu": {"utilization_percent": value}, "memory": {"available_bytes": 1000 - value}}))
+                rows.append(json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T12:{index * 2:02d}:00+00:00", "cpu": {"utilization_percent": value, "interval_seconds": 120}, "memory": {"available_bytes": 1000 - value}}))
             (root / "samples.jsonl").write_text("\n".join(rows) + "\n")
             result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
         self.assertEqual(result["sample_count"], 5)
-        self.assertEqual(result["coverage_seconds"], 480)
+        self.assertEqual(result["coverage_seconds"], 600)
         self.assertEqual(result["cpu"]["average_percent"], 40)
         self.assertIsNone(result["cpu"]["peak_sustained_5m_percent"])
         self.assertEqual(result["cpu"]["max_observed_percent"], 60)
