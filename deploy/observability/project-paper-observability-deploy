@@ -12,6 +12,8 @@ launcher=/usr/local/sbin/project-paper-observability-container
 launcher_mode=$(stat -c %a "$launcher"); [[ $((8#$launcher_mode & 022)) -eq 0 ]] || { echo 'launcher is writable by non-root' >&2; exit 75; }
 exec 9>/run/lock/project-paper-observability-deploy.lock
 /usr/bin/flock -n 9 || { echo 'observability deployment already running' >&2; exit 75; }
+exec 8>/run/lock/project-paper-observability.lock
+/usr/bin/flock -n 8 || { echo 'collector is running; deployment refused' >&2; exit 75; }
 config_dir=/etc/project-paper-observability/$target
 state=/var/lib/project-paper-observability/$target
 export_dir=/var/lib/project-paper-observability/${target}-export
@@ -59,6 +61,7 @@ cat > "$cron_path.new" <<CRON
 CRON
 install -o root -g root -m 0644 "$cron_path.new" "$cron_path"
 rm -f "$cron_path.new"
+flock -u 8
 before_status=$(python3 - "$export_dir/status.json" <<'PY'
 import json, pathlib, sys
 try:
