@@ -403,6 +403,7 @@ out: list[str] = []
 found = False
 found_minilm_eval = False
 found_minilm_shadow = False
+found_routine_sync = False
 found_zenml = False
 for line in source.read_text(encoding="utf-8").splitlines():
     if "scripts/mini_container_job.sh zenml" in line and not line.lstrip().startswith("#"):
@@ -420,6 +421,9 @@ for line in source.read_text(encoding="utf-8").splitlines():
     elif line.startswith("PAPER_MINILM_SHADOW_ENABLED="):
         out.append("PAPER_MINILM_SHADOW_ENABLED=0")
         found_minilm_shadow = True
+    elif line.startswith("PAPER_AGENT_ROUTINE_SYNC="):
+        out.append("PAPER_AGENT_ROUTINE_SYNC=1")
+        found_routine_sync = True
     else:
         out.append(line)
 if not found:
@@ -440,6 +444,14 @@ if not found_minilm_shadow:
     if insert_at is None:
         raise SystemExit("cannot place PAPER_MINILM_SHADOW_ENABLED in managed cron")
     out.insert(insert_at, "PAPER_MINILM_SHADOW_ENABLED=0")
+if not found_routine_sync:
+    insert_at = next(
+        (index + 1 for index, line in enumerate(out) if line.startswith("PAPER_AGENT_SYNC_ENVIRONMENT=")),
+        None,
+    )
+    if insert_at is None:
+        raise SystemExit("cannot place PAPER_AGENT_ROUTINE_SYNC in managed cron")
+    out.insert(insert_at, "PAPER_AGENT_ROUTINE_SYNC=1")
 if not found_zenml:
     insert_at = next((index for index, line in enumerate(out) if line.strip() == "# END PROJECT PAPER MANAGED JOBS"), len(out))
     out[insert_at:insert_at] = [

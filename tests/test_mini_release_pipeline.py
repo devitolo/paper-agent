@@ -148,6 +148,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('python3 - "$RELEASE_DIR/crontab.current" "$RELEASE_DIR/crontab.next" "$OVERLAY" "$ENV_FILE" "$DEPLOY_LOCK_FILE"', update)
         self.assertIn('PAPER_MIGRATION_ENV_FILE={env_file}', update)
         self.assertIn('PAPER_MIGRATION_DEPLOY_LOCK_FILE={deploy_lock_file}', update)
+        self.assertIn('PAPER_AGENT_ROUTINE_SYNC=1', update)
         self.assertIn('Missing or invalid PAPER_AGENT_SYNC_SHARED_SECRET in production env file', update)
         self.assertIn("verification_zenml_cron", update)
 
