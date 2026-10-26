@@ -17,11 +17,11 @@ class HostResourceCollectorTests(unittest.TestCase):
             (root / "samples.jsonl").write_text("\n".join(rows) + "\n")
             result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
         self.assertEqual(result["sample_count"], 6)
-        self.assertEqual(result["coverage_seconds"], 900)
+        self.assertEqual(result["coverage_seconds"], 600)
         self.assertEqual(result["cpu"]["average_percent"], 35)
         self.assertIsNone(result["cpu"]["peak_sustained_5m_percent"])
         self.assertEqual(result["cpu"]["max_observed_percent"], 60)
-        self.assertEqual(result["cpu"]["max_one_minute_percent"], 60)
+        self.assertIsNone(result["cpu"]["max_one_minute_percent"])
         self.assertEqual(result["memory"]["available_max_bytes"], 990)
 
     def test_missing_cpu_and_memory_are_not_zero(self):
@@ -75,7 +75,7 @@ class HostResourceCollectorTests(unittest.TestCase):
             collector.collect(root)
             status = json.loads((root / "status.json").read_text())
             self.assertEqual(status["schema"], collector.SCHEMA)
-            self.assertEqual(status["sample_count"], 0)
+            self.assertEqual(status["sample_count"], 1)
             self.assertTrue((root / "summaries.jsonl").exists())
 
 

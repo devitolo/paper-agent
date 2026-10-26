@@ -34,7 +34,7 @@ def _safe_status(value: Any) -> bool:
         return False
     cpu = value.get("cpu")
     if isinstance(cpu, dict):
-        for key in ("average_percent", "peak_sustained_5m_percent", "max_one_minute_percent", "utilization_percent"):
+        for key in ("average_percent", "max_observed_percent", "peak_sustained_5m_percent", "max_one_minute_percent", "utilization_percent"):
             if key in cpu and cpu[key] is not None:
                 if isinstance(cpu[key], bool) or not isinstance(cpu[key], (int, float)):
                     return False
@@ -42,6 +42,8 @@ def _safe_status(value: Any) -> bool:
                     if not math.isfinite(float(cpu[key])):
                         return False
                 except (OverflowError, ValueError):
+                    return False
+                if key in ("average_percent", "max_observed_percent", "peak_sustained_5m_percent", "max_one_minute_percent", "utilization_percent") and not 0 <= float(cpu[key]) <= 100:
                     return False
     latest = value.get("latest") or {}
     for container in (latest.get("disk"), value.get("disk")):

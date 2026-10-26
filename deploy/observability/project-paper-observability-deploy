@@ -29,7 +29,7 @@ bash "$package_dir/deploy/observability/install_container_cron.sh" --apply --tar
 transaction_started=1
 test -f "/etc/cron.d/project-paper-observability-$target"
 test -f "/var/lib/project-paper-observability/${target}-export/INSTALL-RECEIPT"
-/usr/local/sbin/project-paper-observability-container
+PROJECT_PAPER_RESOURCE_ENV_FILE="/etc/project-paper-observability/${target}/${target}.env" /usr/local/sbin/project-paper-observability-container
 test -f "/var/lib/project-paper-observability/${target}-export/status.json"
 python3 - "$target" <<'PY'
 import json, pathlib, sys
