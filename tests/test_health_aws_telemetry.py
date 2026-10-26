@@ -55,3 +55,32 @@ class AWSHealthTests(unittest.TestCase):
             changed=copy.deepcopy(self.status);changed['cpu'][key]=value;self.path.write_text(json.dumps(changed))
             self.assertEqual(self.read()['freshness'],'unavailable')
         self.status['environment']='mini-production';self.save();self.assertEqual(self.read()['freshness'],'unavailable')
+
+    def test_contradictory_complete_window_and_memory_bounds_fail_closed(self):
+        cases=[]
+        for key,value in (('coverage_seconds',0),('sample_count',0),('sample_count',True)):
+            item=copy.deepcopy(self.status);item[key]=value;cases.append(item)
+        item=copy.deepcopy(self.status);item['window']['sample_gaps']=1;cases.append(item)
+        item=copy.deepcopy(self.status);item['cpu']['average_percent']=None;cases.append(item)
+        item=copy.deepcopy(self.status);item['memory']['available_min_bytes']=1;cases.append(item)
+        item=copy.deepcopy(self.status);item['memory'].update(available_average_bytes=2,available_min_bytes=1,available_max_bytes=0);cases.append(item)
+        for item in cases:
+            self.path.write_text(json.dumps(item));result=self.read()
+            self.assertEqual(result['freshness'],'unavailable')
+            self.assertIn('AWS telemetry export is invalid.',self.page())
+            self.assertNotIn('complete · 15-minute window',self.page())
+
+    def test_consistent_partial_window_is_warming(self):
+        self.status.update(coverage_seconds=0,sample_count=0)
+        self.status['window'].update(complete=False,sample_gaps=1)
+        self.status['cpu'].update(average_percent=None,max_observed_percent=None)
+        self.save()
+        self.assertEqual(self.read()['freshness'],'fresh')
+        self.assertIn('warming · incomplete window',self.page())
+
+    def test_parser_recursion_is_invalid_export_and_does_not_break_mini_panel(self):
+        with patch.object(resource_status.json,'loads',side_effect=RecursionError('synthetic parser depth')):
+            self.assertEqual(self.read()['freshness'],'unavailable')
+        self.path.write_text('['*16000+'0'+']'*16000)
+        self.assertEqual(self.read()['freshness'],'unavailable')
+        self.assertIn('AWS telemetry export is invalid.',self.page())

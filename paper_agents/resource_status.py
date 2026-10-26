@@ -62,6 +62,11 @@ def load_aws_resource_status(path: Path, *, now: datetime | None = None) -> dict
         cpu={key:number(value.get('cpu',{}).get(key),100) for key in ('average_percent','max_observed_percent')}
         if all(cpu[k] is not None for k in cpu) and cpu['average_percent']>cpu['max_observed_percent']:raise ValueError('invalid CPU maximum')
         memory={key:number(value.get('memory',{}).get(key),2**63-1) for key in ('available_average_bytes','available_min_bytes')}
+        maximum=number(value.get('memory',{}).get('available_max_bytes'),2**63-1)
+        if all(memory[k] is not None for k in memory) and memory['available_min_bytes']>memory['available_average_bytes']:
+            raise ValueError('invalid memory minimum')
+        if maximum is not None and any(v is not None and v>maximum for v in memory.values()):
+            raise ValueError('invalid memory maximum')
         latest=value.get('latest') or {};disk=latest.get('disk');disk_state='unavailable'
         if disk is not None:
             observed=(latest.get('observation_times') or {}).get('disk') or latest.get('observed_at')
@@ -73,9 +78,25 @@ def load_aws_resource_status(path: Path, *, now: datetime | None = None) -> dict
             else:disk=None
         window=value.get('window') or {}
         if type(window.get('complete')) is not bool:raise ValueError('invalid window')
+        def integer(value,maximum):
+            if type(value) is not int or not 0<=value<=maximum:raise ValueError('invalid coverage/count')
+            return value
+        samples=integer(value.get('sample_count'),10000)
+        coverage=integer(value.get('coverage_seconds'),900)
+        gaps=integer(window.get('sample_gaps'),10000)
+        if type(window.get('interval_seconds')) is not int or window['interval_seconds']!=900:
+            raise ValueError('invalid window interval')
+        instant(window.get('start_at'));instant(window.get('end_at'))
+        start=datetime.fromisoformat(window['start_at'].replace('Z','+00:00'))
+        end=datetime.fromisoformat(window['end_at'].replace('Z','+00:00'))
+        observed=datetime.fromisoformat(value['observed_at'].replace('Z','+00:00'))
+        if (end-start).total_seconds()!=900 or not -2700 <= (end-observed).total_seconds() <= 300:
+            raise ValueError('invalid window boundaries')
+        if window['complete'] and (coverage!=900 or not samples or gaps or cpu['average_percent'] is None):
+            raise ValueError('contradictory complete window')
         return {'state':'observed','freshness':'fresh','source':'AWS','observed_at':value['observed_at'],'age_seconds':age,
                 'cpu':cpu,'memory':memory,'disk':disk,'disk_state':disk_state,'complete':window['complete']}
     except OSError:
         return {**unavailable,'error':'AWS telemetry export is not readable.'}
-    except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
         return {**unavailable,'error':'AWS telemetry export is invalid.'}
