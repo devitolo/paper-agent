@@ -1437,7 +1437,7 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
         "Database path": str(summary["db"]["path"]),
     }
     mini = {
-        "Mini CPU": metric(mini_status, "cpu") if not mini_cpu.get("average_percent") else f"{mini_cpu['average_percent']}% avg · {mini_cpu.get('peak_sustained_5m_percent', 'unknown')}% peak sustained",
+        "Mini CPU": metric(mini_status, "cpu") if not mini_cpu.get("average_percent") else f"{mini_cpu['average_percent']}% interval avg · {mini_cpu.get('max_observed_percent', 'unknown')}% max observed",
         "Mini memory": metric(mini_status, "memory") if not mini_memory.get("available_average_bytes") else f"{mini_memory['available_average_bytes']} bytes available avg",
         "Mini disk": "observed · see collector snapshot" if mini_status.get("latest", {}).get("disk") else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
         "Mini container": str(mini_status.get("containers", {}).get("state", mini_status.get("state", "unknown"))) if mini_status.get("state") == "observed" else f"placeholder · {mini_status.get('state', 'unknown')} unavailable",
