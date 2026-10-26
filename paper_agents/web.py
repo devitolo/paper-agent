@@ -136,6 +136,22 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
                     return
                 self.send_json(payload)
                 return
+            if parsed.path == "/sync/routine":
+                if not verify_request(self.headers, b"", "GET", parsed.path):
+                    self.send_error(HTTPStatus.UNAUTHORIZED); return
+                import gzip
+                try:
+                    from paper_agents.sync_exchange import ROUTINE_MAX_EXPANDED_BYTES, build_routine_snapshot, register_routine_revision
+                    snapshot = build_routine_snapshot(db_path, sync_root, max_bytes=ROUTINE_MAX_EXPANDED_BYTES)
+                    register_routine_revision(db_path, snapshot)
+                    body = gzip.compress(encoded(snapshot), compresslevel=9)
+                    if len(body) > MAX_BODY_BYTES: raise ValueError('routine snapshot exceeds compressed limit')
+                    self.send_response(HTTPStatus.OK); self.send_header('Content-Type', 'application/json+gzip')
+                    self.send_header('Cache-Control', 'no-store'); self.send_header('Content-Length', str(len(body)))
+                    self.end_headers(); self.wfile.write(body)
+                except (OSError, ValueError, sqlite3.Error):
+                    self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, 'Routine snapshot unavailable')
+                return
             if parsed.path == "/sync/backup":
                 if not verify_request(self.headers, b"", "GET", parsed.path):
                     self.send_error(HTTPStatus.UNAUTHORIZED); return
@@ -296,6 +312,21 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
                 body = self.rfile.read(length)
                 if len(body) != length or not verify_request(self.headers, body, "POST", parsed.path):
                     self.send_error(HTTPStatus.BAD_REQUEST if len(body) != length else HTTPStatus.UNAUTHORIZED); return
+                encoding = self.headers.get('Content-Encoding','').lower()
+                if encoding and (parsed.path != '/sync/pipeline-results' or encoding != 'gzip'):
+                    self.send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, 'Unsupported content encoding'); return
+                if encoding == 'gzip' and parsed.path == '/sync/pipeline-results':
+                    import zlib
+                    try:
+                        decoder=zlib.decompressobj(16 + zlib.MAX_WBITS); expanded=bytearray()
+                        for offset in range(0,len(body),65536):
+                            expanded.extend(decoder.decompress(body[offset:offset+65536], MAX_BODY_BYTES + 1 - len(expanded)))
+                            if len(expanded) > MAX_BODY_BYTES: raise ValueError('expanded routine result exceeds size limit')
+                        expanded.extend(decoder.flush(MAX_BODY_BYTES + 1 - len(expanded)))
+                        if len(expanded) > MAX_BODY_BYTES or not decoder.eof or decoder.unused_data: raise ValueError('invalid compressed routine result')
+                        body=bytes(expanded)
+                    except (ValueError, zlib.error):
+                        self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, 'Invalid or oversized compressed routine result'); return
                 try:
                     if parsed.path == "/sync/profile-proposals":
                         from paper_agents.sync_exchange import receive_profile_proposal

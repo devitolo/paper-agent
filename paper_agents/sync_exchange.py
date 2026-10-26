@@ -7,6 +7,8 @@ from email.message import Message
 from pathlib import Path
 from .db import connect_db as _connect_db, DEFAULT_DB_PATH
 MAX_BODY_BYTES = 8 * 1024 * 1024
+ROUTINE_SCHEMA = 2
+ROUTINE_MAX_EXPANDED_BYTES = 64 * 1024 * 1024
 MAX_TIMESTAMP_SKEW = 300
 SOURCES = ('arxiv', 'openalex', 'semantic_scholar', 'core', 'zenml')
 USER_TABLES = ('raw_feedback','feedback_parse_attempts','structured_feedback','profile_versions','feedback_profile_applications','feedback_profile_apply_attempts','feedback','summary_field_feedback','summary_field_quality_signals')
@@ -83,6 +85,46 @@ def build_input_snapshot(db_path=DEFAULT_DB_PATH,root=Path('.'), *, max_bytes=MA
         if max_bytes is not None and len(encoded(payload))>max_bytes:raise ValueError('snapshot too large; pagination required')
         c.execute('INSERT OR IGNORE INTO sync_snapshot_revisions VALUES(?,?)',(payload['revision'],encoded(payload).decode()));c.commit()
     return payload
+
+def build_routine_snapshot(db_path=DEFAULT_DB_PATH, root=Path('.'), *, max_bytes=ROUTINE_MAX_EXPANDED_BYTES):
+    """Build the bounded business-data snapshot served to routine Mini sync."""
+    root = Path(root)
+    config = {name: (root / name).read_text(encoding='utf-8')
+              for name in ('config/topics.yaml', 'config/industry.json')}
+    with connect_db(db_path) as c:
+        c.row_factory = sqlite3.Row
+        papers = _rows(c, 'papers')
+        sources = [dict(row) for row in c.execute(
+            'SELECT ps.source,ps.source_id,ps.url,ps.pdf_url,ps.discovered_at,ps.metadata_json,p.canonical_key '
+            'FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id ORDER BY ps.id')]
+        profile = c.execute('SELECT version,profile_json FROM profile_versions WHERE active=1 ORDER BY version DESC LIMIT 1').fetchone()
+        profile = dict(profile) if profile is not None else {'version': 0, 'profile_json': (root / 'data/profile.json').read_text()}
+        watermark = c.execute('SELECT COALESCE(MAX(id),0) FROM structured_feedback').fetchone()[0]
+        feedback = [dict(row) for row in c.execute('''SELECT sf.id,sf.decision,sf.score,sf.observations_json,
+            sf.preference_signals_json,sf.created_at,p.canonical_key,ps.source
+            FROM structured_feedback sf LEFT JOIN papers p ON p.id=sf.paper_id
+            LEFT JOIN paper_sources ps ON ps.paper_id=sf.paper_id
+            WHERE (ps.id IS NULL OR ps.id=(SELECT MIN(id) FROM paper_sources WHERE paper_id=sf.paper_id))
+              AND (sf.id IN (SELECT id FROM structured_feedback ORDER BY id DESC LIMIT 12)
+                   OR NOT EXISTS (SELECT 1 FROM feedback_profile_applications fpa WHERE fpa.structured_feedback_id=sf.id))
+            ORDER BY sf.id''')]
+        saved = [dict(row) for row in c.execute('SELECT p.canonical_key,s.created_at FROM saved_papers s JOIN papers p ON p.id=s.paper_id')]
+        excluded = [dict(row) for row in c.execute('SELECT p.canonical_key,e.created_at FROM excluded_papers e JOIN papers p ON p.id=e.paper_id')]
+    payload = {'schema': ROUTINE_SCHEMA, 'kind': 'routine_snapshot', 'config': config,
+               'profile': profile, 'papers': papers, 'paper_sources': sources,
+               'feedback': feedback, 'feedback_watermark': watermark,
+               'saved': saved, 'excluded': excluded}
+    payload['revision'] = _digest(encoded(payload))
+    if max_bytes is not None and len(encoded(payload)) > max_bytes: raise ValueError('routine snapshot too large')
+    return payload
+
+def register_routine_revision(db_path, snapshot):
+    if not isinstance(snapshot, dict) or type(snapshot.get('schema')) is not int or snapshot.get('schema') != ROUTINE_SCHEMA:
+        raise ValueError('unsupported routine snapshot')
+    with connect_db(db_path) as c:
+        _setup(c)
+        marker = {'schema': ROUTINE_SCHEMA, 'kind': 'routine_revision', 'revision': snapshot['revision'], 'feedback_watermark': snapshot.get('feedback_watermark', 0)}
+        c.execute('INSERT OR REPLACE INTO sync_snapshot_revisions VALUES(?,?)', (snapshot['revision'], encoded(marker).decode()))
 
 def register_backup_snapshot(db_path, backup, snapshot=None):
     manifest_path=Path(backup)/'manifest.json'
