@@ -12,7 +12,7 @@ case "$target" in aws-production|mini-production) ;; *) echo 'unsupported target
 for file in deploy/observability/install_container_cron.sh deploy/observability/remove_container_cron.sh deploy/observability/run-container.sh; do
   [[ -f "$package_dir/$file" && ! -L "$package_dir/$file" ]] || { echo "package file missing: $file" >&2; exit 66; }
 done
-exec 9>/run/lock/project-paper-observability.lock
+exec 9>/run/lock/project-paper-observability-deploy.lock
 /usr/bin/flock -n 9 || { echo 'observability deployment already running' >&2; exit 75; }
 export PROJECT_PAPER_OBSERVABILITY_IMAGE="$image" PROJECT_PAPER_OBSERVABILITY_TARGET="$target"
 transaction_started=0
