@@ -27,9 +27,11 @@ def _safe_status(value: Any) -> bool:
         return node is None or isinstance(node, (str, int, bool))
     if not isinstance(value, dict) or not walk(value):
         return False
-    for key in ("cpu", "memory", "latest", "containers", "disk"):
-        if key in value and value[key] is not None and not isinstance(value[key], dict):
+    for key in ("cpu", "memory", "latest", "containers"):
+        if key in value and not isinstance(value[key], dict):
             return False
+    if "disk" in value and value["disk"] is not None and not isinstance(value["disk"], dict):
+        return False
     cpu = value.get("cpu")
     if isinstance(cpu, dict):
         for key in ("average_percent", "peak_sustained_5m_percent", "max_one_minute_percent", "utilization_percent"):
@@ -41,7 +43,8 @@ def _safe_status(value: Any) -> bool:
                         return False
                 except (OverflowError, ValueError):
                     return False
-    for container in (value.get("latest", {}).get("disk"), value.get("disk")):
+    latest = value.get("latest") or {}
+    for container in (latest.get("disk"), value.get("disk")):
         if container is None:
             continue
         if not isinstance(container, dict):
