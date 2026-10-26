@@ -1,0 +1,5 @@
+# Provision only after independent root bootstrap and visudo validation.
+# Fixed root-owned executable validates full argv, digest, commit and attestation.
+# No shell, environment assignment, arbitrary archive path or installer permitted.
+devitolo ALL=(root) NOPASSWD: /usr/local/sbin/project-paper-observability-package-install --target mini-production --bundle [0-9a-f]* --source-sha [0-9a-f]*
+devitolo ALL=(root) NOPASSWD: /usr/local/sbin/project-paper-observability-package-install --target mini-production --recover

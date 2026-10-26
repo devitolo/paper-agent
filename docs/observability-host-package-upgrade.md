@@ -1,0 +1,58 @@
+# Mini host-package upgrade contract (not activated)
+
+The fixed root-owned `/usr/local/sbin/project-paper-observability-package-install`
+accepts only `--target mini-production --bundle <sha256> --source-sha <commit>`
+or the fixed target with `--recover`. It cannot update AWS. The sudoers example
+is for review; it is not installed by a runner or by this package.
+
+GitHub OIDC artifact attestations authorize BOTH `artifact.tar` and the external
+`manifest.json`, using `attestation.jsonl`. No separate signing key is generated,
+read or managed. A root-provisioned GitHub CLI verifier is required at
+`/usr/local/libexec/project-paper-observability/gh`. Its identity policy pins:
+
+- repository `devitolo/paper-agent`;
+- signer workflow `.github/workflows/observability-release.yml`;
+- exact certificate identity for `refs/tags/observability-mini`;
+- GitHub Actions OIDC issuer and SLSA provenance v1;
+- matching source and signer commit, rejecting self-hosted build attestations.
+
+Reference: https://cli.github.com/manual/gh_attestation_verify
+
+The runner stages three bounded files under the fixed root-owned incoming
+parent `/var/lib/project-paper-observability/mini-production-incoming/<sha256>`.
+The bundle directory may be runner-owned. Directory-relative NOFOLLOW opens
+snapshot regular-file bytes; no tar extraction is performed. Root-owned staging
+holds the snapshot during verification. The manifest is not trusted until its
+own attestation passes. Strict schema, target, source commit, timestamps,
+installer version, archive digest and every allowlisted file digest/type/mode
+are then checked. The archive is an uncompressed tar (maximum 1 MiB), containing
+only the Mini wrapper, image-update helper and collector launcher as root:root
+0755. No configuration, secrets, publisher state, business data or scheduling
+files are accepted from the archive.
+
+Deployment and collector locks serialize changes. Exact existing combined cron
+is required and preserved. Prior executable bytes/modes, cron and audit receipt
+are saved in a root-only transaction directory; a durable pending marker is
+written before replacement. Each file replacement uses fsync and atomic rename.
+Collector-only qualification verifies a newly produced, timestamped Mini host
+status. The publisher is not invoked during qualification. A successful update
+records source/digest/prior hashes/result/time in a root-only audit receipt.
+Failure restores prior files. Interruption leaves the pending marker, blocking
+new upgrades until `--recover` validates all backups, restores them and checks
+health. Invalid recovery backups keep the marker and require trusted repair.
+Multiple files are transactional under locks; a crash between renames is handled
+by recovery rather than claiming a multi-file atomic filesystem operation.
+
+Synthetic-verifier Linux tests cover the verification argument policy, tamper,
+wrong target/schema/path/hash/owner/mode, archive links, FIFO/symlink inboxes,
+expiry/future timestamps, trust ownership, serialization, qualification rollback,
+interrupted recovery and corrupt backups. They do not prove live OIDC signing or
+real GitHub CLI verification. Those need the hosted release workflow and an
+independently bootstrapped verifier before production acceptance.
+
+Activation is NOT complete: SRE found no existing unattended root provisioning
+route, and Mini does not have GitHub CLI installed. The root installer, trusted
+verifier binary, incoming parent and narrow sudo rule must first be provisioned
+through an independently authorized administrative mechanism. Neither a runner
+script nor Docker host mounts may bootstrap that authority. The existing
+collect-publish cron remains active without this upgrade mechanism.
