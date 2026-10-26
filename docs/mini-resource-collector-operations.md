@@ -66,6 +66,19 @@ Missing records are `unknown`; unreadable or malformed records are distinct
 stale. Host-wide readings remain labeled host scope. No Mini-to-AWS metrics
 transport is implied by this procedure.
 
+## Release identity and target routing
+
+Standalone observability releases use exactly one target selector:
+`observability-mini` for Mini or `observability-aws` for AWS. Versioned,
+suffixed, or lookalike tags are rejected. The immutable release identity is
+the triggering event SHA together with the archive checksum and AMD64 image
+digest; every checkout is pinned to that SHA. A push of a valid target tag
+automatically runs the serialized deployment for its matching target
+environment (`observability-mini-production` or `observability-aws-production`).
+The deployment still requires resource checks, checksum/digest verification,
+health evidence, and rollback handling; no manual approval action is part of
+the valid-tag path.
+
 
 ## Container package transaction recovery
 
