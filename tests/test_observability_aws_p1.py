@@ -72,6 +72,7 @@ class ObservabilityAwsP1Tests(unittest.TestCase):
         workflow = Path('.github/workflows/observability-release.yml').read_text()
         self.assertIn('trap cleanup EXIT', launcher)
         self.assertIn('docker rm -f "$container_name"', launcher)
+        self.assertIn('timeout --signal=TERM --kill-after=1s 5s docker rm -f', launcher)
         self.assertIn('observability-aws-v*', workflow)
         self.assertIn('project-paper-observability-aws-deploy', workflow)
         self.assertIn('target=aws-production', workflow)

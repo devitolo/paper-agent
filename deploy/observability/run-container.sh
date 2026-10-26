@@ -15,7 +15,7 @@ if [ -f "$log" ] && [ "$(wc -c <"$log")" -gt 1048576 ]; then
   tail -c 524288 "$log" > "$log.1"
   : > "$log"
 fi
-cleanup() { rc=$?; if [ "$rc" -ne 0 ]; then docker rm -f "$container_name" >/dev/null 2>&1 || true; fi; exit "$rc"; }
+cleanup() { rc=$?; if [ "$rc" -ne 0 ]; then /usr/bin/timeout --signal=TERM --kill-after=1s 5s docker rm -f "$container_name" >/dev/null 2>&1 || true; fi; exit "$rc"; }
 trap cleanup EXIT
 /usr/bin/timeout --signal=TERM --kill-after=5s 45s docker run --rm --name "$container_name" \
   --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
