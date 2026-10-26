@@ -204,7 +204,11 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         value = cpu_row.get("utilization_percent")
         if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in (seconds, value)):
             continue
-        if not math.isfinite(float(seconds)) or not math.isfinite(float(value)) or seconds <= 0 or not 0 <= value <= 100:
+        # Bound native JSON numbers before float conversion or microsecond
+        # scaling. Corrupt huge integers/finite floats must not stop export.
+        if not 0 < seconds <= 1200 or not 0 <= value <= 100:
+            continue
+        if not math.isfinite(float(seconds)) or not math.isfinite(float(value)):
             continue
         try:
             stamp = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))

@@ -9,6 +9,15 @@ from scripts import host_resource_collector as collector
 
 
 class HostResourceCollectorTests(unittest.TestCase):
+    def test_corrupt_numeric_intervals_cannot_crash_or_create_coverage(self):
+        for seconds, value in ((1e308, 50), (10**1000, 50), (900, 10**1000)):
+            with self.subTest(kind=(type(seconds).__name__, type(value).__name__)):
+                rows = [{"observed_at": "2026-10-26T14:15:00+00:00", "cpu": {"utilization_percent": value, "interval_seconds": seconds}}]
+                result = self.summarize_rows(rows, collector.datetime.fromisoformat(rows[0]["observed_at"]))
+                self.assertIsNone(result["cpu"]["average_percent"])
+                self.assertEqual(result["coverage_seconds"], 0)
+                self.assertFalse(result["window"]["complete"])
+
     def test_many_fractional_retries_have_exact_microsecond_coverage(self):
         start = collector.datetime(2026, 10, 26, 14, tzinfo=collector.timezone.utc)
         for count in (10, 15, 30):
