@@ -299,6 +299,10 @@ def make_handler(db_path: Path, *, sync_root: Path = Path(".")) -> type[BaseHTTP
 
         def do_POST(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/observability/v1/mini-status":
+                from paper_agents.observability_transport import handle_post
+                handle_post(self)
+                return
             if parsed.path == "/sync/pipeline-results" and self.headers.get("X-Paper-Sync-Probe") == "1":
                 raw_length = self.headers.get("Content-Length", "")
                 if raw_length != "2" or self.headers.get("Transfer-Encoding"):
