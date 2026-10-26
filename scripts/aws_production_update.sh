@@ -15,6 +15,13 @@ AWS_APP_IMAGE=${1:-${AWS_APP_IMAGE:-}}
 PROJECT_DIR=${AWS_PROJECT_DIR:-/home/ubuntu/project-paper-prod}
 ENV_FILE=${AWS_ENV_FILE:-$PROJECT_DIR/.env}
 COMPOSE_FILE=${AWS_COMPOSE_FILE:-$PROJECT_DIR/compose.yml}
+RESOURCE_OVERRIDE=$PROJECT_DIR/compose.aws-resources.json
+compose() {
+  local extra=()
+  [[ ! -L "$RESOURCE_OVERRIDE" ]] || { echo "resource override symlink refused" >&2; return 75; }
+  [[ ! -f "$RESOURCE_OVERRIDE" ]] || extra=(-f "$RESOURCE_OVERRIDE")
+  docker compose --project-directory "$PROJECT_DIR" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "${extra[@]}" "$@"
+}
 SERVICE=${AWS_SERVICE:-app}
 CONTAINER=${AWS_CONTAINER:-project-paper-prod-app-1}
 RELEASE_ROOT=${AWS_RELEASE_ROOT:-$PROJECT_DIR/production-releases}
@@ -32,12 +39,16 @@ release="$RELEASE_ROOT/$(date -u +%Y%m%d-%H%M%S)-${GITHUB_RUN_ID:-manual}"
 umask 077
 mkdir "$release"
 cp -p "$ENV_FILE" "$release/env.before"
+cp -p "$COMPOSE_FILE" "$release/compose.before"
+[[ ! -L "$RESOURCE_OVERRIDE" ]] || { echo "resource override symlink refused" >&2; exit 75; }
+if [[ -f "$RESOURCE_OVERRIDE" ]]; then cp -p "$RESOURCE_OVERRIDE" "$release/resource.before"; fi
 printf '%s\n' "$AWS_APP_IMAGE" > "$release/image"
 
 restore() {
   cp -p "$release/env.before" "$ENV_FILE"
-  docker compose --project-directory "$PROJECT_DIR" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
-    up -d --no-build --pull never --no-deps "$SERVICE" >/dev/null
+  cp -p "$release/compose.before" "$COMPOSE_FILE"
+  if [[ -f "$release/resource.before" ]]; then cp -p "$release/resource.before" "$RESOURCE_OVERRIDE"; else rm -f "$RESOURCE_OVERRIDE"; fi
+  compose up -d --no-build --pull never --no-deps "$SERVICE" >/dev/null
 }
 failed=0
 trap 'failed=1; restore || true; printf "rollback=attempted\\n" > "$release/result"' ERR
@@ -51,9 +62,19 @@ else
 fi
 cp -p "$tmp_env" "$ENV_FILE"
 
+# Connect an already-installed AWS collector; never create or replace its data.
+# Back up consistently before adding the read-only mount. Existing secrets and
+# volume definitions are retained by the narrow Compose transformation.
+if [[ -f /var/lib/project-paper-observability/aws-production-export/status.json ]]; then
+  backup_name="$(basename "$release").db"
+  docker exec "$CONTAINER" python3 -c 'import sqlite3,sys; src=sqlite3.connect("file:/app/data/paper_agent.db?mode=ro",uri=True); dst=sqlite3.connect("/backups/"+sys.argv[1]); src.backup(dst); dst.close(); src.close()' "$backup_name"
+  printf 'database_backup=/backups/%s\n' "$backup_name" > "$release/backup-evidence"
+  docker compose --project-directory "$PROJECT_DIR" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --format json | python3 "$(dirname -- "$0")/aws_resource_status_mount.py" "$RESOURCE_OVERRIDE"
+  compose config --quiet
+fi
+
 docker pull "$AWS_APP_IMAGE" >/dev/null
-docker compose --project-directory "$PROJECT_DIR" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
-  up -d --no-build --pull never --no-deps "$SERVICE" >/dev/null
+compose up -d --no-build --pull never --no-deps "$SERVICE" >/dev/null
 
 for ((i=0; i<TIMEOUT; i++)); do
   status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' "$CONTAINER" 2>/dev/null || true)

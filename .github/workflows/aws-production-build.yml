@@ -29,7 +29,17 @@ jobs:
           python3 -m unittest discover -s tests/aws_build -v
           python3 -m unittest discover -s tests/aws_deploy -v
           python3 -m unittest tests.sync_exchange.test_http_serving -v
-          python3 -m unittest tests.test_observability_transport tests.test_health_mini_telemetry -v
+          python3 -m unittest tests.test_observability_transport tests.test_health_mini_telemetry tests.test_health_aws_telemetry tests.test_aws_resource_mount -v
+
+      - name: Validate AWS resource mount transaction and rollback
+        run: |
+          docker run --rm --platform linux/amd64 --user 0:0 --network none --read-only \
+            --tmpfs /tmp:rw,exec,nosuid --tmpfs /var/lib:rw,nosuid \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/qa-source,readonly" \
+            -e PAPER_OBSERVABILITY_QA_ISOLATED=1 -e PYTHONDONTWRITEBYTECODE=1 \
+            --entrypoint python3 \
+            python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 \
+            -m unittest discover -s /qa-source/tests -p test_aws_resource_deploy_linux_qa.py -v
 
   build:
     if: github.ref == 'refs/heads/aws-production'

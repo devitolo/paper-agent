@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
-from paper_agents.resource_status import load_resource_status
+from paper_agents.resource_status import load_aws_resource_status
 from paper_agents.observability_transport import health_status as mini_telemetry_health
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.pdf_links import looks_like_direct_pdf_url
@@ -1534,24 +1534,38 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     return rows
 
 
+def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
+    freshness = status.get("freshness", "unavailable")
+    rows = {"Source": "AWS", "AWS telemetry freshness": freshness,
+            "AWS observed at (UTC)": status.get("observed_at") or "unknown"}
+    if freshness != "fresh":
+        for label in ("AWS CPU (15 minutes)", "AWS memory", "AWS disk", "Collection status"):
+            rows[label] = f"placeholder · {freshness}"
+        rows["Telemetry error"] = status.get("error") or "AWS telemetry unavailable."
+        return rows
+    def percent(value):return "unavailable" if value is None else f"{value:g}%"
+    def gib(value):return "unavailable" if value is None else f"{value / (1024 ** 3):.2f} GiB"
+    cpu, memory = status["cpu"], status["memory"]
+    rows.update({
+        "AWS CPU (15 minutes)": f"{percent(cpu['average_percent'])} average · {percent(cpu['max_observed_percent'])} maximum observed",
+        "AWS memory": f"{gib(memory['available_average_bytes'])} available average · {gib(memory['available_min_bytes'])} minimum available",
+        "Collection status": "complete · 15-minute window" if status["complete"] else "warming · incomplete window",
+    })
+    disk = status.get("disk")
+    rows["AWS disk"] = (f"{percent(disk['used_percent'])} used · {gib(disk['available_bytes'])} available · {gib(disk['capacity_bytes'])} capacity"
+                         if disk else f"placeholder · {status.get('disk_state', 'unavailable')} disk observation")
+    return rows
+
+
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
-    sync = sync_health_snapshot()
     mini_status = mini_telemetry_health()
-    aws_status = load_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
-    aws_cpu = aws_status.get("cpu", {})
-    aws_memory = aws_status.get("memory", {})
+    aws_status = load_aws_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
     database = {
         "Database integrity": str(summary["db"]["integrity"]),
         "Database path": str(summary["db"]["path"]),
     }
     mini = mini_telemetry_rows(mini_status)
-    aws = {
-        "AWS delivery state": sync["state"],
-        "Last delivery evidence": f"{sync['time']} revision={sync['revision']}",
-        "AWS CPU / memory": f"{aws_cpu.get('average_percent', 'unknown')}% avg CPU · {aws_memory.get('available_average_bytes', 'unknown')} bytes available" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
-        "AWS disk / service": "observed · see collector snapshot" if aws_status.get("disk") else f"placeholder · {aws_status.get('state', 'unknown')} unavailable",
-        "AWS telemetry freshness": f"{aws_status.get('state', 'unknown')} · {aws_status.get('age_seconds') if aws_status.get('age_seconds') is not None else 'unknown'}s old" if aws_status.get("state") == "observed" else f"placeholder · {aws_status.get('state', 'unknown')} · age unknown",
-    }
+    aws = aws_telemetry_rows(aws_status)
     badge = "SANITIZED COLLECTOR DATA" if mini_status.get("freshness") == "fresh" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · NO FRESH OBSERVATIONS"
     return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked fresh, stale, unknown, or unavailable. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>'
 
