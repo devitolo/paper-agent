@@ -71,3 +71,16 @@ Crash-after-each-file-replacement tests execute the entrypoint guards and verify
 refusal until recovery completes. Successful audit history is bounded to 20
 transactions; failed and pending evidence is never pruned. Control-directory
 fsync makes transaction creation and pending-marker removal durable.
+
+Read-only production policy probe on 2026-10-26: invoking the existing fixed
+helper with an invalid `--probe` argument and an explicit qualification-variable
+assignment was rejected by sudo before executing the helper:
+`sudo: sorry, you are not allowed to set the following environment variables: PROJECT_PAPER_HOST_PACKAGE_QUALIFY`.
+This made no host changes. SRE accepted the clean-environment qualification
+exception subject to this effective-policy check. Guard markers remain version
+compatibility checks; signed executable content still requires review.
+
+The repository visibility API reports public; artifact-attestation eligibility is
+therefore not blocked by private-repository plan restrictions. No repository
+visibility setting was changed. A real hosted positive/negative attestation test
+is still required; fixture verification is not a replacement.
