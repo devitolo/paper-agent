@@ -17,9 +17,10 @@ class HostResourceCollectorTests(unittest.TestCase):
             (root / "samples.jsonl").write_text("\n".join(rows) + "\n")
             result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
         self.assertEqual(result["sample_count"], 6)
-        self.assertEqual(result["coverage_seconds"], 300)
+        self.assertEqual(result["coverage_seconds"], 900)
         self.assertEqual(result["cpu"]["average_percent"], 35)
-        self.assertEqual(result["cpu"]["peak_sustained_5m_percent"], 40)
+        self.assertIsNone(result["cpu"]["peak_sustained_5m_percent"])
+        self.assertEqual(result["cpu"]["max_observed_percent"], 60)
         self.assertEqual(result["cpu"]["max_one_minute_percent"], 60)
         self.assertEqual(result["memory"]["available_min_bytes"], 940)
 
@@ -51,14 +52,14 @@ class HostResourceCollectorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             rows = []
-            for minute in (0, 1, 3, 4):
-                rows.append(json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T12:{minute:02d}:00+00:00", "cpu": {"utilization_percent": 10}, "memory": {"available_bytes": 100}}))
+            for stamp in ("12:00", "12:15", "12:45", "13:00"):
+                rows.append(json.dumps({"schema": collector.SCHEMA, "observed_at": f"2026-10-24T{stamp}:00+00:00", "cpu": {"utilization_percent": 10}, "memory": {"available_bytes": 100}}))
             (root / "samples.jsonl").write_text("\n".join(rows) + "\n")
             result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
         self.assertEqual(result["window"]["start_at"], "2026-10-24T12:00:00+00:00")
         self.assertEqual(result["window"]["end_at"], "2026-10-24T12:15:00+00:00")
-        self.assertEqual(result["window"]["sample_gaps"], 1)
-        self.assertFalse(result["window"]["complete"])
+        self.assertEqual(result["window"]["sample_gaps"], 0)
+        self.assertTrue(result["window"]["complete"])
 
     def test_sustained_peak_never_spans_a_gap(self):
         with tempfile.TemporaryDirectory() as directory:

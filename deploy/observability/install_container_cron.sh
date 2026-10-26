@@ -75,7 +75,7 @@ PROJECT_PAPER_RESOURCE_ENV_FILE=$env_path
 EOF
 chown root:root "$env_path.new"; chmod 0640 "$env_path.new"
 cat > "$cron_path.new" <<EOF
-* * * * * root . $env_path; export PROJECT_PAPER_OBSERVABILITY_IMAGE PROJECT_PAPER_RESOURCE_ROOT PROJECT_PAPER_RESOURCE_EXPORT_DIR PROJECT_PAPER_RESOURCE_ENVIRONMENT PROJECT_PAPER_RESOURCE_HOST PROJECT_PAPER_RESOURCE_ENV_FILE; /usr/bin/flock -n /run/lock/project-paper-observability.lock /usr/local/sbin/project-paper-observability-container >>$state/collector.log 2>&1
+*/15 * * * * root . $env_path; export PROJECT_PAPER_OBSERVABILITY_IMAGE PROJECT_PAPER_RESOURCE_ROOT PROJECT_PAPER_RESOURCE_EXPORT_DIR PROJECT_PAPER_RESOURCE_ENVIRONMENT PROJECT_PAPER_RESOURCE_HOST PROJECT_PAPER_RESOURCE_ENV_FILE; /usr/bin/flock -n /run/lock/project-paper-observability.lock /usr/local/sbin/project-paper-observability-container >>$state/collector.log 2>&1
 EOF
 chown root:root "$cron_path.new"; chmod 0644 "$cron_path.new"
 mv -f /usr/local/sbin/project-paper-observability-container.new /usr/local/sbin/project-paper-observability-container

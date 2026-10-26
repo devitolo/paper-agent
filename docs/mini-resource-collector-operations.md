@@ -6,7 +6,7 @@ collector does not write the Paper database and does not send metrics to AWS.
 
 ## What the package provides
 
-The release contains the read-only collector, a locked one-minute cron wrapper,
+The release contains the read-only collector, a locked fifteen-minute cron wrapper,
 a root-owned environment template, and bounded-retention
 tests. The collector samples CPU counter deltas, memory and swap, filesystem
 capacity/free/inodes, optional thermal sensors, cgroup memory, and an explicit
@@ -40,7 +40,7 @@ host-install path. Do not run them against AWS during this phase.
    observability mount. Do not mount the
    Docker socket, `/proc`, `/sys`, environment files, secrets, or raw sample
    logs into the web container.
-5. Add the dedicated one-minute cron entry from
+5. Add the dedicated fifteen-minute cron entry from
    `/etc/cron.d/project-paper-resource-collector`. Verify the `flock` lock,
    cron cadence, state ownership, and the fixed production container allowlist.
    Cron must remain separate from Paper discovery jobs.
