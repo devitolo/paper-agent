@@ -124,7 +124,7 @@ def sample(root: Path) -> dict[str, Any]:
                 record["cpu"]["state"] = "gap"
             else:
                 record["cpu"]["state"] = "baseline_invalid"
-        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        except (OSError, ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError):
             record["cpu"]["state"] = "baseline_invalid"
         previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1], "observed_at": stamp.isoformat(), "boot_id": record.get("boot_id")}))
     if stamp.minute % 60 == 0:
