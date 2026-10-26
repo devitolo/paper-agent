@@ -164,7 +164,10 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
                 continue
     except OSError:
         pass
-    end = aligned_end(reference or now())
+    current_reference = reference or now()
+    end = aligned_end(current_reference)
+    if current_reference > end:
+        end = end.replace(minute=end.minute + 15) if end.minute < 45 else end.replace(hour=end.hour + 1, minute=0)
     start = end.timestamp() - 15 * 60
     window_records = []
     for row in records:
@@ -222,8 +225,28 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         return entry.get("value") if isinstance(entry, dict) else entry
     latest_disk = latest_field("disk")
     interval_coverage = [float(row.get("cpu", {}).get("interval_seconds")) for row in records if isinstance(row.get("cpu"), dict) and isinstance(row["cpu"].get("interval_seconds"), (int, float)) and row["cpu"].get("utilization_percent") is not None and math.isfinite(float(row["cpu"]["interval_seconds"])) and float(row["cpu"]["interval_seconds"]) > 0]
-    coverage = max(interval_coverage, default=(max(timestamps) - min(timestamps) if len(timestamps) >= 2 else 0))
-    coverage = min(900, sum(interval_coverage)) if interval_coverage else coverage
+    intervals = []
+    for row in records:
+        cpu_row = row.get("cpu") if isinstance(row.get("cpu"), dict) else {}
+        seconds = cpu_row.get("interval_seconds")
+        if cpu_row.get("utilization_percent") is None or not isinstance(seconds, (int, float)) or seconds <= 0 or not math.isfinite(float(seconds)):
+            continue
+        try:
+            observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp()
+        except (KeyError, TypeError, ValueError):
+            continue
+        left = max(start, observed - float(seconds))
+        right = min(end.timestamp(), observed)
+        if right > left:
+            intervals.append((left, right))
+    intervals.sort()
+    merged = []
+    for left, right in intervals:
+        if merged and left <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], right))
+        else:
+            merged.append((left, right))
+    coverage = min(900, sum(right - left for left, right in merged)) if merged else (max(timestamps) - min(timestamps) if len(timestamps) >= 2 else 0)
     complete = bool(cpu) and gaps == 0 and coverage >= 900
     summary = {"schema": SCHEMA, "collector_version": "4", "state": "observed" if complete else "warming", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 900, "complete": complete, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": round(min(900, coverage)), "cpu": {"average_percent": round(cpu_average, 2) if cpu_average is not None else None, "max_observed_percent": max(cpu) if cpu else None, "peak_sustained_5m_percent": None, "max_one_minute_percent": None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_max_bytes": max(available) if available else None, "available_min_bytes": min(available) if available else None}, "disk": latest_disk, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_disk, "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup"), "observation_times": {name: (entry.get("observed_at") if isinstance(entry, dict) else None) for name, entry in observations.items()}}, "errors": []}
     return summary
