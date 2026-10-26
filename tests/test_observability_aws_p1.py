@@ -43,6 +43,10 @@ class ObservabilityAwsP1Tests(unittest.TestCase):
                 {'schema': SCHEMA, 'observed_at': current.isoformat(), 'cpu': {'average_percent': 10 ** 400}},
                 {'schema': SCHEMA, 'observed_at': current.isoformat(), 'latest': {'disk': 'bad'}},
                 {'schema': SCHEMA, 'observed_at': current.isoformat(), 'latest': {'disk': [1, 2]}},
+                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'cpu': None},
+                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'memory': None},
+                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'containers': None},
+                {'schema': SCHEMA, 'observed_at': current.isoformat(), 'latest': None},
             ):
                 path.write_text(json.dumps(payload))
                 self.assertEqual(load_resource_status(path, now=current)['state'], 'malformed')
