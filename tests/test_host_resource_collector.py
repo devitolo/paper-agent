@@ -2,12 +2,25 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from datetime import timedelta
 from unittest.mock import patch
 
 from scripts import host_resource_collector as collector
 
 
 class HostResourceCollectorTests(unittest.TestCase):
+    def test_many_fractional_retries_have_exact_microsecond_coverage(self):
+        start = collector.datetime(2026, 10, 26, 14, tzinfo=collector.timezone.utc)
+        for count in (10, 15, 30):
+            with self.subTest(count=count):
+                stamps = [start + timedelta(seconds=900 * index / count + (6.1 if index % 2 == 0 else 6.2)) for index in range(count + 1)]
+                rows = [{"observed_at": right.isoformat(), "cpu": {"utilization_percent": 50, "interval_seconds": (right-left).total_seconds()}} for left, right in zip(stamps, stamps[1:])]
+                rows.insert(0, {"observed_at": stamps[0].isoformat(), "cpu": {"utilization_percent": 50, "interval_seconds": 900}})
+                result = self.summarize_rows(rows, stamps[-1])
+                self.assertEqual(result["coverage_seconds"], 900)
+                self.assertTrue(result["window"]["complete"])
+                self.assertEqual(result["window"]["sample_gaps"], 0)
+
     def test_fractional_adjacent_intervals_do_not_report_rounding_as_a_gap(self):
         rows = [
             {"observed_at": "2026-10-26T17:45:06.100000+00:00", "cpu": {"utilization_percent": 20, "interval_seconds": 900}},

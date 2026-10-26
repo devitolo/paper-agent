@@ -196,6 +196,8 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
     # CPU deltas describe intervals ending at observed_at. Clip both the
     # weighting and coverage to the declared window, even for a late cron run.
     intervals = []
+    window_start = datetime.fromtimestamp(start, timezone.utc)
+    window_microseconds = 900 * 1_000_000
     for row in records:
         cpu_row = row.get("cpu") if isinstance(row.get("cpu"), dict) else {}
         seconds = cpu_row.get("interval_seconds")
@@ -205,15 +207,16 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         if not math.isfinite(float(seconds)) or not math.isfinite(float(value)) or seconds <= 0 or not 0 <= value <= 100:
             continue
         try:
-            observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).timestamp()
+            stamp = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
+            observed = round((stamp - window_start).total_seconds() * 1_000_000)
         except (KeyError, TypeError, ValueError):
             continue
-        left = max(start, observed - float(seconds))
-        right = min(end.timestamp(), observed)
+        left = max(0, observed - round(float(seconds) * 1_000_000))
+        right = min(window_microseconds, observed)
         if right > left:
             intervals.append((left, right, float(value), observed))
     boundaries = sorted({edge for left, right, _, _ in intervals for edge in (left, right)})
-    coverage = 0.0
+    coverage = 0
     weighted_total = 0.0
     merged = []
     cpu = []
@@ -228,15 +231,14 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
         coverage += duration
         weighted_total += chosen[2] * duration
         cpu.append(chosen[2])
-        # Timestamp subtraction can differ by less than one microsecond when
-        # reconstructing adjacent intervals from fractional Unix seconds.
-        if merged and left <= merged[-1][1] + 0.000001:
+        if merged and left <= merged[-1][1]:
             merged[-1] = (merged[-1][0], right)
         else:
             merged.append((left, right))
     cpu_average = weighted_total / coverage if coverage else None
+    coverage /= 1_000_000
     gaps = max(0, len(merged) - 1)
-    complete = bool(cpu) and coverage >= 900 - 0.000001
+    complete = bool(cpu) and coverage == 900
     summary = {"schema": SCHEMA, "collector_version": "4", "state": "observed" if complete else "warming", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 900, "complete": complete, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": round(min(900, coverage)), "cpu": {"average_percent": round(cpu_average, 2) if cpu_average is not None else None, "max_observed_percent": max(cpu) if cpu else None, "peak_sustained_5m_percent": None, "max_one_minute_percent": None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_max_bytes": max(available) if available else None, "available_min_bytes": min(available) if available else None}, "disk": latest_disk, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_disk, "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup"), "observation_times": {name: (entry.get("observed_at") if isinstance(entry, dict) else None) for name, entry in observations.items()}}, "errors": []}
     return summary
 
