@@ -295,13 +295,18 @@ python3 -m paper_agents.cli review-backfill --quick
 
 ## Mini Production Schedule
 
-Since the 2026-09-24 production cutover, the Mini keeps host cron as its
-scheduler while executing work inside the app container. OpenAlex runs at 4:00
-AM, arXiv at 5:00 AM, Semantic Scholar at 6:00 AM, CORE has its own scheduled
-trial source entry, the dry-run Gemini profile comparison runs at 2:00 AM every
-Monday, and SQLite backup runs at 1:00 AM Sunday. Every entry calls
+The Mini keeps host cron as its scheduler while executing work inside the app
+container. The current staggered source order is Semantic Scholar at 3:00 AM,
+OpenAlex at 4:00 AM, arXiv at 5:00 AM, and CORE at 6:00 AM Pacific. Profile,
+ZenML, and backup schedules remain separate. Every entry calls
 `scripts/mini_container_job.sh`, whose job watcher participates in the shared
 container runtime lifecycle lock for the full job and cleanup.
+
+Current Curator evidence review can use two concurrent Ollama assessments. Each
+assessment has a 512-token response budget and a 900-second assessment budget;
+the source job's outer timeout remains 1,800 seconds. This changes inference
+parallelism only; SQLite ownership, ranking, validation, the ten-candidate cap,
+and the one-correction behavior remain unchanged.
 
 Inspect the live schedule with:
 

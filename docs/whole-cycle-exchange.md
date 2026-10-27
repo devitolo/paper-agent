@@ -3,8 +3,8 @@
 The default remains off. Set `PAPER_AGENT_ROUTINE_SYNC=1` only after the routine
 contract has been qualified; otherwise the legacy SQLite recovery pull remains in
 use. No cron installation or deployment is part of this change.
-The host wrapper runs `mini_sync_exchange.sh pull`, the existing OpenAlex, arXiv,
-Semantic Scholar, CORE and profile jobs, then `mini_sync_exchange.sh push` when
+The host wrapper runs `mini_sync_exchange.sh pull`, one selected source job, then
+`mini_sync_exchange.sh push` when
 both explicit activation flags are provisioned. The helper uses the same Compose
 files and `exec -T app` as `mini_container_job.sh`. Python runs in the app image
 against `/app/data/paper_agent.db`, `/app/config`, and `/app/data/sync-state`.

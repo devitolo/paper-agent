@@ -80,8 +80,10 @@ SQLite history and guidance
 The production scheduler is the host crontab. Each managed entry calls
 `scripts/mini_container_job.sh`, which executes the existing workflow wrapper
 inside the app container while participating in the runtime lifecycle lock. The
-container runtime owns the long-lived web and Ollama processes; systemd is no
-longer the active Project Paper web/model supervisor on the Mini.
+Curator's evidence assessments may use two Ollama inference workers, but SQLite
+reads/writes and ranking remain on the owning thread. The container runtime
+owns the long-lived web and Ollama processes; systemd is no longer the active
+Project Paper web/model supervisor on the Mini.
 
 The Python workflow owns orchestration between deterministic steps and model-backed judgment steps. It should remain explicit and debuggable before any larger agent framework is considered. A future Go port is plausible, but should wait until workflow and schema boundaries stabilize; preserve SQLite compatibility first, then phase the port through web UI/server, operational CLI/runbooks, scheduled orchestration, and source adapters/agent logic where useful.
 
@@ -114,7 +116,7 @@ not use academic MiniLM relevance. This lets Project Paper surface practical
 industry case studies in the Review Queue while keeping academic paper ranking
 and source adapters inspectable.
 
-Curator reads the candidate pool, active profile version, history, guidance, and stored artifact provenance. Normal pipeline scoring first computes deterministic relevance/profile fit, then runs bounded local Qwen evidence assessment per candidate outside SQLite write transactions. It stores evaluations for every candidate considered, persists evidence assessment/provenance/model/timing/score components in run metadata, and writes at most three ordered recommendations.
+Curator reads the candidate pool, active profile version, history, guidance, and stored artifact provenance. Normal pipeline scoring first computes deterministic relevance/profile fit, then runs bounded local Qwen evidence assessment for at most ten candidates outside SQLite write transactions. In the deployed Mini configuration, up to two assessments run concurrently; each has a 512-token output budget and 900-second assessment timeout, while the whole source job retains its 1,800-second outer timeout. It stores evaluations for every candidate considered, persists evidence assessment/provenance/model/timing/score components in run metadata, and writes at most three ordered recommendations.
 
 The paper registry stores canonical paper identifiers, alternate sources, workflow state, Scout telemetry, Curator evaluations, recommendation records, artifacts, immutable feedback inputs, parse attempts, structured feedback, profile apply attempts, profile versions, and active scouting guidance. SQLite is the initial store because the system is single-host and benefits from easy inspection, online backup, and restore drills.
 

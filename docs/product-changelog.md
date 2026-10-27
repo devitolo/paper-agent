@@ -2,6 +2,25 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-10-27
+
+### Curator two-worker evidence assessment rollout
+
+Status: Deployed to `mini-production` in `4ec18b4`; the AMD64 build and guarded
+deployment workflow passed.
+
+- Qwen3 evidence assessment now runs up to two inference workers while SQLite
+  reads/writes, ranking, validation, and final assembly remain on the owning
+  thread.
+- Initial and correction responses use a 512-token output budget. Each
+  assessment has a 900-second budget; the whole source job retains its
+  1,800-second outer timeout.
+- The prompt/schema, correction behavior, interest and eligibility gates, and
+  ten-candidate bound remain unchanged.
+- CPU-only benchmark results were feasibility evidence for two slots, not a
+  broad throughput or semantic-quality guarantee. No full source cycle was
+  rerun solely to qualify this release.
+
 ## 2026-10-20
 
 ### Standalone MiniLM production service

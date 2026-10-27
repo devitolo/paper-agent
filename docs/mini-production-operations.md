@@ -49,13 +49,13 @@ Use the live host crontab as the schedule source of truth during the soak:
 crontab -l
 ```
 
-Confirm the app, standalone MiniLM service, and Ollama containers, plus loopback
-publication:
+Confirm the app and Ollama containers, plus the current application readiness
+path:
 
 ```sh
 docker ps --filter name=paper-mini-production
 docker inspect --format '{{.Name}} {{.Image}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' \
-  paper-mini-production-app-1 paper-minilm-production-minilm-1 paper-mini-production-ollama-1
+  paper-mini-production-app-1 paper-mini-production-ollama-1
 curl --fail --silent --show-error http://127.0.0.1:8000/ >/dev/null
 ```
 
@@ -77,10 +77,10 @@ calls one of these launcher jobs:
 
 | Job | Launcher argument | Schedule |
 |---|---|---|
+| Semantic Scholar pipeline | `semantic` | daily 03:00 |
 | OpenAlex pipeline | `openalex` | daily 04:00 |
 | arXiv pipeline | `arxiv` | daily 05:00 |
-| Semantic Scholar pipeline | `semantic` | daily 06:00 |
-| CORE pipeline | `core` | daily trial source run; see live crontab |
+| CORE pipeline | `core` | daily 06:00 |
 | ZenML industry discovery | `zenml` | Sunday 23:30 America/Los_Angeles |
 | Gemini profile comparison | `profile` | biweekly cadence checked by the Monday 02:00 wrapper; dry-run only |
 | SQLite backup | `backup` | Sunday 01:00 |
@@ -89,6 +89,12 @@ The launcher executes the corresponding wrapper inside the app container and
 holds the shared runtime lifecycle lease across preflight, writes, descendant
 cleanup, and completion. Cron remains the only scheduling authority; the parked
 container scheduler must remain disabled.
+
+Production Curator evidence review uses two Ollama inference workers, 512 output
+tokens for the initial response and correction attempt, and a 900-second
+per-assessment budget. The whole source job retains its 1,800-second timeout.
+These settings are CPU-only feasibility tuning, not a guarantee that ten slow
+reviews complete within one source cycle.
 
 The committed `deploy/project-paper.crontab` uses the container launcher. The
 installer refuses templates that still contain native `.venv` pipeline commands.
@@ -207,6 +213,25 @@ source, run ID, candidate/eligible/recommendation counts, severity, and origin
 retained. No trend rows are written to production SQLite. Repeated source
 warnings should be handled as a health/dashboard improvement rather than
 becoming a reason for recurring SSH inspection.
+
+## Container observability
+
+The installed observability package uses the existing quarter-hour (`*/15`)
+cron cadence. It runs a bounded fixed allowlist of container projections on the
+Mini and AWS, atomically exports sanitized `container-status.json` facts, and
+publishes authenticated facts from the Mini to AWS through the existing
+telemetry path. It adds no systemd unit, recurring cron, Docker socket mount, or
+secret mount. The guarded updater package is already installed with its matching
+hash; do not document a separate manual AWS launcher installation as a pending
+step.
+
+The Infrastructure page shows current CPU, memory, disk, collection age, image
+identity, and container status with Pacific timestamps. Explicit unhealthy state
+remains unhealthy; accepted collection or delivery evidence is not an
+application health probe. Missing metrics are shown as unavailable rather than
+fabricated. Current Peak/Lowest values describe the collection window only.
+Daily CPU and memory high-water marks are not implemented; a 15-minute sample
+cannot promise capture of transient spikes.
 
 The Actions summary also prints a `7-day source trends` section directly. It
 uses the recent source-run rows already returned by `db health --json` and

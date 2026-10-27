@@ -37,7 +37,9 @@ The production Mini uses local models with distinct responsibilities:
   image does not contain the inference runtime or model mount. This helps decide
   which candidates deserve deeper Curator attention.
 - **Qwen3 4B:** active Curator evidence assessment for the top 10 preliminary
-  candidates. It can adjust Curator scoring through structured assessment.
+  candidates. In the current Mini deployment, up to two assessments run in
+  parallel, with a 512-token response budget and a 900-second per-assessment
+  budget. It can adjust Curator scoring through structured assessment.
 - **Qwen 2.5 1.5B:** extraction model for `Problem`, `Why it matters`, and
   `Approach`.
 - **Gemini:** optional low-volume profile synthesis and rebuild workflows.
@@ -47,6 +49,11 @@ or returns invalid output, Curator falls back to deterministic scoring.
 Conceptual, architecture, framework, and threat-model papers are not penalized
 merely because they are non-empirical; unsupported experimental claims remain
 weak evidence.
+
+The two-worker setting was selected from a small CPU-only feasibility pilot on
+the Intel i7 Mini. It is not a sustained-throughput or semantic-quality claim,
+and it does not guarantee that all ten candidates finish before the source
+job's existing 1,800-second outer timeout.
 
 MiniLM transport is explicit: the production app uses an internal HTTP origin
 with identity/readiness checks, a 10-second default client timeout, and no
