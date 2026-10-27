@@ -39,7 +39,7 @@ jobs:
             --workdir /qa-source -e PAPER_OBSERVABILITY_QA_ISOLATED=1 \
             --entrypoint python3 \
             python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 \
-            -B -m unittest tests.test_observability_host_package_linux_qa tests.test_observability_host_bootstrap_linux_qa -v
+            -B -m unittest tests.test_observability_host_package_linux_qa tests.test_observability_host_bootstrap_linux_qa tests.test_guarded_updater_adversarial_linux_qa -v
 
   package:
     needs: validate

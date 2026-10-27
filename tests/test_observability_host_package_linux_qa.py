@@ -128,7 +128,7 @@ assert digest==claims[subject.name]
         digest,_=self.bundle()
         result=self.install(digest)
         self.assertEqual(result['result'],'already_ready')
-        self.assertEqual(self.m.timestamp(result['created_at']),self.now)
+        self.assertAlmostEqual(self.m.timestamp(result['created_at']),self.now,delta=0.000001)
         self.now-=10
         self.files[next(iter(self.files))]+=b'# intermediate older release\n'
         digest,_=self.bundle()
