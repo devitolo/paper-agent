@@ -1678,7 +1678,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     <nav class="health-tabs" aria-label="Health sections">{tabs}</nav>
     {render_needs_attention(summary) if tab == "jobs" else ""}
     {tab_content}
-    <div class="health-cards">{card_html}</div>
+    {'<div class="health-cards">' + card_html + '</div>' if tab != 'infrastructure' else ''}
     {render_health_job_charts(summary) if tab == "jobs" else ""}
     {render_sync_health() if tab == "jobs" else ""}
     <section class="health-section" style="display: {'block' if tab == 'analytics' else 'none'}">
