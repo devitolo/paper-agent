@@ -27,6 +27,9 @@ class MiniContainerHealthTests(unittest.TestCase):
             html=web.render_mini_container_health(t.health_status(path,clock=clock))
             for expected in ('Production app','Observability publisher','healthy','sha256:'+'b'*64,'0.25% CPU','5.5 MiB memory'):
                 self.assertIn(expected,html)
+            self.assertNotIn('<th>Image Digest</th>',html)
+            self.assertEqual(html.count('<details class="container-details">'),6)
+            self.assertNotIn('<details open',html)
             self.assertEqual(path.read_bytes(),before)
 
     def test_old_container_observation_hidden_despite_fresh_host(self):

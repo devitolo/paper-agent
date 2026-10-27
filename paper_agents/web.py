@@ -1631,7 +1631,19 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
                          'image_digest': digest or 'Unavailable', 'cpu_and_memory': resource})
     message = ('Docker-reported status, health, running image digest, and sampled CPU/memory. Collector and publisher are scheduled jobs; they normally have no running container between runs.'
                if fresh else 'No fresh Mini container observations have been received.')
-    details = render_health_table('Mini containers', rows, ['container', 'status', 'health', 'image_digest', 'cpu_and_memory']) if rows else ''
+    details = ''
+    if rows:
+        columns = ('status', 'health', 'cpu_and_memory')
+        headers = '<th>Container</th>' + ''.join(f'<th>{escape(key.replace("_", " ").title())}</th>' for key in columns)
+        body = ''.join(
+            '<tr><td>' + escape(row['container'])
+            + '<details class="container-details"><summary>Details</summary><div>Image digest<code>'
+            + escape(row['image_digest']) + '</code></div></details></td>'
+            + ''.join('<td>' + escape(row[key]) + '</td>' for key in columns) + '</tr>'
+            for row in rows
+        )
+        details = '<div class="health-table"><table><thead><tr>' + headers + '</tr></thead><tbody>' + body + '</tbody></table></div>'
+
     return '<section class="health-section mini-container-health"><h2>Mini containers</h2><p>' + message + '</p>' + details + '</section>'
 
 
@@ -4011,6 +4023,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .attention-card:first-of-type { border-top: 0; }
 .attention-card h3 { margin: 0 0 4px; font-size: 13px; }
 .attention-card p { margin: 3px 0; font-size: 12px; }
+.container-details { margin-top: 4px; }
+.container-details summary { cursor: pointer; color: var(--muted); }
+.container-details code { display: block; max-width: 28ch; overflow-wrap: anywhere; }
 .mini-container-health td { overflow-wrap: anywhere; }
 .health-table { margin: 8px 0 12px; overflow-x: auto; }
 .health-table table { width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; }
