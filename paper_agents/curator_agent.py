@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -30,7 +33,7 @@ class CuratorConfig:
     evidence_enabled: bool = False
     evidence_model: str = DEFAULT_CURATOR_MODEL
     evidence_ollama_url: str = field(default_factory=ollama_url)
-    evidence_timeout: int = 180
+    evidence_timeout: int = 900
     evidence_max_chars: int = 7000
     evidence_candidate_limit: int = 10
     evidence_min_interest_score: float = DEFAULT_EVIDENCE_MIN_INTEREST_SCORE
@@ -141,11 +144,17 @@ class CuratorAgent:
                     (index, evaluation) for index, evaluation in enumerate(evaluations)
                     if evaluation["score_components"]["interest_fit_gate"]["status"] != "blocked"
                 ][:max(1, config.evidence_candidate_limit)]
-                for index, preliminary in evidence_candidates:
-                    enriched = {**preliminary, "evidence_assessment": assess_evidence(
-                        preliminary, model=config.evidence_model, ollama_url=config.evidence_ollama_url,
+                # Only inference runs in workers. SQLite reads, ranking, and writes stay
+                # on the owning thread; wait for all workers before unloading the model.
+                with ThreadPoolExecutor(max_workers=2, thread_name_prefix="curator-evidence") as pool:
+                    futures = [pool.submit(
+                        copy_context().run, assess_evidence, preliminary,
+                        model=config.evidence_model, ollama_url=config.evidence_ollama_url,
                         timeout=config.evidence_timeout, max_chars=config.evidence_max_chars,
-                    )}
+                    ) for _, preliminary in evidence_candidates]
+                    assessments = [future.result() for future in futures]
+                for (index, preliminary), assessment in zip(evidence_candidates, assessments):
+                    enriched = {**preliminary, "evidence_assessment": assessment}
                     evaluation = evaluate_candidate(enriched, profile)
                     apply_eligibility(evaluation, enriched)
                     evaluation["interest_fit"] = preliminary["interest_fit"]

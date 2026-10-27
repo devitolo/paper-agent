@@ -103,6 +103,13 @@ services:
     stop_grace_period: 12s
     logging: *logging
   ollama:
+    environment:
+      OLLAMA_NUM_PARALLEL: "2"
+    # Match the qualified concurrency test and leave capacity for other services.
+    cpus: 6
+    mem_limit: 5g
+    memswap_limit: 5g
+    pids_limit: 128
     image: ${PAPER_MIGRATION_OLLAMA_IMAGE:?Set independently qualified immutable Ollama image digest}
     pull_policy: never
     restart: "no"

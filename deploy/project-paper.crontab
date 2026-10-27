@@ -25,10 +25,10 @@ PAPER_AGENT_ROUTINE_SYNC=1
 
 # Staggered source jobs. Each source pulls current AWS state before running
 # and publishes its results afterward.
-0 3 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh core >> logs/pipeline-core.log 2>&1
+0 6 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh core >> logs/pipeline-core.log 2>&1
 0 4 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh openalex >> logs/pipeline-openalex.log 2>&1
 0 5 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh arxiv >> logs/pipeline-arxiv.log 2>&1
-0 6 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh semantic >> logs/pipeline-semantic-scholar.log 2>&1
+0 3 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh semantic >> logs/pipeline-semantic-scholar.log 2>&1
 
 # Paused afternoon runs retained for reference:
 # 0 16 * * * cd "$HOME/paper-mini-rehearsal/candidate" && mkdir -p logs && bash scripts/mini_container_job.sh openalex >> logs/pipeline-openalex.log 2>&1

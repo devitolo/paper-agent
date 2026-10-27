@@ -283,3 +283,18 @@ MiniLM service remains stopped. Do not describe this as validated or attach
 production to non-production inference services.
 
 Only one managed scheduled job runs at a time. An overlapping invocation is skipped for that day, exits successfully, and records the reason in `data/job-events.jsonl`. The Health page shows the event under **Scheduled jobs** and raises a warning when the most recent event for that job is `skipped_busy`.
+
+### Curator concurrency and source order (2026-10-27)
+
+Curator reviews at most two candidates concurrently using Qwen3. Each assessment
+allows 512 output tokens and 900 seconds including its single correction attempt.
+The prompt, response schema, eligibility gates and ten-candidate bound are unchanged.
+Database work and ranking remain on the owning thread; model unload waits for all
+reviews. Ollama uses two inference slots with the qualified 6-CPU/5-GiB limits.
+The existing whole-source job timeout remains unchanged; the assessment budget does
+not extend that outer timeout or guarantee ten slow candidates finish within it.
+
+Managed source schedules preserve the approved installed swap: Semantic Scholar at
+03:00, OpenAlex 04:00, arXiv 05:00, CORE 06:00, in the Mini host's Pacific timezone.
+Other jobs are preserved. The updater backs up and restores the previous Compose
+configuration along with the application image, private environment and crontab.

@@ -116,6 +116,8 @@ fi
 mkdir -p "$RELEASE_DIR"
 printf 'phase\tseconds\n' > "$RELEASE_DIR/timing.tsv"
 phase_start "prepare release files"
+# Preserve the prior model configuration for image/config rollback.
+cp "$CANDIDATE_DIR/docker-compose.mini-migration.yml" "$RELEASE_DIR/compose.before.yml"
 mkdir -p "$CANDIDATE_DIR/scripts"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-migration.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
 install -m 0644 "$SOURCE_DIR/docker-compose.mini-rehearsal.yml" "$CANDIDATE_DIR/docker-compose.mini-rehearsal.yml"
@@ -157,12 +159,14 @@ set -euo pipefail
 cd "$CANDIDATE_DIR"
 unset SEMANTIC_SCHOLAR_API_KEY SEMANTIC_SCHOLAR_API_KEY1 SEMANTIC_SCHOLAR_API_KEY2
 cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"
+cp "$RELEASE_DIR/compose.before.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
 crontab "$RELEASE_DIR/crontab.before"
 compose=(docker compose --env-file "$ENV_FILE" -f docker-compose.mini-migration.yml)
 if grep -q '^PAPER_REHEARSAL_SOURCE_SHA256=' "$ENV_FILE"; then
   compose+=(-f docker-compose.mini-rehearsal.yml)
 fi
 compose+=(-f "$OVERLAY")
+"\${compose[@]}" up -d --no-deps --pull never --wait --wait-timeout 120 ollama
 "\${compose[@]}" up -d --no-deps --pull never --force-recreate app
 "\${compose[@]}" exec -T app python -m paper_agents.package_runtime check-app
 EOF
@@ -170,6 +174,7 @@ chmod 700 "$RELEASE_DIR/rollback.sh"
 
 DEPLOYMENT_MUTATED=0
 APP_REPLACEMENT_STARTED=0
+OLLAMA_REPLACEMENT_STARTED=0
 DEPLOYMENT_SUCCESS=0
 RESTORE_IN_PROGRESS=0
 
@@ -182,6 +187,7 @@ restore_previous_production() {
 
   echo "Deployment failed; restoring previous production configuration." >&2
   cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"
+  cp "$RELEASE_DIR/compose.before.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
   if [[ -f "$RELEASE_DIR/crontab.before" ]]; then
     crontab "$RELEASE_DIR/crontab.before" || true
   fi
@@ -200,6 +206,13 @@ restore_previous_production() {
     fi
     restore_compose+=(-f "$OVERLAY")
 
+    if [[ "$OLLAMA_REPLACEMENT_STARTED" == 1 ]]; then
+      "${restore_compose[@]}" up -d --no-deps --pull never --wait --wait-timeout 120 ollama \
+        > "$RELEASE_DIR/auto-restore-ollama.log" 2>&1 || {
+          echo "Automatic Ollama restore failed. Evidence: $RELEASE_DIR" >&2
+          return 0
+        }
+    fi
     if "${restore_compose[@]}" up -d --no-deps --pull never --force-recreate app \
       > "$RELEASE_DIR/auto-restore-app.log" 2>&1; then
       local deadline
@@ -405,7 +418,16 @@ found_minilm_eval = False
 found_minilm_shadow = False
 found_routine_sync = False
 found_zenml = False
+import re
+source_schedule_counts = {"semantic": 0, "core": 0}
 for line in source.read_text(encoding="utf-8").splitlines():
+    if not line.lstrip().startswith("#"):
+        for job, target_hour in (("semantic", "3"), ("core", "6")):
+            if re.search(r"scripts/mini_container_job[.]sh " + job + r"\s+>>", line):
+                if not re.match(r"0 [36] \* \* \* ", line):
+                    raise SystemExit("unexpected schedule for " + job)
+                source_schedule_counts[job] += 1
+                line = re.sub(r"^0 [36] ", "0 " + target_hour + " ", line, count=1)
     if "scripts/mini_container_job.sh zenml" in line and not line.lstrip().startswith("#"):
         found_zenml = True
     if line.startswith("PAPER_MIGRATION_ENV_FILE="):
@@ -426,6 +448,8 @@ for line in source.read_text(encoding="utf-8").splitlines():
         found_routine_sync = True
     else:
         out.append(line)
+if any(count != 1 for count in source_schedule_counts.values()):
+    raise SystemExit("missing or duplicate CORE/Semantic source schedule")
 if not found:
     raise SystemExit("managed cron is missing PAPER_MIGRATION_EXTRA_COMPOSE_FILES")
 if not found_minilm_eval:
@@ -546,6 +570,11 @@ from paper_agents.migration_lifecycle import lease
 with lease(Path("/runtime-control"), exclusive=True):
     pass
 PY
+phase_end
+
+phase_start "configure Ollama inference slots"
+OLLAMA_REPLACEMENT_STARTED=1
+"${compose[@]}" up -d --no-deps --pull never --wait --wait-timeout 120 ollama
 phase_end
 
 phase_start "recreate app"

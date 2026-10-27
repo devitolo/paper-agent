@@ -157,7 +157,7 @@ def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_CURATOR_M
             model,
             _prompt(str(candidate.get("title") or ""), text, provenance),
             timeout,
-            options={"num_ctx": 4096, "num_predict": 220, "temperature": 0},
+            options={"num_ctx": 4096, "num_predict": 512, "temperature": 0},
             think=False,
             keep_alive="5m",
         )
@@ -175,7 +175,7 @@ def assess_evidence(candidate: dict[str, Any], *, model: str = DEFAULT_CURATOR_M
                 model,
                 _correction_prompt(response, first_error),
                 max(1, int(remaining)),
-                options={"num_ctx": 4096, "num_predict": 220, "temperature": 0},
+                options={"num_ctx": 4096, "num_predict": 512, "temperature": 0},
                 think=False,
                 keep_alive="5m",
             )
