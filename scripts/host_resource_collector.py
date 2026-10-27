@@ -262,7 +262,7 @@ def collect(root: Path) -> None:
             observations[field] = {"observed_at": current["observed_at"], "value": current[field]}
     publish(root / "last-observations.json", observations, mode=0o600)
     current_time = datetime.fromisoformat(current["observed_at"])
-    if current_time.minute % 15 == 0:
+    if current_time.minute % 15 == 0 or os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT") == "aws-production":
         summary = summarize(root, reference=current_time)
         append_bounded(root / "summaries.jsonl", summary, 8640)
         publish(root / "status.json", summary)
