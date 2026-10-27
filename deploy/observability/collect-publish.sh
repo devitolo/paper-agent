@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Called by the existing Mini cron under the collector lock.
 set -Eeuo pipefail
+# host-package-pending-guard-v1 (caller holds collector lock)
+[[ ! -e /var/lib/project-paper-observability/mini-production-control/HOST-BOOTSTRAP-PENDING.json && ! -L /var/lib/project-paper-observability/mini-production-control/HOST-BOOTSTRAP-PENDING.json ]] || { echo 'host bootstrap recovery pending' >&2; exit 75; }
+[[ ! -e /var/lib/project-paper-observability/mini-production-control/HOST-PACKAGE-PENDING.json && ! -L /var/lib/project-paper-observability/mini-production-control/HOST-PACKAGE-PENDING.json ]] || { echo 'host package recovery pending' >&2; exit 75; }
 set -a
 source /etc/project-paper-observability/mini-production/mini-production.env
 set +a

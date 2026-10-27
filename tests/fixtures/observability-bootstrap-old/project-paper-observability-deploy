@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() { echo 'usage: project-paper-observability-deploy --image ghcr.io/devitolo/paper-agent/observability:TAG@sha256:DIGEST --target aws-production|mini-production' >&2; exit 64; }
+[[ ${EUID:-$(id -u)} -eq 0 ]] || { echo 'must be run as root' >&2; exit 77; }
+[[ $# -eq 4 && $1 == --image && $3 == --target ]] || usage
+image=$2; target=$4
+[[ "$image" =~ ^ghcr\.io/devitolo/paper-agent/observability:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || { echo 'immutable observability image required' >&2; exit 64; }
+case "$target" in aws-production|mini-production) ;; *) echo 'unsupported target' >&2; exit 64 ;; esac
+launcher=/usr/local/sbin/project-paper-observability-container
+[[ -f "$launcher" && ! -L "$launcher" && $(stat -c %u "$launcher") -eq 0 ]] || { echo 'fixed root-owned launcher missing' >&2; exit 66; }
+launcher_mode=$(stat -c %a "$launcher"); [[ $((8#$launcher_mode & 022)) -eq 0 ]] || { echo 'launcher is writable by non-root' >&2; exit 75; }
+cron_launcher=$launcher
+pipeline=/usr/local/sbin/project-paper-observability-collect-publish
+if [[ $target == mini-production && -e $pipeline ]]; then
+  [[ -f $pipeline && ! -L $pipeline && $(stat -c %u "$pipeline") -eq 0 ]] || { echo 'untrusted pipeline wrapper' >&2; exit 75; }
+  pipeline_mode=$(stat -c %a "$pipeline")
+  [[ $((8#$pipeline_mode & 022)) -eq 0 ]] || { echo 'pipeline wrapper is writable by non-root' >&2; exit 75; }
+  cron_launcher=$pipeline
+fi
+exec 9>/run/lock/project-paper-observability-deploy.lock
+/usr/bin/flock -n 9 || { echo 'observability deployment already running' >&2; exit 75; }
+exec 8>/run/lock/project-paper-observability.lock
+/usr/bin/flock -n 8 || { echo 'collector is running; deployment refused' >&2; exit 75; }
+config_dir=/etc/project-paper-observability/$target
+state=/var/lib/project-paper-observability/$target
+export_dir=/var/lib/project-paper-observability/${target}-export
+control=/var/lib/project-paper-observability/${target}-control
+receipt=$control/INSTALL-RECEIPT
+env_path=$config_dir/$target.env
+cron_path=/etc/cron.d/project-paper-observability-$target
+install -d -o root -g root -m 0755 "$config_dir"
+install -d -o 10001 -g 10001 -m 0755 "$export_dir"
+install -d -o 10001 -g 10001 -m 0700 "$state"
+install -d -o root -g root -m 0700 "$control"
+backup=$(mktemp -d "$control/previous-install-XXXXXX")
+backup_ready=0
+rollback() {
+  local rc=$?
+  trap - EXIT
+  if (( ! backup_ready )); then
+    rm -rf "$backup"
+    exit "$rc"
+  fi
+  if [[ -f "$backup/env.previous" ]]; then install -o root -g root -m 0640 "$backup/env.previous" "$env_path"; else rm -f "$env_path"; fi
+  if [[ -f "$backup/cron.previous" ]]; then install -o root -g root -m 0644 "$backup/cron.previous" "$cron_path"; else rm -f "$cron_path"; fi
+  if [[ -f "$backup/receipt.previous" ]]; then install -o root -g root -m 0644 "$backup/receipt.previous" "$receipt"; else rm -f "$receipt"; fi
+  rm -rf "$backup"
+  exit "$rc"
+}
+trap rollback ERR
+[[ ! -L "$env_path" && ! -L "$cron_path" ]] || { echo 'managed path is a symlink' >&2; exit 75; }
+[[ ! -e "$env_path" ]] || cp -p --no-dereference "$env_path" "$backup/env.previous"
+[[ ! -e "$cron_path" ]] || cp -p --no-dereference "$cron_path" "$backup/cron.previous"
+[[ ! -e "$receipt" ]] || cp -p --no-dereference "$receipt" "$backup/receipt.previous"
+backup_ready=1
+cat > "$env_path.new" <<ENV
+PROJECT_PAPER_OBSERVABILITY_IMAGE=$image
+PROJECT_PAPER_RESOURCE_ROOT=$state
+PROJECT_PAPER_RESOURCE_EXPORT_DIR=$export_dir
+PROJECT_PAPER_RESOURCE_ENVIRONMENT=$target
+PROJECT_PAPER_RESOURCE_HOST=$target
+PROJECT_PAPER_RESOURCE_ENV_FILE=$env_path
+ENV
+install -o root -g root -m 0640 "$env_path.new" "$env_path"
+rm -f "$env_path.new"
+cat > "$cron_path.new" <<CRON
+*/15 * * * * root . $env_path; export PROJECT_PAPER_OBSERVABILITY_IMAGE PROJECT_PAPER_RESOURCE_ROOT PROJECT_PAPER_RESOURCE_EXPORT_DIR PROJECT_PAPER_RESOURCE_ENVIRONMENT PROJECT_PAPER_RESOURCE_HOST PROJECT_PAPER_RESOURCE_ENV_FILE; /usr/bin/flock -n /run/lock/project-paper-observability.lock $cron_launcher >>$state/collector.log 2>&1
+CRON
+install -o root -g root -m 0644 "$cron_path.new" "$cron_path"
+rm -f "$cron_path.new"
+before_status=$(python3 - "$export_dir/status.json" <<'PY'
+import json, pathlib, sys
+try:
+    path=pathlib.Path(sys.argv[1])
+    print((json.loads(path.read_text()).get('observed_at') or '') + '\t' + str(path.stat().st_mtime_ns))
+except (OSError, ValueError):
+    print('\t0')
+PY
+)
+before_observed=${before_status%%$'\t'*}
+before_mtime=${before_status##*$'\t'}
+set -a
+. "$env_path"
+set +a
+"$launcher"
+test -f "$export_dir/status.json"
+python3 - "$target" "$before_observed" "$before_mtime" <<'PY'
+import datetime
+import json, pathlib, sys
+path=pathlib.Path(f'/var/lib/project-paper-observability/{sys.argv[1]}-export/status.json')
+value=json.loads(path.read_text())
+assert value.get('schema') == 'project-paper.resource-status.v1'
+assert value.get('environment') == sys.argv[1]
+assert value.get('scope') == 'host'
+observed=value.get('observed_at')
+assert isinstance(observed, str) and observed and observed != sys.argv[2]
+assert path.stat().st_mtime_ns > int(sys.argv[3])
+when=datetime.datetime.fromisoformat(observed.replace('Z','+00:00'))
+assert abs((datetime.datetime.now(datetime.timezone.utc)-when).total_seconds()) <= 300
+PY
+printf 'target=%s\nimage=%s\nconfig=%s\n' "$target" "$image" "$env_path" > "$receipt.new"
+install -o root -g root -m 0644 "$receipt.new" "$receipt"
+rm -f "$receipt.new"
+rm -rf "$backup"
+trap - ERR
+echo 'observability deployment complete'

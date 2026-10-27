@@ -20,6 +20,13 @@ if [ -z "$env_file" ]; then
   esac
 fi
 if [ -n "$env_file" ] && [ -r "$env_file" ]; then . "$env_file"; fi
+# host-package-pending-guard-v1 (caller holds collector lock)
+bootstrap_pending=/var/lib/project-paper-observability/mini-production-control/HOST-BOOTSTRAP-PENDING.json
+pending=/var/lib/project-paper-observability/mini-production-control/HOST-PACKAGE-PENDING.json
+if [ "${PROJECT_PAPER_RESOURCE_ENVIRONMENT:-}" = mini-production ] && [ "${PROJECT_PAPER_HOST_PACKAGE_QUALIFY:-0}" != 1 ] && { [ -e "$pending" ] || [ -L "$pending" ] || [ -e "$bootstrap_pending" ] || [ -L "$bootstrap_pending" ]; }; then
+  echo 'host package recovery pending' >&2
+  exit 75
+fi
 image="${PROJECT_PAPER_OBSERVABILITY_IMAGE:?image digest is required}"
 case "$image" in *[!A-Za-z0-9_./:@-]*) echo 'immutable image digest is required' >&2; exit 64 ;; esac
 printf '%s' "$image" | /usr/bin/grep -Eq '^[^@[:space:]]+@sha256:[0-9a-f]{64}$' || { echo 'immutable image digest is required' >&2; exit 64; }

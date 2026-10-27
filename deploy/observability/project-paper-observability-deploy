@@ -7,6 +7,13 @@ usage() { echo 'usage: project-paper-observability-deploy --image ghcr.io/devito
 image=$2; target=$4
 [[ "$image" =~ ^ghcr\.io/devitolo/paper-agent/observability:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || { echo 'immutable observability image required' >&2; exit 64; }
 case "$target" in aws-production|mini-production) ;; *) echo 'unsupported target' >&2; exit 64 ;; esac
+# After the guarded capability is bootstrapped, Mini image changes must be
+# covered by the same attested script/image transaction. The legacy sudo rule
+# must not become an alternate route around manifest verification.
+if [[ $target == mini-production ]] && [[ -e /usr/local/sbin/project-paper-observability-package-install || -L /usr/local/sbin/project-paper-observability-package-install ]]; then
+  echo 'Mini requires the guarded package installer' >&2
+  exit 75
+fi
 launcher=/usr/local/sbin/project-paper-observability-container
 [[ -f "$launcher" && ! -L "$launcher" && $(stat -c %u "$launcher") -eq 0 ]] || { echo 'fixed root-owned launcher missing' >&2; exit 66; }
 launcher_mode=$(stat -c %a "$launcher"); [[ $((8#$launcher_mode & 022)) -eq 0 ]] || { echo 'launcher is writable by non-root' >&2; exit 75; }
@@ -22,6 +29,11 @@ exec 9>/run/lock/project-paper-observability-deploy.lock
 /usr/bin/flock -n 9 || { echo 'observability deployment already running' >&2; exit 75; }
 exec 8>/run/lock/project-paper-observability.lock
 /usr/bin/flock -n 8 || { echo 'collector is running; deployment refused' >&2; exit 75; }
+# host-package-pending-guard-v1 (both locks held)
+bootstrap_pending=/var/lib/project-paper-observability/$target-control/HOST-BOOTSTRAP-PENDING.json
+[[ ! -e $bootstrap_pending && ! -L $bootstrap_pending ]] || { echo 'host bootstrap recovery pending' >&2; exit 75; }
+pending=/var/lib/project-paper-observability/$target-control/HOST-PACKAGE-PENDING.json
+[[ ! -e $pending && ! -L $pending ]] || { echo 'host package recovery pending' >&2; exit 75; }
 config_dir=/etc/project-paper-observability/$target
 state=/var/lib/project-paper-observability/$target
 export_dir=/var/lib/project-paper-observability/${target}-export
