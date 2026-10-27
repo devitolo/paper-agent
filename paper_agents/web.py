@@ -1646,7 +1646,8 @@ def _render_container_health(status: dict[str, Any], *, host: str) -> str:
         )
         details = '<div class="health-table"><table><thead><tr>' + headers + '</tr></thead><tbody>' + body + '</tbody></table></div>'
 
-    return f'<section class="health-section {host.lower()}-container-health"><h2>{host} containers</h2>' + message + details + '</section>'
+    observed = ('<p class="container-observed">Observed ' + render_telemetry_timestamp(containers.get('observed_at')) + '</p>') if fresh else ''
+    return f'<section class="health-section {host.lower()}-container-health"><h2>{host} containers</h2>' + observed + message + details + '</section>'
 
 
 def render_mini_container_health(status: dict[str, Any]) -> str:
@@ -4037,6 +4038,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .attention-card:first-of-type { border-top: 0; }
 .attention-card h3 { margin: 0 0 4px; font-size: 13px; }
 .attention-card p { margin: 3px 0; font-size: 12px; }
+.container-observed { margin: 4px 0 8px; color: var(--muted); font-size: 11px; }
 .container-details { margin-top: 4px; }
 .container-details summary { cursor: pointer; color: var(--muted); }
 .container-details code { display: block; max-width: 28ch; overflow-wrap: anywhere; }
@@ -4050,6 +4052,8 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
 .container-host-columns { align-items: start; }
+.container-host-columns > section { min-width: 0; max-width: 100%; }
+.container-host-columns .health-table { max-width: 100%; overflow-x: auto; }
 .resource-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .telemetry-age { white-space: nowrap; }
 .telemetry-age-stale { color: var(--danger, #dc2626); font-weight: 600; }
