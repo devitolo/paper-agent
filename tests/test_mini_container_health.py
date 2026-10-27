@@ -43,7 +43,7 @@ class MiniContainerHealthTests(unittest.TestCase):
         item=value['items'][-1];item.update(status='unavailable',health='unavailable',image_digest=None,image_id=None,cpu_percent=None,memory_bytes=None,memory_limit_bytes=None)
         html=web.render_mini_container_health({'freshness':'fresh','latest':{'containers':value}})
         self.assertIn('No health check configured',html)
-        self.assertIn('Not running or unavailable (scheduled job)',html)
+        self.assertIn('Scheduled',html)
         self.assertIn('CPU unavailable',html)
 
     def test_scheduled_job_checks_use_accepted_data_and_preserve_explicit_failures(self):

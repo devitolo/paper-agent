@@ -30,7 +30,7 @@ class AWSContainerHealthTests(unittest.TestCase):
         item.update(status='unavailable',health='unavailable',image_digest=None,image_id=None,cpu_percent=None,memory_bytes=None,memory_limit_bytes=None)
         page=web.render_aws_container_health(c.validate(value))
         self.assertIn('Last collection OK',page)
-        self.assertIn('scheduled job',page)
+        self.assertIn('Scheduled',page)
 
 
 if __name__=='__main__':unittest.main()

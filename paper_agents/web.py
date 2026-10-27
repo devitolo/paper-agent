@@ -1615,7 +1615,7 @@ def _render_container_health(status: dict[str, Any], *, host: str) -> str:
                 elif item['service'] == 'observability-publisher':
                     health = 'Last delivery accepted'
             if state == 'unavailable' and item['service'].startswith('observability-'):
-                state = 'Not running or unavailable (scheduled job)'
+                state = 'Scheduled'
             digest = item['image_digest']
             if digest is None and item['image_id']:
                 digest = 'Image ID: ' + item['image_id'] + ' (registry digest unavailable)'
