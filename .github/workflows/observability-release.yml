@@ -38,6 +38,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     outputs:
       archive: ${{ steps.archive.outputs.archive }}
       sha256: ${{ steps.archive.outputs.sha256 }}
@@ -69,18 +71,31 @@ jobs:
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}/observability:${GITHUB_REF_NAME}"
           printf '%s' "$CR_PAT" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          docker buildx build --platform linux/amd64 --push -f deploy/observability/Dockerfile -t "$image" .
+          docker buildx build --platform linux/amd64 --build-arg VCS_REF="$GITHUB_SHA" --push -f deploy/observability/Dockerfile -t "$image" .
           digest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
           [[ "$digest" = sha256:* ]]
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           printf 'image=%s@%s\n' "$image" "$digest" >> observability-release-evidence.txt
+          if [[ "$GITHUB_REF_NAME" == observability-mini ]]; then
+            python3 scripts/build_observability_host_package.py --source-sha "$GITHUB_SHA" --image "$image@$digest" --output-directory host-package
+          fi
+      - id: attest_host
+        if: github.ref_name == 'observability-mini'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: |
+            host-package/artifact.tar
+            host-package/manifest.json
+      - if: github.ref_name == 'observability-mini'
+        run: cp "${{ steps.attest_host.outputs.bundle-path }}" host-package/attestation.jsonl
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: project-paper-observability-${{ github.sha }}
           path: |
             ${{ steps.archive.outputs.archive }}
             observability-release-evidence.txt
+            host-package/
           if-no-files-found: error
           retention-days: 14
 
@@ -132,4 +147,19 @@ jobs:
           actual=$(sha256sum "$archive" | cut -d' ' -f1)
           test "$actual" = "$expected"
           image='${{ needs.package.outputs.image }}@${{ needs.package.outputs.image_digest }}'
-          sudo -n /usr/local/sbin/project-paper-observability-deploy --image "$image" --target "$target"
+          if [[ "$target" == mini-production ]]; then
+            host=/tmp/project-paper-observability-package/host-package
+            bundle=$(sha256sum "$host/artifact.tar" | cut -d' ' -f1)
+            inbox=/var/lib/project-paper-observability/mini-production-incoming
+            test -d "$inbox"
+            staged="$inbox/.upload-$bundle-$GITHUB_SHA"
+            test ! -e "$staged" && test ! -L "$staged"
+            mkdir "$staged"
+            trap 'rm -rf -- "$staged"' EXIT
+            install -m 0600 "$host/artifact.tar" "$host/manifest.json" "$host/attestation.jsonl" "$staged/"
+            sudo -n /usr/local/sbin/project-paper-observability-package-install --target mini-production --bundle "$bundle" --source-sha "$GITHUB_SHA"
+            rm -rf -- "$staged"
+            trap - EXIT
+          else
+            sudo -n /usr/local/sbin/project-paper-observability-deploy --image "$image" --target "$target"
+          fi
