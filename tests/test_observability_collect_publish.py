@@ -17,7 +17,7 @@ class CollectPublishTests(unittest.TestCase):
             docker=binary/'docker';docker.write_text('''#!/bin/sh
 case "$1" in
 container) exit 1;;
-run) echo "publish $*" >> "$CALLS"; exit "${PUBLISHER_EXIT}";;
+run) cat >/dev/null; echo "publish $*" >> "$CALLS"; exit "${PUBLISHER_EXIT}";;
 rm) exit 0;;
 esac
 ''');docker.chmod(0o755)

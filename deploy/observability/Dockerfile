@@ -8,7 +8,7 @@ RUN addgroup --system --gid 10002 publisher \
 WORKDIR /opt/project-paper-observability
 COPY scripts/host_resource_collector.py ./host_resource_collector.py
 COPY deploy/observability/entrypoint.sh ./entrypoint.sh
-COPY paper_agents/__init__.py paper_agents/observability_transport.py paper_agents/observability_publisher.py ./paper_agents/
+COPY paper_agents/__init__.py paper_agents/observability_transport.py paper_agents/observability_publisher.py paper_agents/container_telemetry.py ./paper_agents/
 COPY deploy/observability/publish.sh ./publish.sh
 RUN chmod 0555 host_resource_collector.py entrypoint.sh publish.sh
 USER 10001:10001

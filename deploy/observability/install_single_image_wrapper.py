@@ -16,7 +16,7 @@ CONTROL='var/lib/project-paper-observability/mini-production-control'
 ENV='etc/project-paper-observability/mini-production/mini-production.env'
 CRON='etc/cron.d/project-paper-observability-mini-production'
 OLD_SHA='effd533529bb0f0db5fadfd212a88079ac36c43b08f068861c1bba68772ff20d'
-NEW_SHA='bb721c206f8f705e8de6e24efbbac24a73ed7e585807e5787604e38366062614'
+NEW_SHA='0218b4ae926ab1b1738e21c729c6a80aaedd1f79622f6875409bf7dc5ddcb2ce'
 
 
 def digest(data):return hashlib.sha256(data).hexdigest()
@@ -48,7 +48,8 @@ def probe(image):
     if identity!='linux/amd64':raise ValueError('qualified AMD64 image must already be deployed')
     name='paper-observability-wrapper-probe-'+str(os.getpid())
     try:
-        subprocess.run(['/usr/bin/docker','run','--rm','--pull=never','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--user=10002:10002','--memory=64m','--pids-limit=16','--name',name,'--entrypoint=/opt/project-paper-observability/publish.sh',image,'--help'],env=environment,check=True,timeout=15,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        help_result=subprocess.run(['/usr/bin/docker','run','--rm','--pull=never','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--user=10002:10002','--memory=64m','--pids-limit=16','--name',name,'--entrypoint=/opt/project-paper-observability/publish.sh',image,'--help'],env=environment,check=True,timeout=15,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+        if '--container-health-stdin' not in help_result.stdout:raise ValueError('container-aware publisher image required')
     finally:
         subprocess.run(['/usr/bin/docker','rm','-f',name],env=environment,timeout=5,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 

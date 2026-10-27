@@ -1,15 +1,17 @@
-name: Observability Single Image Candidate
+name: Mini Container Monitoring Candidate
 
 on:
   push:
     branches:
-      - codex/observability-single-image
+      - codex/mini-container-monitoring
     paths:
       - .github/workflows/observability-single-image-test.yml
       - deploy/observability/**
       - paper_agents/observability_*.py
+      - paper_agents/container_telemetry.py
       - scripts/host_resource_collector.py
       - tests/test_observability_*.py
+      - tests/test_mini_container_telemetry.py
 
 permissions: {}
 concurrency:
@@ -29,7 +31,7 @@ jobs:
           persist-credentials: false
       - name: Test collector, publisher and isolation contracts
         run: |
-          python3 -m unittest tests.test_host_resource_collector tests.test_resource_status tests.test_observability_container tests.test_observability_aws_p1 tests.test_observability_collect_publish tests.test_observability_transport -v
+          python3 -m unittest tests.test_mini_container_telemetry tests.test_host_resource_collector tests.test_resource_status tests.test_observability_container tests.test_observability_aws_p1 tests.test_observability_collect_publish tests.test_observability_transport -v
           bash -n deploy/observability/collect-publish.sh deploy/observability/publish.sh deploy/observability/entrypoint.sh deploy/observability/run-container.sh
           git diff --check
       - name: Build and publish immutable AMD64 candidate
@@ -38,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$CR_PAT" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          image="ghcr.io/${GITHUB_REPOSITORY,,}/observability:single-image-$GITHUB_SHA"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/observability:mini-containers-$GITHUB_SHA"
           docker buildx build --platform linux/amd64 --push -f deploy/observability/Dockerfile -t "$image" .
           digest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]

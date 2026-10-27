@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -14,7 +15,7 @@ import uuid
 
 from paper_agents.observability_transport import (
     ENDPOINT, MAX_BYTES, TransportError, atomic, decode, encoded, identifier,
-    locked, project, read_key, signature, validate,
+    locked, project, read_key, signature, validate, validate_container_health,
 )
 
 
@@ -23,7 +24,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def publish_once(status_file, state_file, url, key_file, events_file=None):
+def publish_once(status_file, state_file, url, key_file, events_file=None, container_health=None):
     # Disable gate precedes every file/network access, including credentials.
     if os.environ.get('PAPER_OBSERVABILITY_PUBLISH_ENABLED') != '1':
         return {'state': 'disabled'}
@@ -47,6 +48,8 @@ def publish_once(status_file, state_file, url, key_file, events_file=None):
             with Path(status_file).open('rb') as stream:
                 raw = stream.read(MAX_BYTES + 1)
             source = decode(raw)
+            if container_health is not None:
+                source['latest']['containers'] = validate_container_health(container_health)
             events = []
             if events_file:
                 with Path(events_file).open('rb') as stream:
@@ -91,10 +94,16 @@ def main():
     parser.add_argument('--url', required=True)
     parser.add_argument('--key-file', type=Path, required=True)
     parser.add_argument('--events-file', type=Path)
+    parser.add_argument('--container-health-stdin', action='store_true')
     args = parser.parse_args()
     try:
-        print(json.dumps(publish_once(**vars(args))))
-    except (OSError, ValueError, TypeError):
+        values = vars(args)
+        read_health = values.pop('container_health_stdin')
+        if read_health and os.environ.get('PAPER_OBSERVABILITY_PUBLISH_ENABLED') == '1':
+            from paper_agents.container_telemetry import read_container_health
+            values['container_health'] = read_container_health(sys.stdin.buffer)
+        print(json.dumps(publish_once(**values)))
+    except (OSError, ValueError, TypeError, RecursionError):
         # No path, key, body, response or raw exception text in diagnostics.
         print('{"state":"delivery_failed"}')
         raise SystemExit(1)

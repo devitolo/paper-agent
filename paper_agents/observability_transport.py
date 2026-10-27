@@ -146,7 +146,8 @@ def validate(payload, *, clock=None, persisted=False):
             number(disk[key], 0, 100, nullable=True)
         if disk['capacity_bytes'] is not None and disk['available_bytes'] is not None and disk['available_bytes'] > disk['capacity_bytes']:
             raise TransportError(400, 'invalid disk capacity')
-    for key in ('containers', 'temperature', 'cgroup'):
+    validate_container_health(latest['containers'], clock=clock, persisted=persisted)
+    for key in ('temperature', 'cgroup'):
         exact(latest[key], ('state',))
         if not isinstance(latest[key]['state'], str) or latest[key]['state'] not in AVAILABILITY:
             raise TransportError(400, 'invalid availability')
@@ -164,6 +165,45 @@ def validate(payload, *, clock=None, persisted=False):
         if any(not isinstance(event[key], str) for key in ('source', 'state', 'code')) or event['source'] not in SOURCES or event['state'] not in ('started', 'completed', 'failed', 'skipped') or event['code'] not in CODES:
             raise TransportError(400, 'invalid event enum')
     return payload
+
+
+CONTAINER_SERVICES = ('app', 'minilm', 'ollama', 'phoenix', 'observability-collector', 'observability-publisher')
+
+
+def validate_container_health(value, *, clock=None, persisted=False):
+    if isinstance(value, dict) and set(value) == {'state'}:
+        if not isinstance(value['state'], str) or value['state'] not in AVAILABILITY:
+            raise TransportError(400, 'invalid container availability')
+        return value
+    exact(value, ('state', 'observed_at', 'items'))
+    if value['state'] != 'observed':
+        raise TransportError(400, 'invalid container state')
+    observed = stamp(value['observed_at'])
+    clock = time.time() if clock is None else clock
+    if not persisted and not clock - 2700 <= observed <= clock + 300:
+        raise TransportError(400, 'invalid container observation time')
+    items = value['items']
+    if not isinstance(items, list) or len(items) != len(CONTAINER_SERVICES):
+        raise TransportError(400, 'invalid container inventory')
+    for service, item in zip(CONTAINER_SERVICES, items):
+        exact(item, ('service', 'status', 'health', 'image_digest', 'image_id', 'cpu_percent', 'memory_bytes', 'memory_limit_bytes'))
+        if item['service'] != service:
+            raise TransportError(400, 'invalid container service')
+        if not isinstance(item['status'], str) or item['status'] not in ('created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead', 'unavailable'):
+            raise TransportError(400, 'invalid container status')
+        if not isinstance(item['health'], str) or item['health'] not in ('healthy', 'unhealthy', 'starting', 'no-healthcheck', 'unavailable'):
+            raise TransportError(400, 'invalid container health')
+        for field in ('image_digest', 'image_id'):
+            if item[field] is not None and (not isinstance(item[field], str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', item[field])):
+                raise TransportError(400, 'invalid container digest')
+        number(item['cpu_percent'], 0, 6400, nullable=True)
+        for field in ('memory_bytes', 'memory_limit_bytes'):
+            number(item[field], 0, 2**63-1, integer=True, nullable=True)
+        if item['status'] != 'running' and any(item[field] is not None for field in ('cpu_percent', 'memory_bytes', 'memory_limit_bytes')):
+            raise TransportError(400, 'invalid stopped container measurement')
+        if item['memory_bytes'] is not None and item['memory_limit_bytes'] is not None and item['memory_bytes'] > item['memory_limit_bytes']:
+            raise TransportError(400, 'invalid container memory')
+    return value
 
 
 def project(status, events=(), *, clock=None):
@@ -184,6 +224,8 @@ def project(status, events=(), *, clock=None):
             raise TransportError(400, 'invalid source availability')
         state = (latest.get(key) or {}).get('state', 'unknown')
         s['latest'][key] = {'state': state if isinstance(state, str) and state in AVAILABILITY else 'unknown'}
+    if isinstance(latest.get('containers'), dict) and 'items' in latest['containers']:
+        s['latest']['containers'] = validate_container_health(latest['containers'], clock=clock)
     return validate({'schema': SCHEMA, 'producer': 'mini-production', 'status': s, 'events': list(events)}, clock=clock)
 
 
@@ -306,15 +348,33 @@ def ingest(path, body, delivery_id, *, clock=None):
 
 
 def health_status(path=None, *, clock=None):
+    """Read the received Mini snapshot without locks, writes or secret access.
+
+    A receipt proves the last accepted delivery only; it cannot report the
+    outcome of a later publisher attempt that never reached AWS.
+    """
     clock = time.time() if clock is None else clock
+    unavailable = {'state': 'unavailable', 'freshness': 'unavailable',
+                   'source': 'Mini', 'observed_at': None, 'received_at': None,
+                   'age_seconds': None}
     try:
-        status = dict(read_state(path or os.environ.get('PAPER_OBSERVABILITY_STATE_FILE', STORE))['payload']['status'])
-        age = max(0, int(clock - stamp(status['observed_at'])))
-        if stamp(status['observed_at']) > clock + 300:
-            raise ValueError()
-        return {**status, 'age_seconds': age, 'state': 'stale' if age > 2700 else status['state']}
-    except (OSError, ValueError):
-        return {'state': 'unavailable', 'age_seconds': None}
+        saved = read_state(path or os.environ.get('PAPER_OBSERVABILITY_STATE_FILE', STORE))
+        status = dict(saved['payload']['status'])
+        observed, received = stamp(status['observed_at']), stamp(saved['received_at'])
+        if max(observed, received) > clock + 300 or observed > received + 300:
+            return {**unavailable, 'error': 'Telemetry timestamps are inconsistent or in the future.'}
+        age = max(0, int(clock - observed))
+        stale = age > 2700 or clock - received > 2700
+        return {**status, 'source': 'Mini', 'received_at': saved['received_at'],
+                'age_seconds': age, 'freshness': 'stale' if stale else 'fresh',
+                'state': 'stale' if stale else status['state'],
+                'error': 'No fresh Mini telemetry received within 45 minutes.' if stale else None}
+    except FileNotFoundError:
+        return {**unavailable, 'error': 'No Mini telemetry has been received.'}
+    except OSError:
+        return {**unavailable, 'error': 'Stored Mini telemetry cannot be read.'}
+    except (ValueError, TypeError, KeyError, OverflowError):
+        return {**unavailable, 'error': 'Stored Mini telemetry is invalid.'}
 
 
 def handle_post(handler):
