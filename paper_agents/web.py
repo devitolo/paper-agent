@@ -1623,9 +1623,12 @@ def _render_container_health(status: dict[str, Any], *, host: str) -> str:
             memory = item['memory_bytes']
             limit = item['memory_limit_bytes']
             resource = (f'{cpu:g}% CPU' if cpu is not None else 'CPU unavailable') + ' · '
-            resource += f'{memory / 1024**2:.1f} MiB memory' if memory is not None else 'memory unavailable'
-            if limit is not None:
-                resource += f' / {limit / 1024**2:.1f} MiB limit'
+            if memory is not None and limit is not None:
+                resource += f'{memory / 1024**2:.1f} / {limit / 1024**2:.1f} MiB'
+            else:
+                resource += f'{memory / 1024**2:.1f} MiB' if memory is not None else 'memory unavailable'
+                if limit is not None:
+                    resource += f' / {limit / 1024**2:.1f} MiB'
             rows.append({'container': labels[item['service']], 'status': state,
                          'health': 'No health check configured' if health == 'no-healthcheck' else health,
                          'image_digest': digest or 'Unavailable', 'cpu_and_memory': resource})
