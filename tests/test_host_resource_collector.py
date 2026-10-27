@@ -9,6 +9,30 @@ from scripts import host_resource_collector as collector
 
 
 class HostResourceCollectorTests(unittest.TestCase):
+    def test_disk_sampled_at_all_quarter_hours_and_delayed_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for minute in (0, 15, 30, 45, 46):
+                stamp = collector.datetime(2026, 10, 26, 12, minute, tzinfo=collector.timezone.utc)
+                with patch.object(collector, "now", return_value=stamp), patch.object(collector, "read_cpu", return_value=None), patch.object(collector, "filesystem", return_value={"used_percent": 55}) as disk:
+                    result = collector.sample(Path(directory))
+                disk.assert_called_once()
+                self.assertEqual(result["disk"]["used_percent"], 55)
+                self.assertEqual(result["observed_at"], stamp.isoformat())
+
+    def test_disk_value_and_timestamp_stay_paired_across_window_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = "2026-10-26T12:00:00+00:00"
+            new = "2026-10-26T12:15:06+00:00"
+            (root / "samples.jsonl").write_text(json.dumps({"observed_at": old, "disk": {"used_percent": 90}}) + "\n")
+            (root / "last-observations.json").write_text(json.dumps({"disk": {"observed_at": new, "value": {"used_percent": 55}}}))
+            result = collector.summarize(root, reference=collector.datetime.fromisoformat(new))
+            self.assertEqual(result["latest"]["disk"]["used_percent"], 55)
+            self.assertEqual(result["latest"]["observation_times"]["disk"], new)
+            (root / "samples.jsonl").unlink()
+            result = collector.summarize(root, reference=collector.datetime.fromisoformat("2026-10-26T14:00:00+00:00"))
+            self.assertEqual(result["latest"]["observation_times"]["disk"], new)
+
     def test_corrupt_numeric_intervals_cannot_crash_or_create_coverage(self):
         for seconds, value in ((1e308, 50), (10**1000, 50), (900, 10**1000)):
             with self.subTest(kind=(type(seconds).__name__, type(value).__name__)):

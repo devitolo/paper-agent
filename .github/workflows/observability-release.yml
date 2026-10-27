@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - name: Validate standalone package
         run: |
-          python3 -m unittest tests.test_mini_container_telemetry tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container tests.test_observability_aws_p1 tests.test_observability_collect_publish tests.test_observability_transport -v
+          python3 -m unittest tests.test_mini_container_telemetry tests.test_host_resource_collector tests.test_resource_status tests.test_observability_release tests.test_observability_container tests.test_observability_aws_p1 tests.test_observability_collect_publish tests.test_observability_transport tests.test_disk_provenance -v
           bash -n scripts/resource_collector_job.sh scripts/install_resource_collector_cron.sh scripts/remove_resource_collector_cron.sh deploy/observability/*.sh
           test -s deploy/observability/Dockerfile
           test -s deploy/observability/entrypoint.sh

@@ -30,7 +30,7 @@ def fixture(clock=None):
         'sample_count': 2, 'coverage_seconds': 900,
         'cpu': {'average_percent': 0, 'max_observed_percent': 0, 'peak_sustained_5m_percent': None, 'max_one_minute_percent': None},
         'memory': {'available_average_bytes': 0, 'available_max_bytes': 0, 'available_min_bytes': 0},
-        'latest': {'observed_at': now.isoformat(), 'disk': {'capacity_bytes': 1000, 'available_bytes': 500, 'used_percent': 50, 'inode_used_percent': 5}, 'containers': {'state': 'unconfigured'}, 'temperature': {'state': 'unavailable'}, 'cgroup': {'state': 'unavailable'}},
+        'latest': {'disk_observed_at': now.isoformat(), 'observed_at': now.isoformat(), 'disk': {'capacity_bytes': 1000, 'available_bytes': 500, 'used_percent': 50, 'inode_used_percent': 5}, 'containers': {'state': 'unconfigured'}, 'temperature': {'state': 'unavailable'}, 'cgroup': {'state': 'unavailable'}},
     }
     return {'schema': t.SCHEMA, 'producer': 'mini-production', 'status': status, 'events': []}
 

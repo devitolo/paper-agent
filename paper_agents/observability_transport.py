@@ -134,7 +134,10 @@ def validate(payload, *, clock=None, persisted=False):
     if all(v is not None for v in vals) and not vals[2] <= vals[0] <= vals[1]:
         raise TransportError(400, 'invalid memory maximum')
     latest = s['latest']
-    exact(latest, ('observed_at', 'disk', 'containers', 'temperature', 'cgroup'))
+    fields = ('observed_at', 'disk', 'containers', 'temperature', 'cgroup')
+    exact(latest, fields + (('disk_observed_at',) if isinstance(latest, dict) and 'disk_observed_at' in latest else ()))
+    if latest.get('disk_observed_at') is not None and stamp(latest['disk_observed_at']) > observed + 300:
+        raise TransportError(400, 'future disk observation')
     if latest['observed_at'] is not None and stamp(latest['observed_at']) > observed + 300:
         raise TransportError(400, 'future observation')
     disk = latest['disk']
@@ -219,6 +222,20 @@ def project(status, events=(), *, clock=None):
     if disk is not None and not isinstance(disk, dict):
         raise TransportError(400, 'invalid source disk')
     s['latest'] = {'observed_at': latest.get('observed_at'), 'disk': None if disk is None else {key: disk.get(key) for key in ('capacity_bytes', 'available_bytes', 'used_percent', 'inode_used_percent')}}
+    # Preserve disk provenance independently of CPU/host timestamps. Unknown or
+    # expired field times must not acquire the age of a fresh host observation.
+    observation_times = latest.get('observation_times')
+    disk_time = (observation_times.get('disk') if isinstance(observation_times, dict) else None) or latest.get('disk_observed_at')
+    current = time.time() if clock is None else clock
+    try:
+        disk_fresh = disk_time is not None and -300 <= current - stamp(disk_time) <= 2700
+    except TransportError:
+        disk_time, disk_fresh = None, False
+    if disk_time is not None and stamp(disk_time) > current + 300:
+        disk_time = None
+    s['latest']['disk_observed_at'] = disk_time
+    if not disk_fresh:
+        s['latest']['disk'] = None
     for key in ('containers', 'temperature', 'cgroup'):
         if latest.get(key) is not None and not isinstance(latest[key], dict):
             raise TransportError(400, 'invalid source availability')
@@ -363,6 +380,13 @@ def health_status(path=None, *, clock=None):
         observed, received = stamp(status['observed_at']), stamp(saved['received_at'])
         if max(observed, received) > clock + 300 or observed > received + 300:
             return {**unavailable, 'error': 'Telemetry timestamps are inconsistent or in the future.'}
+        latest = dict(status['latest'])
+        disk_time = latest.get('disk_observed_at')
+        disk_fresh = disk_time is not None and -300 <= clock - stamp(disk_time) <= 2700
+        if not disk_fresh:
+            latest['disk'] = None
+        status['latest'] = latest
+        status['disk_state'] = 'observed' if disk_fresh and latest['disk'] is not None else 'unavailable'
         age = max(0, int(clock - observed))
         stale = age > 2700 or clock - received > 2700
         return {**status, 'source': 'Mini', 'received_at': saved['received_at'],

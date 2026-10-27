@@ -127,8 +127,7 @@ def sample(root: Path) -> dict[str, Any]:
         except (OSError, ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError):
             record["cpu"]["state"] = "baseline_invalid"
         previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1], "observed_at": stamp.isoformat(), "boot_id": record.get("boot_id")}))
-    if stamp.minute % 60 == 0:
-        record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
+    record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
     cgroup = Path(os.environ.get("PROJECT_PAPER_RESOURCE_CGROUP_ROOT", "/sys/fs/cgroup"))
     try:
         record["cgroup"] = {"memory_current_bytes": int((cgroup / "memory.current").read_text().strip()), "memory_max_bytes": (lambda value: None if value == "max" else int(value))((cgroup / "memory.max").read_text().strip())}
@@ -192,7 +191,19 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
                 return row.get(name)
         entry = observations.get(name)
         return entry.get("value") if isinstance(entry, dict) else entry
-    latest_disk = latest_field("disk")
+    # Disk is an instantaneous observation, independent of the CPU averaging window.
+    # Keep its value and timestamp from the same sample, including a just-collected
+    # boundary sample that is outside the preceding averaging window.
+    disk_observations = [
+        {"observed_at": row["observed_at"], "value": row["disk"]}
+        for row in records if row.get("disk") is not None
+    ]
+    cached_disk = observations.get("disk")
+    if isinstance(cached_disk, dict) and cached_disk.get("observed_at"):
+        disk_observations.append(cached_disk)
+    if disk_observations:
+        observations["disk"] = max(disk_observations, key=lambda item: datetime.fromisoformat(item["observed_at"].replace("Z", "+00:00")))
+    latest_disk = observations.get("disk", {}).get("value")
     # CPU deltas describe intervals ending at observed_at. Clip both the
     # weighting and coverage to the declared window, even for a late cron run.
     intervals = []
