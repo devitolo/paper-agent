@@ -1549,7 +1549,7 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
         "Received by AWS (Pacific)": status.get("received_at"),
     }
     if freshness != "fresh":
-        for label in ("CPU (15 minutes)", "memory", "disk", "Collection status", "Publish status"):
+        for label in ("CPU (15 minutes)", "memory", "disk", "Collection status"):
             rows[label] = f"placeholder · {freshness}"
         rows["Telemetry error"] = status.get("error") or "Mini telemetry is unavailable."
         return rows
@@ -1564,7 +1564,6 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
         "memory": f"{gib(memory.get('available_average_bytes'))} available average · {gib(memory.get('available_min_bytes'))} minimum available",
         "disk": f"{amount(disk.get('used_percent'))} used · {gib(disk.get('available_bytes'))} available · {gib(disk.get('capacity_bytes'))} capacity",
         "Collection status": "complete · 15-minute window" if status["window"]["complete"] else f"warming · {status['coverage_seconds']}/900 seconds covered · {status['window']['sample_gaps']} gaps",
-        "Publish status": "last delivery accepted by AWS · subsequent attempts unknown",
     })
     return rows
 

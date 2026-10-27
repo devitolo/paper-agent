@@ -41,8 +41,9 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         html = self.render()
         for expected in ('Mini', 'just now', '0% average', '0% maximum observed',
                          '0.00 GiB available average', '50% used', 'complete · 15-minute window',
-                         'last delivery accepted by AWS', web.telemetry_pacific_time(self.payload['status']['observed_at'])):
+                         web.telemetry_pacific_time(self.payload['status']['observed_at'])):
             self.assertIn(expected, html)
+        self.assertNotIn('Publish Status</dt>', html)
         self.assertNotIn('/never-read-mini-directly', html)
         self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual([p.name for p in self.path.parent.iterdir() if p.name != 'mini-state.json.lock'], ['mini-state.json'])
