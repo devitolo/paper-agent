@@ -135,6 +135,7 @@ open(os.environ['QA_CAPTURE'],'w').write(json.dumps(value))
         decoy = dict(self.values, SEMANTIC_SCHOLAR_API_KEY1='decoy-one', SEMANTIC_SCHOLAR_API_KEY2='decoy-two')
         self.write_env(final / 'production.env', decoy)
         candidate = self.root / 'candidate'; candidate.mkdir()
+        (candidate / 'docker-compose.mini-migration.yml').write_bytes((ROOT / 'docker-compose.mini-migration.yml').read_bytes())
         overlay = self.root / 'overlay.yml'; overlay.write_text('services: {}\n')
         bin_dir = self.root / 'updater-bin'; bin_dir.mkdir()
         for name in ('flock',):

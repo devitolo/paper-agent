@@ -132,7 +132,7 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn("PAPER_MIGRATION_EXTRA_COMPOSE_FILES=/home/devitolo/paper-mini-rehearsal/production-cutover/docker-compose.production.yml", template)
         self.assertIn("PAPER_MIGRATION_DEPLOY_LOCK_FILE=/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock", template)
         self.assertNotIn("docker-compose.mini-rehearsal.yml", template)
-        for source, hour in (("core", "0 3"), ("openalex", "0 4"), ("arxiv", "0 5"), ("semantic", "0 6")):
+        for source, hour in (("core", "0 6"), ("openalex", "0 4"), ("arxiv", "0 5"), ("semantic", "0 3")):
             self.assertIn(f"{hour} * * * cd", template)
             self.assertIn(f"scripts/mini_container_job.sh {source}", template)
         self.assertIn("30 23 * * 0", template)
@@ -151,6 +151,30 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('PAPER_AGENT_ROUTINE_SYNC=1', update)
         self.assertIn('Missing or invalid PAPER_AGENT_SYNC_SHARED_SECRET in production env file', update)
         self.assertIn("verification_zenml_cron", update)
+
+    def test_cron_upgrade_preserves_other_jobs_and_is_idempotent(self):
+        import sys
+        import tempfile
+        script = (ROOT / "scripts/mini_production_update.sh").read_text()
+        marker = 'python3 - "$RELEASE_DIR/crontab.current"'
+        code = script.split(marker, 1)[1].split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+        template = (ROOT / "deploy/project-paper.crontab").read_text()
+        with tempfile.TemporaryDirectory() as tmp:
+            source, target = Path(tmp)/"before", Path(tmp)/"after"
+            custom = "\n17 12 * * * echo preserve-custom-job\n"
+            source.write_text(template + custom)
+            args = [sys.executable, "-c", code, str(source), str(target),
+                "/home/devitolo/paper-mini-rehearsal/production-cutover/docker-compose.production.yml",
+                "/home/devitolo/paper-mini-rehearsal/production-cutover/final-20260924-230636/production.env",
+                "/home/devitolo/paper-mini-rehearsal/production-cutover/deploy.lock"]
+            subprocess.run(args, check=True, capture_output=True)
+            self.assertEqual(target.read_text(), template + custom)
+            old = template.replace("0 6 * * * cd", "0 3 * * * cd", 1)
+            semantic = next(line for line in template.splitlines() if line.startswith("0 3 * * *"))
+            old = old.replace(semantic, semantic.replace("0 3", "0 6", 1))
+            source.write_text(old + custom)
+            subprocess.run(args, check=True, capture_output=True)
+            self.assertEqual(target.read_text(), template + custom)
 
     def test_routine_sync_is_explicitly_passed_to_app_and_defaults_off(self):
         script = (ROOT / "scripts/mini_sync_exchange.sh").read_text()

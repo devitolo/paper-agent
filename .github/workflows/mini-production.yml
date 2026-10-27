@@ -41,9 +41,11 @@ jobs:
       - name: Run deployment safety tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-          PYTHONPATH: tests
+          PYTHONPATH: ".:tests"
         run: |
           python3 -m unittest \
+            tests.test_curator_v3 \
+            tests.test_curator_interest \
             tests.test_mini_release_pipeline \
             tests.test_migration_foundations \
             tests.test_migration_gemini \

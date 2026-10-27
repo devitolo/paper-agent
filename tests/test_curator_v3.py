@@ -89,7 +89,7 @@ class CuratorV3ScoringTests(unittest.TestCase):
 
 class CuratorV3EvidenceCallTests(unittest.TestCase):
     def test_curator_allows_bounded_qwen3_cold_start(self):
-        self.assertEqual(CuratorConfig().evidence_timeout, 180)
+        self.assertEqual(CuratorConfig().evidence_timeout, 900)
 
     def test_malformed_response_becomes_unavailable_assessment(self):
         with patch("paper_agents.curator_evidence.call_ollama", return_value={"response": "not-json"}):
@@ -180,7 +180,7 @@ class CuratorV3EvidenceCallTests(unittest.TestCase):
         kwargs = call.call_args.kwargs
         self.assertFalse(kwargs["think"])
         self.assertEqual(kwargs["options"]["num_ctx"], 4096)
-        self.assertEqual(kwargs["options"]["num_predict"], 220)
+        self.assertEqual(kwargs["options"]["num_predict"], 512)
 
     def test_short_technical_evidence_and_string_prose_remain_valid(self):
         payload = assessment(experiment_or_evaluation="A/B test", real_data_or_deployment="Linux",
@@ -255,6 +255,55 @@ class CuratorV3EvidenceCallTests(unittest.TestCase):
                     config=CuratorConfig(min_quality_score=1, max_scout_attempts=1, evidence_enabled=True),
                 )
             self.assertEqual(writer_errors, [])
+
+    def test_two_overlapping_reviews_keep_sqlite_and_unload_on_owner_thread(self):
+        import threading
+        barrier = threading.Barrier(2)
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+        seen = []
+        owner = threading.get_ident()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "parallel.db"
+            db.init_db(path)
+            connection = db.connect_db(path)
+            self.addCleanup(connection.close)
+            cycle = db.create_workflow_cycle(connection, mode="test", max_scout_attempts=1)
+            candidates = []
+            for n in range(4):
+                paper_id, _ = db.upsert_paper(connection, {
+                    "source": "arxiv", "source_id": str(n), "title": "AIOps incident response " + str(n),
+                    "abstract": "Measured production evaluation for observability.",
+                })
+                candidates.append({"paper_id": paper_id, "title": "AIOps " + str(n), "abstract": "Measured results."})
+            def judge(candidate, **kwargs):
+                nonlocal active, peak
+                self.assertNotEqual(threading.get_ident(), owner)
+                self.assertEqual(kwargs["timeout"], 900)
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                    seen.append(candidate["paper_id"])
+                try:
+                    barrier.wait(timeout=3)
+                    return assessment()
+                finally:
+                    with lock:
+                        active -= 1
+            def unload(*args):
+                self.assertEqual(threading.get_ident(), owner)
+                self.assertEqual(active, 0)
+            with patch("paper_agents.curator_agent.assess_evidence", side_effect=judge), \
+                 patch("paper_agents.curator_agent.unload_ollama_model", side_effect=unload) as cleanup:
+                result = CuratorAgent().run(connection, workflow_cycle_id=cycle, candidates=candidates,
+                    profile_version=None, scout_attempt_count=1,
+                    config=CuratorConfig(evidence_enabled=True, interest_fit_enabled=False, min_quality_score=0))
+            self.assertEqual(peak, 2)
+            self.assertCountEqual(seen, [c["paper_id"] for c in candidates])
+            self.assertEqual(len(result["evaluations"]), 4)
+            self.assertEqual(connection.execute("SELECT count(*) FROM curator_evaluations").fetchone()[0], 4)
+            cleanup.assert_called_once()
 
     def test_active_qwen3_judge_is_limited_to_top_ten_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:
