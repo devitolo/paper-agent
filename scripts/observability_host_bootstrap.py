@@ -79,9 +79,11 @@ def restore(root, control):
         if destination.exists() or destination.is_symlink():trusted(destination)
         if set(entry)!={'sha256','mode'}:raise ValueError('invalid recovery fields')
         if entry['mode'] is None:
-            if entry['sha256'] is not None:raise ValueError('invalid absent recovery file')
+            if name in OLD_HASHES or entry['sha256'] is not None:raise ValueError('invalid absent recovery file')
             snapshots.append((destination,None,None));continue
         if entry['mode']!=mode:raise ValueError('unexpected backup mode')
+        if entry['sha256'] not in {SOURCE_HASHES[name],OLD_HASHES.get(name)}:
+            raise ValueError('unexpected bootstrap backup revision')
         previous=transaction/(str(index)+'.before');trusted(previous)
         data=previous.read_bytes()
         if sha(data)!=entry['sha256']:raise ValueError('corrupt recovery backup')

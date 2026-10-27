@@ -97,6 +97,24 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaises(OSError):self.bootstrap()
         self.assert_restored()
 
+    def test_recovery_cannot_delete_a_required_previous_entrypoint(self):
+        import json
+        original=self.m.atomic
+        target=self.root/self.m.FILES['sudoers'][0]
+        def crash(path,data,mode):
+            original(path,data,mode)
+            if path==target:raise KeyboardInterrupt()
+        with patch.object(self.m,'atomic',side_effect=crash):
+            with self.assertRaises(KeyboardInterrupt):self.bootstrap()
+        pending=self.control/'HOST-BOOTSTRAP-PENDING.json'
+        audit=json.loads(pending.read_text())
+        relative=self.m.FILES['run-container.sh'][0]
+        audit['before'][relative]={'mode':None,'sha256':None}
+        pending.write_text(json.dumps(audit))
+        with self.assertRaises(ValueError):self.m.restore(self.root,self.control)
+        self.assertTrue((self.root/relative).exists())
+        self.assertTrue(pending.exists())
+
     def test_runner_authority_installed_last(self):
         original=self.m.atomic;active=[]
         def record(path,data,mode):

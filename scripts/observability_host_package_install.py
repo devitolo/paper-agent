@@ -20,7 +20,7 @@ import tarfile
 import tempfile
 import time
 
-SCHEMA = 'project-paper.observability-host-package.v1'
+SCHEMA = 'project-paper.observability-host-package.v2'
 TARGET = 'mini-production'
 FILES = {
     'deploy/observability/collect-publish.sh': '/usr/local/sbin/project-paper-observability-collect-publish',
