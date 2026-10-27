@@ -9,7 +9,7 @@ class AWSContainerHealthTests(unittest.TestCase):
     def test_actual_projection_has_matching_columns_and_collapsed_digests(self):
         status=c.validate(c.from_stream(io.BytesIO(facts())))
         page=web.render_aws_container_health(status)
-        for text in ('AWS containers','Production app','healthy','0% CPU','5.5 MiB memory'):
+        for text in ('AWS containers','Production app','healthy','<th>CPU</th><th>Memory</th>','5.5 / 64.0 MiB'):
             self.assertIn(text,page)
         self.assertNotIn('<th>Image Digest</th>',page)
         self.assertEqual(page.count('<details class="container-details">'),2)
@@ -30,7 +30,7 @@ class AWSContainerHealthTests(unittest.TestCase):
         item.update(status='unavailable',health='unavailable',image_digest=None,image_id=None,cpu_percent=None,memory_bytes=None,memory_limit_bytes=None)
         page=web.render_aws_container_health(c.validate(value))
         self.assertIn('Last collection OK',page)
-        self.assertIn('scheduled job',page)
+        self.assertIn('Scheduled',page)
 
 
 if __name__=='__main__':unittest.main()
