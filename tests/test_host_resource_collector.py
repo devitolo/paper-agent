@@ -93,6 +93,20 @@ class HostResourceCollectorTests(unittest.TestCase):
             result = collector.summarize(root, reference=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc))
         self.assertIsNone(result["cpu"]["peak_sustained_5m_percent"])
 
+    def test_aws_delayed_collection_refreshes_existing_export(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "state"
+            export = Path(directory) / "export"
+            export.mkdir()
+            (export / "status.json").write_text('{"old":true}')
+            stamp = collector.datetime(2026, 10, 26, 12, 46, tzinfo=collector.timezone.utc)
+            with patch.dict(collector.os.environ, {"PROJECT_PAPER_RESOURCE_ENVIRONMENT": "aws-production", "PROJECT_PAPER_RESOURCE_EXPORT_DIR": str(export)}), patch.object(collector, "now", return_value=stamp), patch.object(collector, "filesystem", return_value={"used_percent": 55}):
+                collector.collect(root)
+            status = json.loads((export / "status.json").read_text())
+            self.assertEqual(status["latest"]["disk"]["used_percent"], 55)
+            self.assertEqual(status["latest"]["observation_times"]["disk"], stamp.isoformat())
+            self.assertEqual(status["observed_at"], stamp.isoformat())
+
     def test_collect_publishes_atomic_summary_without_database_access(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(collector, "now", return_value=collector.datetime(2026, 10, 24, 12, 15, tzinfo=collector.timezone.utc)):
             root = Path(directory)
