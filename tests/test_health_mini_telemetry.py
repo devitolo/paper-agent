@@ -39,9 +39,9 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         self.assertEqual(status['freshness'], 'fresh')
         self.assertEqual(status['received_at'], self.payload['status']['observed_at'])
         html = self.render()
-        for expected in ('Source', 'Mini', 'fresh', '0% average', '0% maximum observed',
+        for expected in ('Mini', 'fresh', '0% average', '0% maximum observed',
                          '0.00 GiB available average', '50% used', 'complete · 15-minute window',
-                         'last delivery accepted by AWS', self.payload['status']['observed_at']):
+                         'last delivery accepted by AWS', web.telemetry_pacific_time(self.payload['status']['observed_at'])):
             self.assertIn(expected, html)
         self.assertNotIn('/never-read-mini-directly', html)
         self.assertEqual(self.path.read_bytes(), before)
@@ -57,6 +57,12 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         self.assertIn('No fresh Mini telemetry received within 45 minutes.', html)
         self.assertNotIn('50% used', html)
         self.assertNotIn('0% average', html)
+
+    def test_pacific_display_handles_daylight_saving_and_invalid_times(self):
+        self.assertEqual(web.telemetry_pacific_time('2026-10-26T21:45:06+00:00'), '2026-10-26 02:45:06 PM PDT')
+        self.assertEqual(web.telemetry_pacific_time('2026-12-26T21:45:06Z'), '2026-12-26 01:45:06 PM PST')
+        for value in (None, 'invalid', '2026-10-26T21:45:06'):
+            self.assertEqual(web.telemetry_pacific_time(value), 'unknown')
 
     def test_freshness_threshold(self):
         self.save()
