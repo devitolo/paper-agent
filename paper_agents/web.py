@@ -1629,8 +1629,7 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
             rows.append({'container': labels[item['service']], 'status': state,
                          'health': 'No health check configured' if health == 'no-healthcheck' else health,
                          'image_digest': digest or 'Unavailable', 'cpu_and_memory': resource})
-    message = ('Docker-reported status, health, running image digest, and sampled CPU/memory. Collector and publisher are scheduled jobs; they normally have no running container between runs.'
-               if fresh else 'No fresh Mini container observations have been received.')
+    message = '' if fresh else '<p>No fresh Mini container observations have been received.</p>'
     details = ''
     if rows:
         columns = ('status', 'health', 'cpu_and_memory')
@@ -1644,7 +1643,7 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
         )
         details = '<div class="health-table"><table><thead><tr>' + headers + '</tr></thead><tbody>' + body + '</tbody></table></div>'
 
-    return '<section class="health-section mini-container-health"><h2>Mini containers</h2><p>' + message + '</p>' + details + '</section>'
+    return '<section class="health-section mini-container-health"><h2>Mini containers</h2>' + message + details + '</section>'
 
 
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
