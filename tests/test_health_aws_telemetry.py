@@ -32,6 +32,8 @@ class AWSHealthTests(unittest.TestCase):
         before=self.path.read_bytes();value=self.read();self.assertEqual(value['freshness'],'fresh')
         self.assertNotIn('secrets',value);self.assertNotIn('path',value['disk'])
         html=self.page()
+        self.assertNotIn('Telemetry Freshness</dt>',html)
+        self.assertIn('just now',html)
         for item in ('AWS','0% average','0% maximum observed','50% used','0.00 GiB available average'):self.assertIn(item,html)
         self.assertNotIn('never-render-this',html);self.assertNotIn('/private/must-not-render',html)
         self.assertEqual(self.path.read_bytes(),before)

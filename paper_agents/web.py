@@ -10,6 +10,7 @@ import re
 import signal
 import sqlite3
 import threading
+import time
 import urllib.parse
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -1517,16 +1518,38 @@ def telemetry_pacific_time(value: Any) -> str:
         return "unknown"
 
 
+def render_telemetry_timestamp(value: Any, *, clock: float | None = None) -> str:
+    formatted = telemetry_pacific_time(value)
+    if formatted == "unknown":
+        return "unknown"
+    instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    age = max(0, int((time.time() if clock is None else clock) - instant.timestamp()))
+    if age < 60:
+        label = "just now"
+    elif age < 3600:
+        minutes = age // 60
+        label = f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    elif age < 86400:
+        hours = age // 3600
+        label = f"{hours} hour{'s' if hours != 1 else ''} ago"
+    else:
+        days = age // 86400
+        label = f"{days} day{'s' if days != 1 else ''} ago"
+    stale = age > 45 * 60
+    style = "telemetry-age telemetry-age-stale" if stale else "telemetry-age"
+    title = ' title="Older than 45 minutes"' if stale else ''
+    return f'<time datetime="{escape(value)}">{escape(formatted)}</time> · <span class="{style}"{title}>{label}</span>'
+
+
 def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     """Presentation of validated received telemetry; stale numbers stay hidden."""
     freshness = status.get("freshness", "unavailable")
     rows = {
-        "Mini telemetry freshness": freshness,
-        "Observed at (Pacific)": telemetry_pacific_time(status.get("observed_at")),
-        "Received by AWS (Pacific)": telemetry_pacific_time(status.get("received_at")),
+        "Observed at (Pacific)": status.get("observed_at"),
+        "Received by AWS (Pacific)": status.get("received_at"),
     }
     if freshness != "fresh":
-        for label in ("Mini CPU (15 minutes)", "Mini memory", "Mini disk", "Collection status", "Publish status"):
+        for label in ("CPU (15 minutes)", "memory", "disk", "Collection status"):
             rows[label] = f"placeholder · {freshness}"
         rows["Telemetry error"] = status.get("error") or "Mini telemetry is unavailable."
         return rows
@@ -1537,22 +1560,20 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     cpu, memory = status["cpu"], status["memory"]
     disk = status["latest"].get("disk") or {}
     rows.update({
-        "Mini CPU (15 minutes)": f"{amount(cpu.get('average_percent'))} average · {amount(cpu.get('max_observed_percent'))} maximum observed",
-        "Mini memory": f"{gib(memory.get('available_average_bytes'))} available average · {gib(memory.get('available_min_bytes'))} minimum available",
-        "Mini disk": f"{amount(disk.get('used_percent'))} used · {gib(disk.get('available_bytes'))} available · {gib(disk.get('capacity_bytes'))} capacity",
+        "CPU (15 minutes)": f"{amount(cpu.get('average_percent'))} average · {amount(cpu.get('max_observed_percent'))} maximum observed",
+        "memory": f"{gib(memory.get('available_average_bytes'))} available average · {gib(memory.get('available_min_bytes'))} minimum available",
+        "disk": f"{amount(disk.get('used_percent'))} used · {gib(disk.get('available_bytes'))} available · {gib(disk.get('capacity_bytes'))} capacity",
         "Collection status": "complete · 15-minute window" if status["window"]["complete"] else f"warming · {status['coverage_seconds']}/900 seconds covered · {status['window']['sample_gaps']} gaps",
-        "Publish status": "last delivery accepted by AWS · subsequent attempts unknown",
     })
     return rows
 
 
 def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     freshness = status.get("freshness", "unavailable")
-    rows = {"AWS telemetry freshness": freshness,
-            "AWS observed at (Pacific)": telemetry_pacific_time(status.get("observed_at")),
+    rows = {"Observed at (Pacific)": status.get("observed_at"),
             "\u00a0": "\u00a0"}
     if freshness != "fresh":
-        for label in ("AWS CPU (15 minutes)", "AWS memory", "AWS disk", "Collection status"):
+        for label in ("CPU (15 minutes)", "memory", "disk", "Collection status"):
             rows[label] = f"placeholder · {freshness}"
         rows["Telemetry error"] = status.get("error") or "AWS telemetry unavailable."
         return rows
@@ -1560,12 +1581,12 @@ def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     def gib(value):return "unavailable" if value is None else f"{value / (1024 ** 3):.2f} GiB"
     cpu, memory = status["cpu"], status["memory"]
     rows.update({
-        "AWS CPU (15 minutes)": f"{percent(cpu['average_percent'])} average · {percent(cpu['max_observed_percent'])} maximum observed",
-        "AWS memory": f"{gib(memory['available_average_bytes'])} available average · {gib(memory['available_min_bytes'])} minimum available",
+        "CPU (15 minutes)": f"{percent(cpu['average_percent'])} average · {percent(cpu['max_observed_percent'])} maximum observed",
+        "memory": f"{gib(memory['available_average_bytes'])} available average · {gib(memory['available_min_bytes'])} minimum available",
         "Collection status": "complete · 15-minute window" if status["complete"] else "warming · incomplete window",
     })
     disk = status.get("disk")
-    rows["AWS disk"] = (f"{percent(disk['used_percent'])} used · {gib(disk['available_bytes'])} available · {gib(disk['capacity_bytes'])} capacity"
+    rows["disk"] = (f"{percent(disk['used_percent'])} used · {gib(disk['available_bytes'])} available · {gib(disk['capacity_bytes'])} capacity"
                          if disk else f"Unavailable · {status.get('disk_state', 'unavailable')} disk observation")
     return rows
 
@@ -1588,6 +1609,11 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
     if fresh:
         for item in items:
             state, health = item['status'], item['health']
+            if status.get('received_at') and health in ('unavailable', 'no-healthcheck'):
+                if item['service'] == 'observability-collector':
+                    health = 'Last received collection OK'
+                elif item['service'] == 'observability-publisher':
+                    health = 'Last delivery accepted'
             if state == 'unavailable' and item['service'].startswith('observability-'):
                 state = 'Not running or unavailable (scheduled job)'
             digest = item['image_digest']
@@ -1605,21 +1631,28 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
                          'image_digest': digest or 'Unavailable', 'cpu_and_memory': resource})
     message = ('Docker-reported status, health, running image digest, and sampled CPU/memory. Collector and publisher are scheduled jobs; they normally have no running container between runs.'
                if fresh else 'No fresh Mini container observations have been received.')
-    details = render_health_table('Mini containers', rows, ['container', 'status', 'health', 'image_digest', 'cpu_and_memory']) if rows else ''
+    details = ''
+    if rows:
+        columns = ('status', 'health', 'cpu_and_memory')
+        headers = '<th>Container</th>' + ''.join(f'<th>{escape(key.replace("_", " ").title())}</th>' for key in columns)
+        body = ''.join(
+            '<tr><td>' + escape(row['container'])
+            + '<details class="container-details"><summary>Details</summary><div>Image digest<code>'
+            + escape(row['image_digest']) + '</code></div></details></td>'
+            + ''.join('<td>' + escape(row[key]) + '</td>' for key in columns) + '</tr>'
+            for row in rows
+        )
+        details = '<div class="health-table"><table><thead><tr>' + headers + '</tr></thead><tbody>' + body + '</tbody></table></div>'
+
     return '<section class="health-section mini-container-health"><h2>Mini containers</h2><p>' + message + '</p>' + details + '</section>'
 
 
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
     mini_status = mini_telemetry_health()
     aws_status = load_aws_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
-    database = {
-        "Database integrity": str(summary["db"]["integrity"]),
-        "Database path": str(summary["db"]["path"]),
-    }
     mini = mini_telemetry_rows(mini_status)
     aws = aws_telemetry_rows(aws_status)
-    badge = "SANITIZED COLLECTOR DATA" if mini_status.get("freshness") == "fresh" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · NO FRESH OBSERVATIONS"
-    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3><img src="/assets/mini-icon.png" class="resource-host-icon" alt="" width="28" height="28"> Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3><img src="/assets/aws-icon.png" class="resource-host-icon" alt="" width="28" height="28"> AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked fresh, stale, unknown, or unavailable. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>' + render_mini_container_health(mini_status)
+    return '<section class="health-section"><h2>Infrastructure</h2><div class="resource-columns"><section class="resource-panel"><h3><img src="/assets/mini-icon.png" class="resource-host-icon" alt="" width="28" height="28"> Mini</h3>' + render_key_values(mini, timestamp_keys={'Observed at (Pacific)', 'Received by AWS (Pacific)'}) + '</section><section class="resource-panel"><h3><img src="/assets/aws-icon.png" class="resource-host-icon" alt="" width="28" height="28"> AWS</h3>' + render_key_values(aws, timestamp_keys={'Observed at (Pacific)'}) + '</section></div></section>' + render_mini_container_health(mini_status)
 
 
 def render_health_job_charts(summary: dict[str, Any]) -> str:
@@ -2717,8 +2750,12 @@ def render_health_table(title: str, rows: list[dict[str, Any]], columns: list[st
     </div>"""
 
 
-def render_key_values(values: dict[str, Any]) -> str:
-    items = "".join(f"<dt>{escape(key.replace('_', ' ').title())}</dt><dd>{escape(value)}</dd>" for key, value in values.items())
+def render_key_values(values: dict[str, Any], *, timestamp_keys: set[str] | None = None) -> str:
+    items = "".join(
+        f"<dt>{escape(key.replace('_', ' ').title())}</dt><dd>"
+        + (render_telemetry_timestamp(value) if timestamp_keys and key in timestamp_keys else escape(value))
+        + "</dd>" for key, value in values.items()
+    )
     return f'<dl class="health-kv">{items}</dl>'
 
 
@@ -3986,6 +4023,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .attention-card:first-of-type { border-top: 0; }
 .attention-card h3 { margin: 0 0 4px; font-size: 13px; }
 .attention-card p { margin: 3px 0; font-size: 12px; }
+.container-details { margin-top: 4px; }
+.container-details summary { cursor: pointer; color: var(--muted); }
+.container-details code { display: block; max-width: 28ch; overflow-wrap: anywhere; }
 .mini-container-health td { overflow-wrap: anywhere; }
 .health-table { margin: 8px 0 12px; overflow-x: auto; }
 .health-table table { width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; }
@@ -3995,8 +4035,9 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
-.infra-database { margin-bottom: 14px; }
 .resource-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.telemetry-age { white-space: nowrap; }
+.telemetry-age-stale { color: var(--danger, #dc2626); font-weight: 600; }
 .resource-host-icon { object-fit: contain; vertical-align: middle; margin-right: 6px; }
 .resource-panel { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(8, 13, 20, 0.28); }
 .resource-panel .health-kv { border: 0; padding: 0; background: transparent; }

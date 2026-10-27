@@ -27,6 +27,9 @@ class MiniContainerHealthTests(unittest.TestCase):
             html=web.render_mini_container_health(t.health_status(path,clock=clock))
             for expected in ('Production app','Observability publisher','healthy','sha256:'+'b'*64,'0.25% CPU','5.5 MiB memory'):
                 self.assertIn(expected,html)
+            self.assertNotIn('<th>Image Digest</th>',html)
+            self.assertEqual(html.count('<details class="container-details">'),6)
+            self.assertNotIn('<details open',html)
             self.assertEqual(path.read_bytes(),before)
 
     def test_old_container_observation_hidden_despite_fresh_host(self):
@@ -42,6 +45,21 @@ class MiniContainerHealthTests(unittest.TestCase):
         self.assertIn('No health check configured',html)
         self.assertIn('Not running or unavailable (scheduled job)',html)
         self.assertIn('CPU unavailable',html)
+
+    def test_scheduled_job_checks_use_accepted_data_and_preserve_explicit_failures(self):
+        value=snapshot()
+        for item in value['items'][-2:]:
+            item['status']='unavailable';item['health']='unavailable'
+        html=web.render_mini_container_health({'freshness':'fresh','received_at':value['observed_at'],'latest':{'containers':value}})
+        self.assertIn('Last received collection OK',html)
+        self.assertIn('Last delivery accepted',html)
+        html=web.render_mini_container_health({'freshness':'stale','latest':{'containers':value}})
+        self.assertNotIn('Last received collection OK',html)
+        self.assertNotIn('Last delivery accepted',html)
+        for item in value['items'][-2:]:item['health']='unhealthy'
+        html=web.render_mini_container_health({'freshness':'fresh','received_at':value['observed_at'],'latest':{'containers':value}})
+        self.assertNotIn('Last received collection OK',html)
+        self.assertIn('unhealthy',html)
 
     def test_old_payload_stays_accepted_and_bad_new_fields_fail_closed(self):
         value=fixture(time.time());t.validate(value)
