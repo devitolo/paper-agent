@@ -1634,14 +1634,9 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
     mini_status = mini_telemetry_health()
     aws_status = load_aws_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
-    database = {
-        "Database integrity": str(summary["db"]["integrity"]),
-        "Database path": str(summary["db"]["path"]),
-    }
     mini = mini_telemetry_rows(mini_status)
     aws = aws_telemetry_rows(aws_status)
-    badge = "SANITIZED COLLECTOR DATA" if mini_status.get("freshness") == "fresh" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · NO FRESH OBSERVATIONS"
-    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3><img src="/assets/mini-icon.png" class="resource-host-icon" alt="" width="28" height="28"> Mini</h3>' + render_key_values(mini, timestamp_keys={'Observed at (Pacific)', 'Received by AWS (Pacific)'}) + '</section><section class="resource-panel"><h3><img src="/assets/aws-icon.png" class="resource-host-icon" alt="" width="28" height="28"> AWS</h3>' + render_key_values(aws, timestamp_keys={'AWS observed at (Pacific)'}) + '</section></div><p class="health-footnote">Observation and receipt ages appear beside Pacific timestamps. Red ages are older than 45 minutes; stale measurements stay hidden. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>' + render_mini_container_health(mini_status)
+    return '<section class="health-section"><h2>Infrastructure</h2><div class="resource-columns"><section class="resource-panel"><h3><img src="/assets/mini-icon.png" class="resource-host-icon" alt="" width="28" height="28"> Mini</h3>' + render_key_values(mini, timestamp_keys={'Observed at (Pacific)', 'Received by AWS (Pacific)'}) + '</section><section class="resource-panel"><h3><img src="/assets/aws-icon.png" class="resource-host-icon" alt="" width="28" height="28"> AWS</h3>' + render_key_values(aws, timestamp_keys={'AWS observed at (Pacific)'}) + '</section></div><p class="health-footnote">Observation and receipt ages appear beside Pacific timestamps. Red ages are older than 45 minutes; stale measurements stay hidden. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>' + render_mini_container_health(mini_status)
 
 
 def render_health_job_charts(summary: dict[str, Any]) -> str:
@@ -4021,7 +4016,6 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
-.infra-database { margin-bottom: 14px; }
 .resource-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .telemetry-age { white-space: nowrap; }
 .telemetry-age-stale { color: var(--danger, #dc2626); font-weight: 600; }
