@@ -44,21 +44,21 @@ class MiniContainerHealthTests(unittest.TestCase):
         html=web.render_mini_container_health({'freshness':'fresh','latest':{'containers':value}})
         self.assertIn('No health check configured',html)
         self.assertIn('Scheduled',html)
-        self.assertIn('<td>Unavailable</td><td>Unavailable</td>',html)
+        self.assertIn('<td>N/A</td><td>Unavailable</td>',html)
 
     def test_scheduled_job_checks_use_accepted_data_and_preserve_explicit_failures(self):
         value=snapshot()
         for item in value['items'][-2:]:
             item['status']='unavailable';item['health']='unavailable'
         html=web.render_mini_container_health({'freshness':'fresh','received_at':value['observed_at'],'latest':{'containers':value}})
-        self.assertIn('Last received collection OK',html)
+        self.assertIn('Last collection OK',html)
         self.assertIn('Last delivery accepted',html)
         html=web.render_mini_container_health({'freshness':'stale','latest':{'containers':value}})
-        self.assertNotIn('Last received collection OK',html)
+        self.assertNotIn('Last collection OK',html)
         self.assertNotIn('Last delivery accepted',html)
         for item in value['items'][-2:]:item['health']='unhealthy'
         html=web.render_mini_container_health({'freshness':'fresh','received_at':value['observed_at'],'latest':{'containers':value}})
-        self.assertNotIn('Last received collection OK',html)
+        self.assertNotIn('Last collection OK',html)
         self.assertIn('unhealthy',html)
 
     def test_old_payload_stays_accepted_and_bad_new_fields_fail_closed(self):

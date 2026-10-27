@@ -1611,7 +1611,7 @@ def _render_container_health(status: dict[str, Any], *, host: str) -> str:
             state, health = item['status'], item['health']
             if (status.get('received_at') or host == 'AWS') and health in ('unavailable', 'no-healthcheck'):
                 if item['service'] == 'observability-collector':
-                    health = 'Last received collection OK' if host == 'Mini' else 'Last collection OK'
+                    health = 'Last collection OK'
                 elif item['service'] == 'observability-publisher':
                     health = 'Last delivery accepted'
             if state == 'unavailable' and item['service'].startswith('observability-'):
@@ -1622,7 +1622,7 @@ def _render_container_health(status: dict[str, Any], *, host: str) -> str:
             cpu = item['cpu_percent']
             memory = item['memory_bytes']
             limit = item['memory_limit_bytes']
-            cpu_text = f'{cpu:g}%' if cpu is not None else 'Unavailable'
+            cpu_text = f'{cpu:g}%' if cpu is not None else 'N/A'
             if memory is not None and limit is not None:
                 memory_text = f'{memory / 1024**2:.1f} / {limit / 1024**2:.1f} MiB'
             else:
@@ -4059,14 +4059,14 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .host-resource-panel { padding: 14px; }
 .host-resource-panel > h3 { display: flex; align-items: center; gap: 4px; margin: 0 0 10px; font-size: 15px; }
 .resource-metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.resource-metric { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
-.resource-metric h4 { min-height: 16px; margin: 0 0 6px; color: var(--muted-strong); font-size: 12px; font-weight: 600; }
-.resource-value { font-size: clamp(22px, 2vw, 26px); font-weight: 700; line-height: 1.15; letter-spacing: -0.035em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.resource-metric { min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.resource-metric h4 { min-height: 16px; margin: 0 0 4px; color: var(--muted-strong); font-size: 12px; font-weight: 600; }
+.resource-value { font-size: clamp(20px, 1.8vw, 24px); font-weight: 700; line-height: 1.15; letter-spacing: -0.035em; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .resource-value small { margin-left: 4px; color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: 0; }
-.resource-caption { margin-top: 4px; color: var(--muted); font-size: 11px; }
-.resource-supporting { display: grid; gap: 2px; min-height: 28px; margin-top: 7px; color: var(--muted-strong); font-size: 11px; font-variant-numeric: tabular-nums; }
-.resource-meter-spacer { display: block; height: 5px; margin-top: 8px; }
-.resource-meter { display: block; width: 100%; height: 5px; margin-top: 8px; border: 0; border-radius: 5px; background: var(--border); accent-color: var(--accent); }
+.resource-caption { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.resource-supporting { display: grid; gap: 2px; min-height: 26px; margin-top: 5px; color: var(--muted-strong); font-size: 11px; font-variant-numeric: tabular-nums; }
+.resource-meter-spacer { display: block; height: 5px; margin-top: 6px; }
+.resource-meter { display: block; width: 100%; height: 5px; margin-top: 6px; border: 0; border-radius: 5px; background: var(--border); accent-color: var(--accent); }
 .resource-meter::-webkit-meter-bar { height: 5px; border: 0; border-radius: 5px; background: var(--border); }
 .resource-meter::-webkit-meter-optimum-value { border-radius: 5px; background: var(--accent); }
 .resource-meter::-moz-meter-bar { border-radius: 5px; background: var(--accent); }
