@@ -101,7 +101,11 @@ def main():
         read_health = values.pop('container_health_stdin')
         if read_health and os.environ.get('PAPER_OBSERVABILITY_PUBLISH_ENABLED') == '1':
             from paper_agents.container_telemetry import read_container_health
-            values['container_health'] = read_container_health(sys.stdin.buffer)
+            try:
+                values['container_health'] = read_container_health(sys.stdin.buffer)
+            except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError):
+                # Container inspection cannot block normal host telemetry delivery.
+                values['container_health'] = {'state': 'unavailable'}
         print(json.dumps(publish_once(**values)))
     except (OSError, ValueError, TypeError, RecursionError):
         # No path, key, body, response or raw exception text in diagnostics.

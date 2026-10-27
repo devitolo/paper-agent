@@ -1,6 +1,10 @@
 import copy
 from datetime import datetime, timezone
 import io
+import os
+import subprocess
+from unittest.mock import patch
+from paper_agents import observability_publisher as publisher
 import json
 from pathlib import Path
 import tempfile
@@ -62,6 +66,13 @@ class MiniContainerTelemetryTests(unittest.TestCase):
             with self.assertRaises(t.TransportError): t.validate_container_health(altered)
         with self.assertRaises(ValueError): c.read_container_health(io.BytesIO(b'x'*16385))
         with self.assertRaises(ValueError): c.read_container_health(io.BytesIO(b'{}\n'))
+
+    def test_bad_container_input_does_not_block_host_publication(self):
+        argv=['publisher','--status-file','/absent','--state-file','/absent','--url','https://example.invalid/observability/v1/mini-status','--key-file','/absent','--container-health-stdin']
+        with patch.dict(os.environ, {'PAPER_OBSERVABILITY_PUBLISH_ENABLED':'1'}), patch('sys.argv',argv), patch.object(publisher.sys,'stdin') as stdin, patch.object(publisher,'publish_once',return_value={'state':'delivered'}) as publish:
+            stdin.buffer=io.BytesIO(b'malformed')
+            publisher.main()
+        self.assertEqual(publish.call_args.kwargs['container_health'],{'state':'unavailable'})
 
     def test_wrapper_is_fixed_allowlist_without_socket_or_config_access(self):
         text=(Path(__file__).resolve().parents[1]/'deploy/observability/collect-publish.sh').read_text()
