@@ -95,6 +95,28 @@ print('QA Docker boundary')
             preexec_fn=drop, capture_output=True, text=True, timeout=5)
         self.assertEqual(probe.returncode, 0, probe.stderr)
 
+    def test_ambiguous_roles_require_explicit_target(self):
+        self.installed()
+        aws = Path('/etc/project-paper-observability/aws-production/aws-production.env')
+        aws.parent.mkdir(parents=True, exist_ok=True)
+        aws.write_text(CONFIG.read_text())
+        self.addCleanup(aws.unlink)
+        env = {key:value for key,value in self.env.items() if not key.startswith('PROJECT_PAPER_')}
+        run = subprocess.run([str(WRAPPER)], env=env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(run.returncode, 64, run.stderr)
+        self.assertIn('multiple observability roles', run.stderr)
+        self.assertFalse(self.capture.exists())
+        run = subprocess.run([str(WRAPPER)], env={**env, 'PROJECT_PAPER_OBSERVABILITY_TARGET':'mini-production'}, capture_output=True, text=True, timeout=5)
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_unsupported_direct_target_cannot_fall_back_to_aws(self):
+        self.installed()
+        env = {key:value for key,value in self.env.items() if not key.startswith('PROJECT_PAPER_')}
+        env['PROJECT_PAPER_OBSERVABILITY_TARGET'] = 'wrong-role'
+        run = subprocess.run([str(WRAPPER)], env=env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(run.returncode, 64)
+        self.assertFalse(self.capture.exists())
+
     def test_direct_installed_launcher_loads_exact_config_without_inherited_variables(self):
         self.installed()
         env = {k:v for k,v in self.env.items() if not k.startswith('PROJECT_PAPER_')}

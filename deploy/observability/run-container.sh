@@ -1,7 +1,25 @@
 #!/bin/sh
 set -eu
-env_file="${PROJECT_PAPER_RESOURCE_ENV_FILE:-/etc/project-paper-observability/aws-production/aws-production.env}"
-if [ -r "$env_file" ]; then . "$env_file"; fi
+# Cron supplies an exact path. A direct invocation selects only an explicit
+# target or the sole installed role; never silently choose AWS on a Mini host.
+env_file="${PROJECT_PAPER_RESOURCE_ENV_FILE:-}"
+if [ -z "$env_file" ]; then
+  case "${PROJECT_PAPER_OBSERVABILITY_TARGET:-}" in
+    mini-production|aws-production)
+      target=$PROJECT_PAPER_OBSERVABILITY_TARGET
+      env_file="/etc/project-paper-observability/$target/$target.env" ;;
+    '')
+      for target in mini-production aws-production; do
+        candidate="/etc/project-paper-observability/$target/$target.env"
+        if [ -r "$candidate" ]; then
+          [ -z "$env_file" ] || { echo 'multiple observability roles; explicit target required' >&2; exit 64; }
+          env_file=$candidate
+        fi
+      done ;;
+    *) echo 'unsupported observability target' >&2; exit 64 ;;
+  esac
+fi
+if [ -n "$env_file" ] && [ -r "$env_file" ]; then . "$env_file"; fi
 image="${PROJECT_PAPER_OBSERVABILITY_IMAGE:?image digest is required}"
 case "$image" in *[!A-Za-z0-9_./:@-]*) echo 'immutable image digest is required' >&2; exit 64 ;; esac
 printf '%s' "$image" | /usr/bin/grep -Eq '^[^@[:space:]]+@sha256:[0-9a-f]{64}$' || { echo 'immutable image digest is required' >&2; exit 64; }
