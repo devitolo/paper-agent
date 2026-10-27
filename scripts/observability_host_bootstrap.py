@@ -73,7 +73,7 @@ def restore(root, control):
     transaction=control/audit['transaction'];trusted(transaction,True)
     if set(audit['before'])!={item[0] for item in FILES.values()}:raise ValueError('invalid recovery paths')
     snapshots=[]
-    for index,(_, (relative,mode)) in enumerate(FILES.items()):
+    for index,(name, (relative,mode)) in enumerate(FILES.items()):
         entry=audit['before'][relative];destination=root/relative
         trusted(destination.parent,True)
         if destination.exists() or destination.is_symlink():trusted(destination)

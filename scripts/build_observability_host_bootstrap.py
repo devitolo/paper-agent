@@ -4,6 +4,7 @@ import argparse
 import ast
 import hashlib
 import json
+import shlex
 from pathlib import Path
 
 GH_VERSION = '2.102.0'
@@ -25,6 +26,20 @@ def read_regular(path, limit):
     if len(data) > limit:
         raise ValueError('source file too large')
     return data
+
+
+def operator_command(stage, bootstrap_sha):
+    stage=Path(stage)
+    if not stage.is_absolute() or stage.parent!=Path('/home/devitolo') or not stage.name.startswith('observability-bootstrap-'):
+        raise ValueError('fixed Mini staging namespace required')
+    script=stage/'bootstrap.py'
+    # Snapshot and verify the code in memory before execution: a staging user
+    # cannot swap the file between a hash check and a second Python file open.
+    code=("import hashlib,pathlib; p=pathlib.Path("+repr(str(script))+"); "
+          "b=p.open('rb').read(1048577); "
+          "assert len(b)<=1048576 and hashlib.sha256(b).hexdigest()=="+repr(bootstrap_sha)+", 'bootstrap digest mismatch'; "
+          "exec(compile(b,str(p),'exec'),{'__name__':'__main__','__file__':str(p)})")
+    return 'sudo /usr/bin/python3 -I -c '+shlex.quote(code)
 
 
 def build(root, output, verifier):

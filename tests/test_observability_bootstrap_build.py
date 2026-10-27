@@ -25,3 +25,14 @@ class BootstrapBuildTests(unittest.TestCase):
             self.assertFalse((tmp/'bundle').exists())
             linked=tmp/'linked';linked.symlink_to(gh)
             with self.assertRaises(ValueError):builder.build(root,tmp/'bundle',linked)
+
+    def test_operator_command_hashes_the_same_isolated_code_it_executes(self):
+        import shlex
+        digest='a'*64
+        command=builder.operator_command('/home/devitolo/observability-bootstrap-fixture',digest)
+        argv=shlex.split(command)
+        self.assertEqual(argv[:4],['sudo','/usr/bin/python3','-I','-c'])
+        self.assertIn(digest,argv[4])
+        self.assertIn("read(1048577)",argv[4])
+        self.assertIn("exec(compile(b",argv[4])
+        with self.assertRaises(ValueError):builder.operator_command('/tmp/elsewhere',digest)

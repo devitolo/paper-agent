@@ -1,67 +1,42 @@
-# Mini updater release authorization
+# Mini observability updater release contract
 
-Decision recorded October 27, 2026. Scope: authorization design and policy only;
-no bootstrap, production permission change, tag movement, or deployment.
+The user explicitly confirmed on October 27, 2026 that the existing automatic
+release flow is intentional. No new reviewer, manual approval, administrator
+bypass restriction, reusable authorizer or tag-governance change is required.
+The previously proposed approval policy is removed.
 
-## Verified gap
+The release continues to use tag `observability-mini` and environment
+`observability-mini-production`. This environment has no required reviewers;
+its name is not evidence of human approval.
 
-SDLC's read-only GitHub API inspection found that the actual observability
-environment, `observability-mini-production`, has `protection_rules=[]` and no
-reviewers, `can_admins_bypass=true`, and `deployment_branch_policy=null`.
-Its deployment branch policies request returned 404. The separate
-`mini-production` environment's branch policy does not protect observability
-releases. SDLC also queried repository rulesets and found none. The legacy tag
-protection API returned 404; that response alone would not establish the
-absence of rulesets.
+## Integrity boundary
 
-A build attestation is provenance, not production approval. The candidate's
-current pre-approval package attestation and root verification policy must not
-be activated as production authorization.
+- Hosted validation succeeds before hosted image/package build and signing.
+- Both the exact archive and external manifest receive GitHub OIDC provenance.
+- Root verifies repository `devitolo/paper-agent`, exact workflow
+  `.github/workflows/observability-release.yml`, exact tag ref
+  `refs/tags/observability-mini`, matching source and signer commit, GitHub OIDC
+  issuer and hosted runner origin. Other workflows and changed bytes fail.
+- The manifest binds Mini target, source SHA, archive/file hashes and immutable
+  AMD64 image digest. Root also checks source label and architecture.
+- Only fixed approved host files and literal existing config are accepted.
+  Image and files update together under locks, with backups and rollback.
 
-## Accepted design
+This establishes trusted automatic release provenance, not independent human
+approval. Repository release writers and the reviewed release workflow remain
+trusted. The existing Docker-capable runner is already root-equivalent if
+compromised; narrow sudo does not remove that existing trust limitation.
 
-SRE accepts the following design subject to implementation and real proof:
+## Readiness and activation
 
-1. Build and test on GitHub-hosted runners without production authority. Bind
-   build provenance to the exact package archive, external manifest and source.
-2. Call a reusable authorizer at an immutable reviewed commit. The authorizer
-   contains the literal `observability-mini-production` environment, hosted
-   runner selection and all checks. No caller-supplied scripts execute there.
-3. Fetch fresh protection configuration using GitHub's API. Require configured
-   reviewers with the exact human-selected User/Team ID set pinned in the
-   authorizer, self-review prevention, disabled administrator bypass, and a
-   deployment policy allowing only tag `observability-mini`. Missing fields,
-   inaccessible APIs or unexpected policies fail closed. Check before waiting
-   for approval and again before signing; never substitute caller assertions.
-4. Require the production environment approval before issuing authorization.
-   Independently verify the completed build's identity, successful validation,
-   archive/manifest provenance and immutable source; do not trust caller claims
-   that tests passed. Approval must identify the immutable artifacts being
-   authorized. Tag movement cannot substitute a different commit or package.
-5. Authorization binds repository, Mini target, tag push, source SHA, archive
-   digest, external manifest digest and the manifest's immutable AMD64 image.
-6. Root verifies both subjects and pins the reusable authorizer's workflow path
-   and signer commit separately from the changing release source SHA. Reject
-   pre-approval build signatures, other workflows/signers/refs, changed bytes
-   and mismatched image/source. Retain existing replay and rollback protections.
+Qualification uses the candidate branch only, with no production tag, image
+publication or deployment. Hosted verification must pass for archive and
+manifest and reject wrong commits, bytes and production signer identity.
+Disposable Linux tests cover installation, bootstrap, recovery and rollback.
 
-`scripts/observability_authorization_policy.py` implements the initial pure
-context and environment checks. It does not fetch configuration, integrate a
-signer, or grant authority; invoking it from mutable caller code is insufficient.
-
-## Remaining evidence before activation
-
-- Configure a human-selected reviewer and required environment protections;
-  no reviewer is inferred and no settings changed in this step.
-- Implement and review the immutable authorizer and caller integration, then
-  record the actual signer commit in the bootstrap/root policy.
-- Prove real hosted OIDC positive verification and rejection of pre-approval,
-  alternate signer/ref/source, modified artifacts, missing approval rules and
-  tag movement. Local synthetic verification does not satisfy this requirement.
-- Complete independent transaction/bootstrap QA and final bundle review.
-
-The existing Docker-capable runner is already root-equivalent if compromised.
-The narrow sudo interface does not remove that existing trust limitation.
-
-References: [GitHub reusable-workflow OIDC identity](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows),
-[GitHub CLI verification and signer/source digest controls](https://cli.github.com/manual/gh_attestation_verify).
+A deliberate one-time bootstrap is necessary because the current Mini helper
+can replace only the image. Prepare and independently verify the exact pinned
+bundle before activation. Qualification does not run bootstrap. After bootstrap,
+normal releases update the three approved scripts and image through one package
+transaction without repeated manual sudo. Updating the root updater itself is
+outside that narrow package scope.

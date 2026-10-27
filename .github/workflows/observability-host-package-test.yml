@@ -1,0 +1,111 @@
+name: Observability Host Package Attestation Test
+
+on:
+  push:
+    branches:
+      - codex/guarded-observability-updater
+
+permissions: {}
+concurrency:
+  group: observability-host-package-test
+  cancel-in-progress: false
+
+jobs:
+  attest-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Test fixed transaction in disposable Linux
+        run: |
+          docker run --rm --platform linux/amd64 --user 0:0 --network none --read-only \
+            --tmpfs /tmp:rw,exec,nosuid --tmpfs /qa-state:rw,exec,nosuid \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/qa-source,readonly" \
+            --workdir /qa-source \
+            -e PAPER_OBSERVABILITY_QA_ISOLATED=1 -e PYTHONDONTWRITEBYTECODE=1 \
+            --entrypoint python3 \
+            python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 \
+            -B -m unittest tests.test_observability_host_package_linux_qa tests.test_observability_host_bootstrap_linux_qa -v
+      - name: Qualify the source-labelled AMD64 image locally without publishing
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --network none --build-arg VCS_REF="$GITHUB_SHA" -f deploy/observability/Dockerfile -t paper-observability-qualification .
+          docker image inspect paper-observability-qualification --format '{"architecture":{{json .Architecture}},"os":{{json .Os}},"revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}},"size":{{json .Size}}}' | python3 -c 'import json,os,sys; s=json.load(sys.stdin); assert (s["architecture"],s["os"],s["revision"]) == ("amd64","linux",os.environ["GITHUB_SHA"]); assert 0<s["size"]<=512*1024**2'
+          docker run --rm --network none --read-only --cap-drop ALL --memory 64m --pids-limit 32 --tmpfs /tmp:rw,noexec,nosuid --entrypoint python3 paper-observability-qualification -c 'from paper_agents import observability_transport; print("isolated_image_import=ok")'
+      - name: Build Mini-only test artifact
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_observability_host_package_build tests.test_observability_bootstrap_build tests.test_observability_host_package_policy tests.test_observability_updater_workflow -v
+          python3 scripts/build_observability_host_package.py --source-sha "$GITHUB_SHA" --image "ghcr.io/devitolo/paper-agent/observability:observability-mini@sha256:0000000000000000000000000000000000000000000000000000000000000000" --output-directory host-package
+          echo "qualification_only=yes image=synthetic deployment=none" > host-package/scope.txt
+      - id: attest
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: |
+            host-package/artifact.tar
+            host-package/manifest.json
+      - name: Prepare the pinned official verifier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir verifier
+          gh release download v2.102.0 --repo cli/cli --pattern gh_2.102.0_linux_amd64.tar.gz --pattern gh_2.102.0_checksums.txt --dir verifier
+          python3 - <<'PYCODE'
+          import hashlib,pathlib,tarfile
+          root=pathlib.Path('verifier');archive=root/'gh_2.102.0_linux_amd64.tar.gz'
+          checks=dict(line.split()[::-1] for line in (root/'gh_2.102.0_checksums.txt').read_text().splitlines())
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==checks[archive.name]
+          with tarfile.open(archive) as package:
+              member=package.getmember('gh_2.102.0_linux_amd64/bin/gh')
+              assert member.isfile() and member.size<100*1024**2
+              data=package.extractfile(member).read()
+          assert hashlib.sha256(data).hexdigest()=='7469124f706944133d6a169691dd1c6c3511b12e85878d255e044e2948df4c9b'
+          (root/'gh').write_bytes(data);(root/'gh').chmod(0o755)
+          PYCODE
+      - name: Verify real attestations and reject wrong identities and bytes
+        env:
+          ATTESTATION: ${{ steps.attest.outputs.bundle-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$ATTESTATION" host-package/attestation.jsonl
+          "$GITHUB_WORKSPACE/verifier/gh" --version > host-package/verifier-version.txt
+          clean_home=$(mktemp -d)
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/observability-host-package-test.yml@$GITHUB_REF"
+          verify() {
+            env -i PATH=/usr/bin:/bin HOME="$clean_home" GH_HOST=github.com GH_CONFIG_DIR="$clean_home" XDG_CACHE_HOME="$clean_home" "$GITHUB_WORKSPACE/verifier/gh" attestation verify "$1" --bundle host-package/attestation.jsonl \
+              --repo "$GITHUB_REPOSITORY" \
+              --source-digest "$2" --signer-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" --deny-self-hosted-runners \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --cert-identity "$3" --predicate-type https://slsa.dev/provenance/v1
+          }
+          verify host-package/artifact.tar "$GITHUB_SHA" "$identity" > host-package/archive-verification.txt 2>&1
+          verify host-package/manifest.json "$GITHUB_SHA" "$identity" > host-package/manifest-verification.txt 2>&1
+          if verify host-package/artifact.tar 0000000000000000000000000000000000000000 "$identity" > host-package/rejected-commit.txt 2>&1; then
+            echo 'wrong commit unexpectedly accepted' >&2; exit 1
+          fi
+          cp host-package/artifact.tar host-package/tampered.tar
+          printf tamper >> host-package/tampered.tar
+          if verify host-package/tampered.tar "$GITHUB_SHA" "$identity" > host-package/rejected-bytes.txt 2>&1; then
+            echo 'tampered artifact unexpectedly accepted' >&2; exit 1
+          fi
+          production_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/observability-release.yml@refs/tags/observability-mini"
+          if verify host-package/artifact.tar "$GITHUB_SHA" "$production_identity" > host-package/rejected-production-identity.txt 2>&1; then
+            echo 'test workflow unexpectedly accepted as production' >&2; exit 1
+          fi
+          rm host-package/tampered.tar
+          printf 'source_sha=%s\npositive=archive,manifest\nnegative=commit,bytes,production-identity\ndeployment=none\n' "$GITHUB_SHA" > host-package/test-evidence.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: host-package-attestation-test-${{ github.sha }}
+          path: host-package/
+          if-no-files-found: error
+          retention-days: 14

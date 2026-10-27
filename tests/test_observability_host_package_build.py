@@ -22,6 +22,8 @@ class HostPackageBuildTests(unittest.TestCase):
         image = 'ghcr.io/devitolo/paper-agent/observability:observability-mini@sha256:' + 'b'*64
         digest = builder.build(self.root, self.output, 'a'*40, image)
         manifest = json.loads((self.output/'manifest.json').read_bytes())
+        from scripts.observability_host_package_install import SCHEMA
+        self.assertEqual(manifest['schema'], SCHEMA)
         self.assertEqual(manifest['target'], 'mini-production')
         self.assertEqual(manifest['image'], image)
         self.assertEqual(manifest['installer_version'], 2)
