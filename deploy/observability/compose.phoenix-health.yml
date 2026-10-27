@@ -1,0 +1,14 @@
+# Health-check-only override for the existing Phoenix Compose project.
+# Use with its existing base Compose file; this does not define images or volumes.
+services:
+  phoenix:
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:6006/healthz', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
