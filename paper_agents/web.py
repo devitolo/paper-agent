@@ -1609,6 +1609,11 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
     if fresh:
         for item in items:
             state, health = item['status'], item['health']
+            if status.get('received_at') and health in ('unavailable', 'no-healthcheck'):
+                if item['service'] == 'observability-collector':
+                    health = 'Last received collection OK'
+                elif item['service'] == 'observability-publisher':
+                    health = 'Last delivery accepted'
             if state == 'unavailable' and item['service'].startswith('observability-'):
                 state = 'Not running or unavailable (scheduled job)'
             digest = item['image_digest']
