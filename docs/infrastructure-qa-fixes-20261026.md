@@ -36,10 +36,30 @@ containers, or data were changed while preparing them. Daily peaks remain out of
 4. Observe natural collection, delivery, per-field timestamps, CPU coverage and
    both tables; preserve existing files/data/identity/locks/logs/rollback state.
 
-For rollback to an old strict AWS reader, revert Mini's producer first and confirm
-an accepted legacy-format receipt before rolling back the AWS reader. Retain the
-telemetry state rather than deleting or replacing it. Otherwise old readers may
-reject the persisted new-format snapshot. No production rollback was exercised here.
+Rollback to an old strict reader requires this guarded sequence:
+
+1. Keep the new Mini publisher and new AWS reader active while any new-format
+   pending delivery drains through the normal authenticated publisher. Confirm its
+   acceptance and that the publisher has completed its normal pending-file cleanup.
+   Check without dumping payloads, keys, or private state. Preserve delivery IDs,
+   receipts, and evidence; do not delete, rewrite, or fabricate a pending body.
+2. At an approved serialized deployment boundary, prevent a new-format publisher
+   attempt from creating another pending delivery between that check and reverting
+   Mini. Recheck the drain precondition at that boundary. Revert Mini only after it
+   holds; retain the new AWS reader throughout this step.
+3. Observe an accepted, newer legacy-format Mini delivery and verify the persisted
+   AWS snapshot is now legacy-compatible. Only then roll back the AWS reader.
+
+If drain cannot be confirmed (failed delivery, invalid/expired pending body, or
+uncertain acknowledgement), stop before reverting Mini or the AWS reader. Keep
+both compatible new versions in place and preserve the pending file and receipt
+state. Escalate for a separately reviewed, version-compatible recovery procedure;
+this document authorizes no queue rewrite, deletion, bypass, or forced activation.
+If Mini was already reverted with new-format pending evidence, stop repeated old
+publisher attempts and use an approved restoration of the compatible new publisher
+and reader before attempting normal delivery/recovery. The old publisher rejects
+that body locally before key or network access, so reverting the reader cannot
+unblock it. No production rollback or recovery was exercised here.
 
 ## Candidate verification
 
