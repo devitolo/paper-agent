@@ -42,7 +42,6 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: ".:tests"
-          PYTHONPATH: tests
         run: |
           python3 -m unittest \
             tests.test_curator_v3 \
