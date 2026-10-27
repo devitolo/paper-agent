@@ -1549,7 +1549,7 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
         "Received by AWS (Pacific)": status.get("received_at"),
     }
     if freshness != "fresh":
-        for label in ("Mini CPU (15 minutes)", "Mini memory", "Mini disk", "Collection status", "Publish status"):
+        for label in ("CPU (15 minutes)", "memory", "disk", "Collection status", "Publish status"):
             rows[label] = f"placeholder · {freshness}"
         rows["Telemetry error"] = status.get("error") or "Mini telemetry is unavailable."
         return rows
@@ -1560,9 +1560,9 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     cpu, memory = status["cpu"], status["memory"]
     disk = status["latest"].get("disk") or {}
     rows.update({
-        "Mini CPU (15 minutes)": f"{amount(cpu.get('average_percent'))} average · {amount(cpu.get('max_observed_percent'))} maximum observed",
-        "Mini memory": f"{gib(memory.get('available_average_bytes'))} available average · {gib(memory.get('available_min_bytes'))} minimum available",
-        "Mini disk": f"{amount(disk.get('used_percent'))} used · {gib(disk.get('available_bytes'))} available · {gib(disk.get('capacity_bytes'))} capacity",
+        "CPU (15 minutes)": f"{amount(cpu.get('average_percent'))} average · {amount(cpu.get('max_observed_percent'))} maximum observed",
+        "memory": f"{gib(memory.get('available_average_bytes'))} available average · {gib(memory.get('available_min_bytes'))} minimum available",
+        "disk": f"{amount(disk.get('used_percent'))} used · {gib(disk.get('available_bytes'))} available · {gib(disk.get('capacity_bytes'))} capacity",
         "Collection status": "complete · 15-minute window" if status["window"]["complete"] else f"warming · {status['coverage_seconds']}/900 seconds covered · {status['window']['sample_gaps']} gaps",
         "Publish status": "last delivery accepted by AWS · subsequent attempts unknown",
     })
@@ -1571,10 +1571,10 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
 
 def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     freshness = status.get("freshness", "unavailable")
-    rows = {"AWS observed at (Pacific)": status.get("observed_at"),
+    rows = {"Observed at (Pacific)": status.get("observed_at"),
             "\u00a0": "\u00a0"}
     if freshness != "fresh":
-        for label in ("AWS CPU (15 minutes)", "AWS memory", "AWS disk", "Collection status"):
+        for label in ("CPU (15 minutes)", "memory", "disk", "Collection status"):
             rows[label] = f"placeholder · {freshness}"
         rows["Telemetry error"] = status.get("error") or "AWS telemetry unavailable."
         return rows
@@ -1582,12 +1582,12 @@ def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     def gib(value):return "unavailable" if value is None else f"{value / (1024 ** 3):.2f} GiB"
     cpu, memory = status["cpu"], status["memory"]
     rows.update({
-        "AWS CPU (15 minutes)": f"{percent(cpu['average_percent'])} average · {percent(cpu['max_observed_percent'])} maximum observed",
-        "AWS memory": f"{gib(memory['available_average_bytes'])} available average · {gib(memory['available_min_bytes'])} minimum available",
+        "CPU (15 minutes)": f"{percent(cpu['average_percent'])} average · {percent(cpu['max_observed_percent'])} maximum observed",
+        "memory": f"{gib(memory['available_average_bytes'])} available average · {gib(memory['available_min_bytes'])} minimum available",
         "Collection status": "complete · 15-minute window" if status["complete"] else "warming · incomplete window",
     })
     disk = status.get("disk")
-    rows["AWS disk"] = (f"{percent(disk['used_percent'])} used · {gib(disk['available_bytes'])} available · {gib(disk['capacity_bytes'])} capacity"
+    rows["disk"] = (f"{percent(disk['used_percent'])} used · {gib(disk['available_bytes'])} available · {gib(disk['capacity_bytes'])} capacity"
                          if disk else f"Unavailable · {status.get('disk_state', 'unavailable')} disk observation")
     return rows
 
@@ -1636,7 +1636,7 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
     aws_status = load_aws_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
     mini = mini_telemetry_rows(mini_status)
     aws = aws_telemetry_rows(aws_status)
-    return '<section class="health-section"><h2>Infrastructure</h2><div class="resource-columns"><section class="resource-panel"><h3><img src="/assets/mini-icon.png" class="resource-host-icon" alt="" width="28" height="28"> Mini</h3>' + render_key_values(mini, timestamp_keys={'Observed at (Pacific)', 'Received by AWS (Pacific)'}) + '</section><section class="resource-panel"><h3><img src="/assets/aws-icon.png" class="resource-host-icon" alt="" width="28" height="28"> AWS</h3>' + render_key_values(aws, timestamp_keys={'AWS observed at (Pacific)'}) + '</section></div><p class="health-footnote">Observation and receipt ages appear beside Pacific timestamps. Red ages are older than 45 minutes; stale measurements stay hidden. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>' + render_mini_container_health(mini_status)
+    return '<section class="health-section"><h2>Infrastructure</h2><div class="resource-columns"><section class="resource-panel"><h3><img src="/assets/mini-icon.png" class="resource-host-icon" alt="" width="28" height="28"> Mini</h3>' + render_key_values(mini, timestamp_keys={'Observed at (Pacific)', 'Received by AWS (Pacific)'}) + '</section><section class="resource-panel"><h3><img src="/assets/aws-icon.png" class="resource-host-icon" alt="" width="28" height="28"> AWS</h3>' + render_key_values(aws, timestamp_keys={'Observed at (Pacific)'}) + '</section></div><p class="health-footnote">Observation and receipt ages appear beside Pacific timestamps. Red ages are older than 45 minutes; stale measurements stay hidden. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>' + render_mini_container_health(mini_status)
 
 
 def render_health_job_charts(summary: dict[str, Any]) -> str:
