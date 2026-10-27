@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from paper_agents.db import DEFAULT_DB_PATH, connect_db, health_summary, init_db
 from paper_agents.resource_status import load_aws_resource_status
+from paper_agents.aws_container_status import load as load_aws_container_status
 from paper_agents.observability_transport import health_status as mini_telemetry_health
 from paper_agents.feedback import ProfileProvider, apply_feedback_to_profile, ingest_feedback_blob, parse_feedback_blob
 from paper_agents.pdf_links import looks_like_direct_pdf_url
@@ -1590,7 +1591,7 @@ def render_host_resources(status: dict[str, Any], *, host: str) -> str:
             + '<div class="resource-timestamps">' + times + '</div>' + error + '</section>')
 
 
-def render_mini_container_health(status: dict[str, Any]) -> str:
+def _render_container_health(status: dict[str, Any], *, host: str) -> str:
     from datetime import datetime, timezone
     from paper_agents.observability_transport import stamp
     containers = (status.get('latest') or {}).get('containers') or {}
@@ -1608,9 +1609,9 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
     if fresh:
         for item in items:
             state, health = item['status'], item['health']
-            if status.get('received_at') and health in ('unavailable', 'no-healthcheck'):
+            if (status.get('received_at') or host == 'AWS') and health in ('unavailable', 'no-healthcheck'):
                 if item['service'] == 'observability-collector':
-                    health = 'Last received collection OK'
+                    health = 'Last received collection OK' if host == 'Mini' else 'Last collection OK'
                 elif item['service'] == 'observability-publisher':
                     health = 'Last delivery accepted'
             if state == 'unavailable' and item['service'].startswith('observability-'):
@@ -1628,7 +1629,7 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
             rows.append({'container': labels[item['service']], 'status': state,
                          'health': 'No health check configured' if health == 'no-healthcheck' else health,
                          'image_digest': digest or 'Unavailable', 'cpu_and_memory': resource})
-    message = '' if fresh else '<p>No fresh Mini container observations have been received.</p>'
+    message = '' if fresh else f'<p>No fresh {host} container observations have been received.</p>'
     details = ''
     if rows:
         columns = ('status', 'health', 'cpu_and_memory')
@@ -1642,15 +1643,26 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
         )
         details = '<div class="health-table"><table><thead><tr>' + headers + '</tr></thead><tbody>' + body + '</tbody></table></div>'
 
-    return '<section class="health-section mini-container-health"><h2>Mini containers</h2>' + message + details + '</section>'
+    return f'<section class="health-section {host.lower()}-container-health"><h2>{host} containers</h2>' + message + details + '</section>'
+
+
+def render_mini_container_health(status: dict[str, Any]) -> str:
+    return _render_container_health(status, host='Mini')
+
+
+def render_aws_container_health(status: dict[str, Any]) -> str:
+    normalized = {'freshness': status.get('freshness'), 'latest': {'containers': status}}
+    return _render_container_health(normalized, host='AWS')
 
 
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
     mini_status = mini_telemetry_health()
     aws_status = load_aws_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
+    aws_containers = load_aws_container_status(Path(os.environ.get('PAPER_AGENT_AWS_RESOURCE_STATUS_FILE', 'data/aws-resource-status.json')).with_name('container-status.json'))
     return ('<section class="health-section"><h2>Infrastructure</h2><div class="resource-columns">'
             + render_host_resources(mini_status, host='Mini') + render_host_resources(aws_status, host='AWS')
-            + '</div></section>' + render_mini_container_health(mini_status))
+            + '</div></section><div class="resource-columns container-host-columns">'
+            + render_mini_container_health(mini_status) + render_aws_container_health(aws_containers) + '</div>')
 
 
 
@@ -4034,6 +4046,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 10px; border: 1px solid #d8dee4; background: #ffffff; border-radius: 6px; padding: 8px; }
 .health-kv dt { color: #57606a; }
 .health-kv dd { margin: 0; }
+.container-host-columns { align-items: start; }
 .resource-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .telemetry-age { white-space: nowrap; }
 .telemetry-age-stale { color: var(--danger, #dc2626); font-weight: 600; }
