@@ -127,8 +127,7 @@ def sample(root: Path) -> dict[str, Any]:
         except (OSError, ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError):
             record["cpu"]["state"] = "baseline_invalid"
         previous_path.write_text(json.dumps({"total": cpu[0], "idle": cpu[1], "observed_at": stamp.isoformat(), "boot_id": record.get("boot_id")}))
-    if stamp.minute % 60 == 0:
-        record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
+    record["disk"] = filesystem(Path(os.environ.get("PROJECT_PAPER_RESOURCE_DISK_PATH", "/")))
     cgroup = Path(os.environ.get("PROJECT_PAPER_RESOURCE_CGROUP_ROOT", "/sys/fs/cgroup"))
     try:
         record["cgroup"] = {"memory_current_bytes": int((cgroup / "memory.current").read_text().strip()), "memory_max_bytes": (lambda value: None if value == "max" else int(value))((cgroup / "memory.max").read_text().strip())}
@@ -218,7 +217,19 @@ def summarize(root: Path, *, reference: datetime | None = None) -> dict[str, Any
                 return row.get(name)
         entry = observations.get(name)
         return entry.get("value") if isinstance(entry, dict) else entry
-    latest_disk = latest_field("disk")
+    # Disk is an instantaneous observation, independent of the CPU averaging window.
+    # Keep its value and timestamp from the same sample, including a just-collected
+    # boundary sample that is outside the preceding averaging window.
+    disk_observations = [
+        {"observed_at": row["observed_at"], "value": row["disk"]}
+        for row in records if row.get("disk") is not None
+    ]
+    cached_disk = observations.get("disk")
+    if isinstance(cached_disk, dict) and cached_disk.get("observed_at"):
+        disk_observations.append(cached_disk)
+    if disk_observations:
+        observations["disk"] = max(disk_observations, key=lambda item: datetime.fromisoformat(item["observed_at"].replace("Z", "+00:00")))
+    latest_disk = observations.get("disk", {}).get("value")
     summary = {"schema": SCHEMA, "collector_version": "4", "observed_at": now().isoformat(), "host": os.environ.get("PROJECT_PAPER_RESOURCE_HOST", "unknown"), "environment": os.environ.get("PROJECT_PAPER_RESOURCE_ENVIRONMENT", "mini-nonprod"), "scope": "host", "window": {"start_at": datetime.fromtimestamp(start, timezone.utc).isoformat(), "end_at": end.isoformat(), "interval_seconds": 900, "complete": bool(records) and gaps == 0, "sample_gaps": gaps}, "sample_count": len(records), "coverage_seconds": 900 if records else 0, "cpu": {"average_percent": round(sum(cpu) / len(cpu), 2) if cpu else None, "max_observed_percent": max(cpu) if cpu else None, "peak_sustained_5m_percent": None, "max_one_minute_percent": max(cpu) if cpu else None}, "memory": {"available_average_bytes": round(sum(available) / len(available)) if available else None, "available_max_bytes": max(available) if available else None, "available_min_bytes": min(available) if available else None}, "disk": latest_disk, "latest": {"observed_at": latest.get("observed_at"), "disk": latest_disk, "containers": latest_field("containers"), "temperature": latest_field("temperature"), "cgroup": latest_field("cgroup"), "observation_times": {name: (entry.get("observed_at") if isinstance(entry, dict) else None) for name, entry in observations.items()}}, "errors": []}
     return summary
 
