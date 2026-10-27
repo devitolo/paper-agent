@@ -39,7 +39,7 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         self.assertEqual(status['freshness'], 'fresh')
         self.assertEqual(status['received_at'], self.payload['status']['observed_at'])
         html = self.render()
-        for expected in ('Mini', 'fresh', '0% average', '0% maximum observed',
+        for expected in ('Mini', 'just now', '0% average', '0% maximum observed',
                          '0.00 GiB available average', '50% used', 'complete · 15-minute window',
                          'last delivery accepted by AWS', web.telemetry_pacific_time(self.payload['status']['observed_at'])):
             self.assertIn(expected, html)
@@ -63,6 +63,30 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         self.assertEqual(web.telemetry_pacific_time('2026-12-26T21:45:06Z'), '2026-12-26 01:45:06 PM PST')
         for value in (None, 'invalid', '2026-10-26T21:45:06'):
             self.assertEqual(web.telemetry_pacific_time(value), 'unknown')
+
+    def test_timestamp_age_turns_red_only_after_45_minutes(self):
+        observed = self.payload['status']['observed_at']
+        for seconds, label, stale in ((0, 'just now', False), (60, '1 minute ago', False),
+                                      (2700, '45 minutes ago', False), (2701, '45 minutes ago', True),
+                                      (7200, '2 hours ago', True)):
+            with self.subTest(seconds=seconds):
+                html = web.render_telemetry_timestamp(observed, clock=self.clock + seconds)
+                self.assertIn(label, html)
+                self.assertEqual('class="telemetry-age telemetry-age-stale"' in html, stale)
+        for value in (None, 'invalid', '<script>secret</script>'):
+            self.assertEqual(web.render_telemetry_timestamp(value), 'unknown')
+
+    def test_old_observation_is_red_even_when_receipt_is_recent(self):
+        self.save()
+        saved = json.loads(self.path.read_text())
+        saved['received_at'] = fixture(self.clock + 2701)['status']['observed_at']
+        self.path.write_text(json.dumps(saved))
+        html = self.render(self.clock + 2701)
+        self.assertNotIn('Telemetry Freshness</dt>', html)
+        self.assertEqual(html.count('class="telemetry-age telemetry-age-stale"'), 1)
+        self.assertIn('just now', html)
+        self.assertIn('45 minutes ago', html)
+        self.assertNotIn('50% used', html)
 
     def test_freshness_threshold(self):
         self.save()
