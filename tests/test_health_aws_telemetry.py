@@ -34,7 +34,7 @@ class AWSHealthTests(unittest.TestCase):
         html=self.page()
         self.assertNotIn('Telemetry Freshness</dt>',html)
         self.assertIn('just now',html)
-        for item in ('AWS','0% average','0% maximum observed','50% used','0.00 GiB available average'):self.assertIn(item,html)
+        for item in ('AWS','0.00<small>%</small>','Peak 0.00%','50.00<small>%</small>','0.00<small>GiB</small>'):self.assertIn(item,html)
         self.assertNotIn('never-render-this',html);self.assertNotIn('/private/must-not-render',html)
         self.assertEqual(self.path.read_bytes(),before)
 
@@ -42,15 +42,15 @@ class AWSHealthTests(unittest.TestCase):
         self.path.unlink();self.assertEqual(self.read()['freshness'],'unavailable')
         for delta in (-2701,301):
             self.status['observed_at']=(self.now+timedelta(seconds=delta)).isoformat();self.save()
-            self.assertIn('placeholder',self.page())
-            self.assertNotIn('50% used',self.page())
+            self.assertIn('Reading expired' if delta < 0 else 'Not available',self.page())
+            self.assertNotIn('50.00<small>%</small>',self.page())
         for payload in ('[]','{bad','x'*32769):
             self.path.write_text(payload);self.assertEqual(self.read()['freshness'],'unavailable')
 
     def test_old_disk_hidden_while_current_cpu_remains_fresh(self):
         self.status['latest']['observation_times']={'disk':(self.now-timedelta(seconds=2701)).isoformat()};self.save()
         value=self.read();self.assertEqual(value['freshness'],'fresh');self.assertEqual(value['disk_state'],'stale')
-        html=self.page();self.assertIn('0% average',html);self.assertIn('stale disk observation',html);self.assertNotIn('50% used',html)
+        html=self.page();self.assertIn('0.00<small>%</small>',html);self.assertIn('Reading expired',html);self.assertNotIn('50.00<small>%</small>',html)
 
     def test_wrong_identity_and_invalid_numbers_fail_closed(self):
         for key,value in [('average_percent',True),('max_observed_percent',101),('average_percent',float('nan'))]:
@@ -70,7 +70,7 @@ class AWSHealthTests(unittest.TestCase):
             self.path.write_text(json.dumps(item));result=self.read()
             self.assertEqual(result['freshness'],'unavailable')
             self.assertIn('AWS telemetry export is invalid.',self.page())
-            self.assertNotIn('complete · 15-minute window',self.page())
+            self.assertNotIn('15-minute window complete',self.page())
 
     def test_consistent_partial_window_is_warming(self):
         self.status.update(coverage_seconds=0,sample_count=0)
@@ -78,7 +78,7 @@ class AWSHealthTests(unittest.TestCase):
         self.status['cpu'].update(average_percent=None,max_observed_percent=None)
         self.save()
         self.assertEqual(self.read()['freshness'],'fresh')
-        self.assertIn('warming · incomplete window',self.page())
+        self.assertIn('Collecting · window incomplete',self.page())
 
     def test_parser_recursion_is_invalid_export_and_does_not_break_mini_panel(self):
         with patch.object(resource_status.json,'loads',side_effect=RecursionError('synthetic parser depth')):

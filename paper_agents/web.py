@@ -1541,54 +1541,53 @@ def render_telemetry_timestamp(value: Any, *, clock: float | None = None) -> str
     return f'<time datetime="{escape(value)}">{escape(formatted)}</time> · <span class="{style}"{title}>{label}</span>'
 
 
-def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
-    """Presentation of validated received telemetry; stale numbers stay hidden."""
-    freshness = status.get("freshness", "unavailable")
-    rows = {
-        "Observed at (Pacific)": status.get("observed_at"),
-        "Received by AWS (Pacific)": status.get("received_at"),
-    }
-    if freshness != "fresh":
-        for label in ("CPU (15 minutes)", "memory", "disk", "Collection status"):
-            rows[label] = f"placeholder · {freshness}"
-        rows["Telemetry error"] = status.get("error") or "Mini telemetry is unavailable."
-        return rows
-    def amount(value: Any, unit: str = "%") -> str:
-        return "unavailable" if value is None else f"{value:g}{unit}"
-    def gib(value: Any) -> str:
-        return "unavailable" if value is None else f"{value / (1024 ** 3):.2f} GiB"
-    cpu, memory = status["cpu"], status["memory"]
-    disk = status["latest"].get("disk") or {}
-    rows.update({
-        "CPU (15 minutes)": f"{amount(cpu.get('average_percent'))} average · {amount(cpu.get('max_observed_percent'))} maximum observed",
-        "memory": f"{gib(memory.get('available_average_bytes'))} available average · {gib(memory.get('available_min_bytes'))} minimum available",
-        "disk": f"{amount(disk.get('used_percent'))} used · {gib(disk.get('available_bytes'))} available · {gib(disk.get('capacity_bytes'))} capacity",
-        "Collection status": "complete · 15-minute window" if status["window"]["complete"] else f"warming · {status['coverage_seconds']}/900 seconds covered · {status['window']['sample_gaps']} gaps",
-    })
-    return rows
+def render_resource_card(label: str, value: str, unit: str, caption: str, details: list[str], *, usage: float | None = None) -> str:
+    meter = '<span class="resource-meter-spacer" aria-hidden="true"></span>'
+    if usage is not None:
+        meter = f'<meter class="resource-meter" min="0" max="100" value="{usage:g}" aria-label="{escape(label)} usage">{usage:g}%</meter>'
+    supporting = ''.join(f'<span>{escape(detail)}</span>' for detail in details)
+    return ('<article class="resource-metric"><h4>' + escape(label) + '</h4>'
+            + '<div class="resource-value">' + escape(value) + f'<small>{escape(unit)}</small></div>'
+            + '<div class="resource-caption">' + escape(caption) + '</div>'
+            + meter + '<div class="resource-supporting">' + supporting + '</div></article>')
 
 
-def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
-    freshness = status.get("freshness", "unavailable")
-    rows = {"Observed at (Pacific)": status.get("observed_at"),
-            "\u00a0": "\u00a0"}
-    if freshness != "fresh":
-        for label in ("CPU (15 minutes)", "memory", "disk", "Collection status"):
-            rows[label] = f"placeholder · {freshness}"
-        rows["Telemetry error"] = status.get("error") or "AWS telemetry unavailable."
-        return rows
-    def percent(value):return "unavailable" if value is None else f"{value:g}%"
-    def gib(value):return "unavailable" if value is None else f"{value / (1024 ** 3):.2f} GiB"
-    cpu, memory = status["cpu"], status["memory"]
-    rows.update({
-        "CPU (15 minutes)": f"{percent(cpu['average_percent'])} average · {percent(cpu['max_observed_percent'])} maximum observed",
-        "memory": f"{gib(memory['available_average_bytes'])} available average · {gib(memory['available_min_bytes'])} minimum available",
-        "Collection status": "complete · 15-minute window" if status["complete"] else "warming · incomplete window",
-    })
-    disk = status.get("disk")
-    rows["disk"] = (f"{percent(disk['used_percent'])} used · {gib(disk['available_bytes'])} available · {gib(disk['capacity_bytes'])} capacity"
-                         if disk else f"Unavailable · {status.get('disk_state', 'unavailable')} disk observation")
-    return rows
+def render_host_resources(status: dict[str, Any], *, host: str) -> str:
+    fresh = status.get('freshness') == 'fresh'
+    cpu = status.get('cpu', {}) if fresh else {}
+    memory = status.get('memory', {}) if fresh else {}
+    disk = ((status.get('latest') or {}).get('disk') if host == 'Mini' else status.get('disk')) if fresh else None
+    disk = disk or {}
+    def percent(value):
+        return '—' if value is None else f'{value:.2f}'
+    def gib(value):
+        return '—' if value is None else f'{value / 1024**3:.2f}'
+    def gib_detail(value):
+        return 'Unavailable' if value is None else gib(value) + ' GiB'
+    average, peak = cpu.get('average_percent'), cpu.get('max_observed_percent')
+    available, low = memory.get('available_average_bytes'), memory.get('available_min_bytes')
+    used, free, capacity = disk.get('used_percent'), disk.get('available_bytes'), disk.get('capacity_bytes')
+    unavailable = 'Reading expired' if status.get('freshness') == 'stale' else 'Not available'
+    cpu_card = render_resource_card('CPU', percent(average), '%' if average is not None else '', '15-min average' if average is not None else unavailable,
+        [f'Peak {peak:.2f}%' if peak is not None else 'Peak unavailable'], usage=average)
+    memory_card = render_resource_card('Memory available', gib(available), 'GiB' if available is not None else '', '15-min average' if available is not None else unavailable,
+        ['Lowest ' + gib_detail(low)] if low is not None else ['Low unavailable'])
+    disk_missing = 'Reading expired' if host == 'AWS' and status.get('disk_state') == 'stale' else unavailable
+    disk_card = render_resource_card('Disk', percent(used), '%' if used is not None else '', 'used' if used is not None else disk_missing,
+        [gib_detail(free) + ' free', 'of ' + gib_detail(capacity)] if used is not None else ['No current disk reading'], usage=used)
+    if fresh:
+        complete = (status.get('window') or {}).get('complete') if host == 'Mini' else status.get('complete')
+        collection = '15-minute window complete' if complete else 'Collecting · window incomplete'
+    else:
+        collection = 'Measurements expired' if status.get('freshness') == 'stale' else 'Awaiting measurements'
+    times = '<div class="resource-timestamp"><span>Observed</span><div>' + render_telemetry_timestamp(status.get('observed_at')) + '</div></div>'
+    if host == 'Mini':
+        times += '<div class="resource-timestamp"><span>Received by AWS</span><div>' + render_telemetry_timestamp(status.get('received_at')) + '</div></div>'
+    error = '' if fresh or not status.get('error') else '<p class="resource-error">' + escape(status['error']) + '</p>'
+    return (f'<section class="resource-panel host-resource-panel"><h3><img src="/assets/{host.lower()}-icon.png" class="resource-host-icon" alt="" width="28" height="28"> {host}</h3>'
+            + '<div class="resource-metric-grid">' + cpu_card + memory_card + disk_card + '</div>'
+            + '<div class="resource-collection">' + escape(collection) + '</div>'
+            + '<div class="resource-timestamps">' + times + '</div>' + error + '</section>')
 
 
 def render_mini_container_health(status: dict[str, Any]) -> str:
@@ -1649,9 +1648,10 @@ def render_mini_container_health(status: dict[str, Any]) -> str:
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
     mini_status = mini_telemetry_health()
     aws_status = load_aws_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
-    mini = mini_telemetry_rows(mini_status)
-    aws = aws_telemetry_rows(aws_status)
-    return '<section class="health-section"><h2>Infrastructure</h2><div class="resource-columns"><section class="resource-panel"><h3><img src="/assets/mini-icon.png" class="resource-host-icon" alt="" width="28" height="28"> Mini</h3>' + render_key_values(mini, timestamp_keys={'Observed at (Pacific)', 'Received by AWS (Pacific)'}) + '</section><section class="resource-panel"><h3><img src="/assets/aws-icon.png" class="resource-host-icon" alt="" width="28" height="28"> AWS</h3>' + render_key_values(aws, timestamp_keys={'Observed at (Pacific)'}) + '</section></div></section>' + render_mini_container_health(mini_status)
+    return ('<section class="health-section"><h2>Infrastructure</h2><div class="resource-columns">'
+            + render_host_resources(mini_status, host='Mini') + render_host_resources(aws_status, host='AWS')
+            + '</div></section>' + render_mini_container_health(mini_status))
+
 
 
 def render_health_job_charts(summary: dict[str, Any]) -> str:
@@ -4040,6 +4040,27 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .resource-host-icon { object-fit: contain; vertical-align: middle; margin-right: 6px; }
 .resource-panel { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(8, 13, 20, 0.28); }
 .resource-panel .health-kv { border: 0; padding: 0; background: transparent; }
+.host-resource-panel { padding: 18px; }
+.host-resource-panel > h3 { display: flex; align-items: center; gap: 4px; margin: 0 0 16px; font-size: 15px; }
+.resource-metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.resource-metric { min-width: 0; padding: 14px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.resource-metric h4 { min-height: 32px; margin: 0 0 8px; color: var(--muted-strong); font-size: 12px; font-weight: 600; }
+.resource-value { font-size: clamp(24px, 2.4vw, 32px); font-weight: 700; line-height: 1.15; letter-spacing: -0.035em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.resource-value small { margin-left: 4px; color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: 0; }
+.resource-caption { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.resource-supporting { display: grid; gap: 3px; min-height: 30px; margin-top: 12px; color: var(--muted-strong); font-size: 11px; font-variant-numeric: tabular-nums; }
+.resource-meter-spacer { display: block; height: 5px; margin-top: 12px; }
+.resource-meter { display: block; width: 100%; height: 5px; margin-top: 12px; border: 0; border-radius: 5px; background: var(--border); accent-color: var(--accent); }
+.resource-meter::-webkit-meter-bar { height: 5px; border: 0; border-radius: 5px; background: var(--border); }
+.resource-meter::-webkit-meter-optimum-value { border-radius: 5px; background: var(--accent); }
+.resource-meter::-moz-meter-bar { border-radius: 5px; background: var(--accent); }
+.resource-collection { margin-top: 14px; color: var(--muted); font-size: 11px; }
+.resource-timestamps { display: grid; gap: 5px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; }
+.resource-timestamp { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.resource-timestamp > span { min-width: 90px; }
+.resource-error { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+@media (max-width: 420px) { .resource-metric-grid { grid-template-columns: 1fr; } .resource-metric h4 { min-height: 0; } }
+
 .job-charts { margin-top: 12px; }
 .funnel-summary { margin-top: 14px; }
 .funnel-summary > .health-cards { margin: 8px 0 14px; }
