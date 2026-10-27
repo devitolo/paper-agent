@@ -11,6 +11,8 @@ import signal
 import sqlite3
 import threading
 import urllib.parse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -54,7 +56,7 @@ from paper_agents.topics import (
 
 ASSET_DIR = Path(__file__).with_name("assets")
 LOGGER = logging.getLogger(__name__)
-LOGO_ASSETS = {"logo_light.png", "logo_dark.png"}
+LOGO_ASSETS = {"logo_light.png", "logo_dark.png", "mini-icon.png", "aws-icon.png"}
 LOGO_ASSET_VERSION = "20260829"
 
 FEEDBACK_STATUSES = [
@@ -1503,14 +1505,25 @@ def render_health_jobs(summary: dict[str, Any]) -> str:
     return '<section class="health-section"><div class="section-heading"><div><h2>Jobs</h2><p>Scheduled operations, with processing and AWS delivery shown separately.</p></div><span class="health-note">Live events · refresh the page to update</span></div>' + render_health_table("Operational job history", rows, ["recorded_at", "job", "processing", "delivery", "message"]) + '</section>'
 
 
+def telemetry_pacific_time(value: Any) -> str:
+    if not value:
+        return "unknown"
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if instant.tzinfo is None:
+            return "unknown"
+        return instant.astimezone(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M:%S %p %Z")
+    except (ValueError, TypeError, AttributeError):
+        return "unknown"
+
+
 def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     """Presentation of validated received telemetry; stale numbers stay hidden."""
     freshness = status.get("freshness", "unavailable")
     rows = {
-        "Source": "Mini",
         "Mini telemetry freshness": freshness,
-        "Observed at (UTC)": status.get("observed_at") or "unknown",
-        "Received by AWS (UTC)": status.get("received_at") or "unknown",
+        "Observed at (Pacific)": telemetry_pacific_time(status.get("observed_at")),
+        "Received by AWS (Pacific)": telemetry_pacific_time(status.get("received_at")),
     }
     if freshness != "fresh":
         for label in ("Mini CPU (15 minutes)", "Mini memory", "Mini disk", "Collection status", "Publish status"):
@@ -1535,8 +1548,9 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
 
 def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     freshness = status.get("freshness", "unavailable")
-    rows = {"Source": "AWS", "AWS telemetry freshness": freshness,
-            "AWS observed at (UTC)": status.get("observed_at") or "unknown"}
+    rows = {"AWS telemetry freshness": freshness,
+            "AWS observed at (Pacific)": telemetry_pacific_time(status.get("observed_at")),
+            "\u00a0": "\u00a0"}
     if freshness != "fresh":
         for label in ("AWS CPU (15 minutes)", "AWS memory", "AWS disk", "Collection status"):
             rows[label] = f"placeholder · {freshness}"
@@ -1552,7 +1566,7 @@ def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     })
     disk = status.get("disk")
     rows["AWS disk"] = (f"{percent(disk['used_percent'])} used · {gib(disk['available_bytes'])} available · {gib(disk['capacity_bytes'])} capacity"
-                         if disk else f"placeholder · {status.get('disk_state', 'unavailable')} disk observation")
+                         if disk else f"Unavailable · {status.get('disk_state', 'unavailable')} disk observation")
     return rows
 
 
@@ -1605,7 +1619,7 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
     mini = mini_telemetry_rows(mini_status)
     aws = aws_telemetry_rows(aws_status)
     badge = "SANITIZED COLLECTOR DATA" if mini_status.get("freshness") == "fresh" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · NO FRESH OBSERVATIONS"
-    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked fresh, stale, unknown, or unavailable. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>' + render_mini_container_health(mini_status)
+    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3><img src="/assets/mini-icon.png" class="resource-host-icon" alt="" width="28" height="28"> Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3><img src="/assets/aws-icon.png" class="resource-host-icon" alt="" width="28" height="28"> AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked fresh, stale, unknown, or unavailable. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>' + render_mini_container_health(mini_status)
 
 
 def render_health_job_charts(summary: dict[str, Any]) -> str:
@@ -1678,7 +1692,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     <nav class="health-tabs" aria-label="Health sections">{tabs}</nav>
     {render_needs_attention(summary) if tab == "jobs" else ""}
     {tab_content}
-    <div class="health-cards">{card_html}</div>
+    {'<div class="health-cards">' + card_html + '</div>' if tab != 'infrastructure' else ''}
     {render_health_job_charts(summary) if tab == "jobs" else ""}
     {render_sync_health() if tab == "jobs" else ""}
     <section class="health-section" style="display: {'block' if tab == 'analytics' else 'none'}">
@@ -3983,6 +3997,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .health-kv dd { margin: 0; }
 .infra-database { margin-bottom: 14px; }
 .resource-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.resource-host-icon { object-fit: contain; vertical-align: middle; margin-right: 6px; }
 .resource-panel { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(8, 13, 20, 0.28); }
 .resource-panel .health-kv { border: 0; padding: 0; background: transparent; }
 .job-charts { margin-top: 12px; }
