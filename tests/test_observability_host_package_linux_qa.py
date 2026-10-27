@@ -122,6 +122,19 @@ assert digest==claims[subject.name]
         self.assertIn(self.new_image,(self.root/self.m.ENV_FILE.lstrip('/')).read_text())
         self.assertEqual(self.cron.read_bytes(),self.previous[self.cron])
 
+    def test_newer_noop_advances_replay_high_water(self):
+        digest,_=self.bundle();self.install(digest)
+        self.now+=20
+        digest,_=self.bundle()
+        result=self.install(digest)
+        self.assertEqual(result['result'],'already_ready')
+        self.assertEqual(self.m.timestamp(result['created_at']),self.now)
+        self.now-=10
+        self.files[next(iter(self.files))]+=b'# intermediate older release\n'
+        digest,_=self.bundle()
+        with self.assertRaises(ValueError):self.install(digest)
+        self.assertIn(self.new_image,(self.root/self.m.ENV_FILE.lstrip('/')).read_text())
+
     def test_invalid_image_and_unexpected_config_fail_without_mutation(self):
         for image in ('repo:latest','ghcr.io/devitolo/paper-agent/observability:observability-aws@sha256:'+'a'*64,'$(touch /tmp/no)'):
             digest,_=self.bundle(change=lambda m:m.update(image=image))

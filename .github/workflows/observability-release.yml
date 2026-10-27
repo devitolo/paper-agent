@@ -117,9 +117,10 @@ jobs:
     runs-on: ${{ github.ref_name == 'observability-mini' && fromJSON('["self-hosted","linux","x64","project-paper-observability-mini-deploy"]') || fromJSON('["self-hosted","linux","x64","project-paper-observability-aws-deploy"]') }}
     timeout-minutes: 20
     permissions: {}
-    env:
-      OBSERVABILITY_PACKAGE_DIR: ${{ runner.temp }}/project-paper-observability-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
+      - name: Select unique package staging directory
+        shell: bash
+        run: echo "OBSERVABILITY_PACKAGE_DIR=$RUNNER_TEMP/project-paper-observability-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ github.sha }}

@@ -424,7 +424,14 @@ def install(root, bundle, source_sha, *, check_health=health, prepare=None, now=
                     raise ValueError('pending guard bootstrap missing')
             if receipt.exists() and config_before == config_after and all((root / FILES[name].lstrip('/')).read_bytes() == data for name, data in files.items()):
                 previous = decode(receipt.read_bytes())
-                if previous.get('artifact_sha256') == bundle and previous.get('image') == manifest['image'] and previous.get('result') == 'ready':
+                if (previous.get('artifact_sha256') == bundle and previous.get('image') == manifest['image']
+                        and previous.get('source_sha') == source_sha and previous.get('result') == 'ready'):
+                    # A newly signed no-op is still a newer accepted release.
+                    # Keep its high-water timestamp so an intermediate release
+                    # cannot subsequently replace these already-current bytes.
+                    if timestamp(manifest['created_at']) > timestamp(previous['created_at']):
+                        previous['created_at'] = manifest['created_at']
+                        atomic(receipt, json.dumps(previous, sort_keys=True).encode(), 0o600)
                     return {**previous, 'result': 'already_ready'}
             previous_image = next(line.split('=',1)[1] for line in config_before.decode('ascii').splitlines() if line.startswith('PROJECT_PAPER_OBSERVABILITY_IMAGE='))
             (prepare or prepare_image)(root, manifest['image'], source_sha, previous_image)
