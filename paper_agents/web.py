@@ -1622,21 +1622,21 @@ def _render_container_health(status: dict[str, Any], *, host: str) -> str:
             cpu = item['cpu_percent']
             memory = item['memory_bytes']
             limit = item['memory_limit_bytes']
-            resource = (f'{cpu:g}% CPU' if cpu is not None else 'CPU unavailable') + ' · '
+            cpu_text = f'{cpu:g}%' if cpu is not None else 'Unavailable'
             if memory is not None and limit is not None:
-                resource += f'{memory / 1024**2:.1f} / {limit / 1024**2:.1f} MiB'
+                memory_text = f'{memory / 1024**2:.1f} / {limit / 1024**2:.1f} MiB'
             else:
-                resource += f'{memory / 1024**2:.1f} MiB' if memory is not None else 'memory unavailable'
+                memory_text = f'{memory / 1024**2:.1f} MiB' if memory is not None else 'Unavailable'
                 if limit is not None:
-                    resource += f' / {limit / 1024**2:.1f} MiB'
+                    memory_text += f' / {limit / 1024**2:.1f} MiB'
             rows.append({'container': labels[item['service']], 'status': state,
                          'health': 'No health check configured' if health == 'no-healthcheck' else health,
-                         'image_digest': digest or 'Unavailable', 'cpu_and_memory': resource})
+                         'image_digest': digest or 'Unavailable', 'cpu': cpu_text, 'memory': memory_text})
     message = '' if fresh else f'<p>No fresh {host} container observations have been received.</p>'
     details = ''
     if rows:
-        columns = ('status', 'health', 'cpu_and_memory')
-        headers = '<th>Container</th>' + ''.join(f'<th>{escape(key.replace("_", " ").title())}</th>' for key in columns)
+        columns = ('status', 'health', 'cpu', 'memory')
+        headers = '<th>Container</th>' + ''.join(f'<th>{("CPU" if key == "cpu" else escape(key.replace("_", " ").title()))}</th>' for key in columns)
         body = ''.join(
             '<tr><td>' + escape(row['container'])
             + '<details class="container-details"><summary>Details</summary><div>Image digest<code>'

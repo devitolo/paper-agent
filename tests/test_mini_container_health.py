@@ -25,7 +25,7 @@ class MiniContainerHealthTests(unittest.TestCase):
             t.ingest(path,t.encoded(value),str(uuid.uuid4()),clock=clock)
             before=path.read_bytes()
             html=web.render_mini_container_health(t.health_status(path,clock=clock))
-            for expected in ('Production app','Observability publisher','healthy','sha256:'+'b'*64,'0.25% CPU','5.5 / 256.0 MiB'):
+            for expected in ('Production app','Observability publisher','healthy','sha256:'+'b'*64,'<th>CPU</th><th>Memory</th>','5.5 / 256.0 MiB'):
                 self.assertIn(expected,html)
             self.assertNotIn('<th>Image Digest</th>',html)
             self.assertEqual(html.count('<details class="container-details">'),6)
@@ -44,7 +44,7 @@ class MiniContainerHealthTests(unittest.TestCase):
         html=web.render_mini_container_health({'freshness':'fresh','latest':{'containers':value}})
         self.assertIn('No health check configured',html)
         self.assertIn('Scheduled',html)
-        self.assertIn('CPU unavailable',html)
+        self.assertIn('<td>Unavailable</td><td>Unavailable</td>',html)
 
     def test_scheduled_job_checks_use_accepted_data_and_preserve_explicit_failures(self):
         value=snapshot()
