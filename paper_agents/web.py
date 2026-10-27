@@ -1529,7 +1529,6 @@ def mini_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
         "Mini disk": f"{amount(disk.get('used_percent'))} used · {gib(disk.get('available_bytes'))} available · {gib(disk.get('capacity_bytes'))} capacity",
         "Collection status": "complete · 15-minute window" if status["window"]["complete"] else f"warming · {status['coverage_seconds']}/900 seconds covered · {status['window']['sample_gaps']} gaps",
         "Publish status": "last delivery accepted by AWS · subsequent attempts unknown",
-        "Mini container": status["latest"]["containers"]["state"],
     })
     return rows
 
@@ -1557,6 +1556,45 @@ def aws_telemetry_rows(status: dict[str, Any]) -> dict[str, str]:
     return rows
 
 
+def render_mini_container_health(status: dict[str, Any]) -> str:
+    from datetime import datetime, timezone
+    from paper_agents.observability_transport import stamp
+    containers = (status.get('latest') or {}).get('containers') or {}
+    items = containers.get('items')
+    fresh = status.get('freshness') == 'fresh' and items is not None
+    if fresh:
+        try:
+            age = datetime.now(timezone.utc).timestamp() - stamp(containers.get('observed_at'))
+            fresh = -300 <= age <= 2700
+        except ValueError:
+            fresh = False
+    labels = {'app': 'Production app', 'minilm': 'MiniLM', 'ollama': 'Ollama', 'phoenix': 'Phoenix',
+              'observability-collector': 'Observability collector', 'observability-publisher': 'Observability publisher'}
+    rows = []
+    if fresh:
+        for item in items:
+            state, health = item['status'], item['health']
+            if state == 'unavailable' and item['service'].startswith('observability-'):
+                state = 'Not running or unavailable (scheduled job)'
+            digest = item['image_digest']
+            if digest is None and item['image_id']:
+                digest = 'Image ID: ' + item['image_id'] + ' (registry digest unavailable)'
+            cpu = item['cpu_percent']
+            memory = item['memory_bytes']
+            limit = item['memory_limit_bytes']
+            resource = (f'{cpu:g}% CPU' if cpu is not None else 'CPU unavailable') + ' · '
+            resource += f'{memory / 1024**2:.1f} MiB memory' if memory is not None else 'memory unavailable'
+            if limit is not None:
+                resource += f' / {limit / 1024**2:.1f} MiB limit'
+            rows.append({'container': labels[item['service']], 'status': state,
+                         'health': 'No health check configured' if health == 'no-healthcheck' else health,
+                         'image_digest': digest or 'Unavailable', 'cpu_and_memory': resource})
+    message = ('Docker-reported status, health, running image digest, and sampled CPU/memory. Collector and publisher are scheduled jobs; they normally have no running container between runs.'
+               if fresh else 'No fresh Mini container observations have been received.')
+    details = render_health_table('Mini containers', rows, ['container', 'status', 'health', 'image_digest', 'cpu_and_memory']) if rows else ''
+    return '<section class="health-section mini-container-health"><h2>Mini containers</h2><p>' + message + '</p>' + details + '</section>'
+
+
 def render_health_infrastructure(summary: dict[str, Any]) -> str:
     mini_status = mini_telemetry_health()
     aws_status = load_aws_resource_status(Path(os.environ.get("PAPER_AGENT_AWS_RESOURCE_STATUS_FILE", "data/aws-resource-status.json")))
@@ -1567,7 +1605,7 @@ def render_health_infrastructure(summary: dict[str, Any]) -> str:
     mini = mini_telemetry_rows(mini_status)
     aws = aws_telemetry_rows(aws_status)
     badge = "SANITIZED COLLECTOR DATA" if mini_status.get("freshness") == "fresh" or aws_status.get("state") == "observed" else "PLACEHOLDER TELEMETRY · NO FRESH OBSERVATIONS"
-    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked fresh, stale, unknown, or unavailable. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>'
+    return f'<section class="health-section"><div class="section-heading"><div><h2>Infrastructure</h2><p>Database facts first, then separate Mini and AWS resource observations.</p></div><span class="placeholder-badge">{badge}</span></div><div class="infra-database"><h3>Database</h3>' + render_key_values(database) + '</div><div class="resource-columns"><section class="resource-panel"><h3>Mini</h3>' + render_key_values(mini) + '</section><section class="resource-panel"><h3>AWS</h3>' + render_key_values(aws) + '</section></div><p class="health-footnote">Collector readings are sanitized, timestamped, and explicitly marked fresh, stale, unknown, or unavailable. Mini readings come from the snapshot received by AWS; the browser never reads Mini files.</p></section>' + render_mini_container_health(mini_status)
 
 
 def render_health_job_charts(summary: dict[str, Any]) -> str:
@@ -3934,6 +3972,7 @@ textarea { box-sizing: border-box; width: 100%; min-height: 42px; resize: vertic
 .attention-card:first-of-type { border-top: 0; }
 .attention-card h3 { margin: 0 0 4px; font-size: 13px; }
 .attention-card p { margin: 3px 0; font-size: 12px; }
+.mini-container-health td { overflow-wrap: anywhere; }
 .health-table { margin: 8px 0 12px; overflow-x: auto; }
 .health-table table { width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #d8dee4; border-radius: 6px; overflow: hidden; }
 .health-table th, .health-table td { padding: 5px 7px; border-bottom: 1px solid #d8dee4; text-align: left; white-space: nowrap; }
