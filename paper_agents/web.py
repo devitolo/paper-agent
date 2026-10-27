@@ -1622,7 +1622,7 @@ def _render_container_health(status: dict[str, Any], *, host: str) -> str:
             cpu = item['cpu_percent']
             memory = item['memory_bytes']
             limit = item['memory_limit_bytes']
-            cpu_text = f'{cpu:g}%' if cpu is not None else 'Unavailable'
+            cpu_text = f'{cpu:g}%' if cpu is not None else 'N/A'
             if memory is not None and limit is not None:
                 memory_text = f'{memory / 1024**2:.1f} / {limit / 1024**2:.1f} MiB'
             else:

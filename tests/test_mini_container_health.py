@@ -44,7 +44,7 @@ class MiniContainerHealthTests(unittest.TestCase):
         html=web.render_mini_container_health({'freshness':'fresh','latest':{'containers':value}})
         self.assertIn('No health check configured',html)
         self.assertIn('Scheduled',html)
-        self.assertIn('<td>Unavailable</td><td>Unavailable</td>',html)
+        self.assertIn('<td>N/A</td><td>Unavailable</td>',html)
 
     def test_scheduled_job_checks_use_accepted_data_and_preserve_explicit_failures(self):
         value=snapshot()
