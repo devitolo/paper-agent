@@ -39,8 +39,8 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         self.assertEqual(status['freshness'], 'fresh')
         self.assertEqual(status['received_at'], self.payload['status']['observed_at'])
         html = self.render()
-        for expected in ('Mini', 'just now', '0% average', '0% maximum observed',
-                         '0.00 GiB available average', '50% used', 'complete · 15-minute window',
+        for expected in ('Mini', 'just now', '0.00<small>%</small>', 'Peak 0.00%',
+                         '0.00<small>GiB</small>', '50.00<small>%</small>', '15-minute window complete',
                          web.telemetry_pacific_time(self.payload['status']['observed_at'])):
             self.assertIn(expected, html)
         self.assertNotIn('Publish Status</dt>', html)
@@ -54,10 +54,10 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         saved['received_at'] = fixture(self.clock + 2701)['status']['observed_at']
         self.path.write_text(json.dumps(saved))
         html = self.render(self.clock + 2701)
-        self.assertIn('placeholder · stale', html)
+        self.assertIn('Reading expired', html)
         self.assertIn('No fresh Mini telemetry received within 45 minutes.', html)
-        self.assertNotIn('50% used', html)
-        self.assertNotIn('0% average', html)
+        self.assertNotIn('50.00<small>%</small>', html)
+        self.assertNotIn('0.00<small>%</small>', html)
 
     def test_pacific_display_handles_daylight_saving_and_invalid_times(self):
         self.assertEqual(web.telemetry_pacific_time('2026-10-26T21:45:06+00:00'), '2026-10-26 02:45:06 PM PDT')
@@ -87,7 +87,7 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         self.assertEqual(html.count('class="telemetry-age telemetry-age-stale"'), 1)
         self.assertIn('just now', html)
         self.assertIn('45 minutes ago', html)
-        self.assertNotIn('50% used', html)
+        self.assertNotIn('50.00<small>%</small>', html)
 
     def test_freshness_threshold(self):
         self.save()
@@ -97,7 +97,7 @@ class MiniTelemetryHealthTests(unittest.TestCase):
     def test_missing_state_does_not_create_file_or_lock(self):
         html = self.render()
         self.assertIn('No Mini telemetry has been received.', html)
-        self.assertIn('placeholder · unavailable', html)
+        self.assertIn('Not available', html)
         self.assertEqual(list(self.path.parent.iterdir()), [])
 
     def test_malformed_sensitive_state_fails_closed(self):
@@ -108,13 +108,13 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         html = self.render()
         self.assertIn('Stored Mini telemetry is invalid.', html)
         self.assertNotIn('<script>secret</script>', html)
-        self.assertNotIn('50% used', html)
+        self.assertNotIn('50.00<small>%</small>', html)
 
     def test_future_observation_and_receipt_fail_closed(self):
         self.save()
         html = self.render(self.clock - 301)
         self.assertIn('timestamps are inconsistent or in the future', html)
-        self.assertNotIn('50% used', html)
+        self.assertNotIn('50.00<small>%</small>', html)
         saved = json.loads(self.path.read_text())
         saved['received_at'] = fixture(self.clock + 301)['status']['observed_at']
         self.path.write_text(json.dumps(saved))
@@ -134,6 +134,6 @@ class MiniTelemetryHealthTests(unittest.TestCase):
         payload['status']['latest']['disk'] = None
         self.save(payload)
         html = self.render()
-        self.assertIn('warming · 0/900 seconds covered · 1 gaps', html)
-        self.assertIn('unavailable average', html)
-        self.assertNotIn('complete · 15-minute window', html)
+        self.assertIn('Collecting · window incomplete', html)
+        self.assertIn('Not available', html)
+        self.assertNotIn('15-minute window complete', html)
