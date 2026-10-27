@@ -1611,7 +1611,7 @@ def _render_container_health(status: dict[str, Any], *, host: str) -> str:
             state, health = item['status'], item['health']
             if (status.get('received_at') or host == 'AWS') and health in ('unavailable', 'no-healthcheck'):
                 if item['service'] == 'observability-collector':
-                    health = 'Last received collection OK' if host == 'Mini' else 'Last collection OK'
+                    health = 'Last collection OK'
                 elif item['service'] == 'observability-publisher':
                     health = 'Last delivery accepted'
             if state == 'unavailable' and item['service'].startswith('observability-'):
