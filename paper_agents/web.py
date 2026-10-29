@@ -1376,7 +1376,7 @@ def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]
         items.append({
             "state": state,
             "domain": "delivery",
-            "severity": "warning" if state in {"stale", "unknown"} else "critical",
+            "severity": "warning" if state in {"stale", "unknown", "unavailable", "malformed"} else "critical",
             "what_happened": f"AWS sync status is {state}.",
             "why_it_matters": "New Mini results may not be visible in the AWS serving UI.",
             "likely_cause": "The sync receipt is stale, unavailable, or malformed; the exact delivery cause is unknown.",
@@ -2301,9 +2301,13 @@ def daily_funnel_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
         bucket = by_day.setdefault(day, {"day": day, "candidate_count": 0, "eligible_count": 0, "recommendation_count": 0})
         bucket["candidate_count"] += int(row["candidate_count"] or 0)
         bucket["eligible_count"] += int(row["eligible_count"] or 0)
+    coverage={(str(row['day']),row['source']) for row in summary['daily']['scout']}
     for row in summary["daily"]["curator"]:
         day = str(row["day"])
         bucket = by_day.setdefault(day, {"day": day, "candidate_count": None, "eligible_count": None, "recommendation_count": 0})
+        if 'source' in row and (day,row['source']) not in coverage:
+            bucket['candidate_count']=None
+            bucket['eligible_count']=None
         bucket["recommendation_count"] += int(row["recommendation_count"] or 0)
     return [by_day[day] for day in sorted(by_day.keys(), reverse=True)]
 
@@ -2322,6 +2326,11 @@ def source_funnel_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
         source = str(row["source"])
         bucket = by_source.setdefault(source, {"source": source, "candidate_count": None, "eligible_count": None, "recommendation_count": 0})
         bucket["recommendation_count"] += int(row["recommendation_count"] or 0)
+    coverage={(str(row['day']),row['source']) for row in summary['daily']['scout']}
+    for row in summary['daily']['curator']:
+        if row.get('source') in by_source and (str(row['day']),row['source']) not in coverage:
+            by_source[row['source']]['candidate_count']=None
+            by_source[row['source']]['eligible_count']=None
     return sorted(by_source.values(), key=lambda item: (item["candidate_count"] or 0, item["eligible_count"] or 0, item["recommendation_count"]), reverse=True)
 
 

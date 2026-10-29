@@ -54,7 +54,7 @@ def validate(value):
         start=stamp(row['started_at'])
         if start>datetime.now(timezone.utc)+timedelta(minutes=5):
             raise ValueError('future operational Scout run')
-        if row['completed_at'] is not None and stamp(row['completed_at'])<start:
+        if row['completed_at'] is not None and (stamp(row['completed_at'])<start or stamp(row['completed_at'])>datetime.now(timezone.utc)+timedelta(minutes=5)):
             raise ValueError('operational completion precedes start')
         for key in ('candidate_count','eligible_count','excluded_count'):
             if type(row[key]) is not int or not 0<=row[key]<=1000000:
@@ -93,6 +93,7 @@ def batches(connection, *, days=21):
         json_extract(payload_json,'$.producer_id') AS producer_id,
         json_extract(payload_json,'$.environment') AS environment
         FROM sync_result_batches WHERE created_at>=datetime('now',?)
+        OR id=(SELECT MAX(id) FROM sync_result_batches)
         ORDER BY id DESC LIMIT 200''',(f'-{int(days)} days',))]
 
 
@@ -104,14 +105,15 @@ def project(summary, rows):
     events=[]; scout=[]; receipts=[]
     seen_events=set(); seen_runs=set()
     for batch in rows:
-        facts=json.loads(batch['operational']) if batch['operational'] else None
-        if facts:
-            try: validate(facts)
-            except (ValueError,TypeError,KeyError): facts=None
+        try:
+            facts=json.loads(batch['operational']) if batch['operational'] else None
+            validate(facts)
+        except (ValueError,TypeError,KeyError):
+            facts=None
         fact_sources=({r['source'] for r in facts['scout_runs']} | {'semantic_scholar' if r['job']=='semantic' else r['job'] for r in facts['events']}) if facts else set()
+        receipts.append(batch)  # Sync acceptance is global, independent of chart filtering.
         if source and source not in fact_sources:
             continue
-        receipts.append(batch)
         if facts is None or batch['status']!='applied':
             continue
         for event in facts['events']:
