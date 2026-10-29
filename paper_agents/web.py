@@ -1365,7 +1365,12 @@ def load_minilm_eval_page(db_path: Path, *, run_value: str | None = None) -> dic
     return {"runs": runs, "selected_run": selected, "items": items}
 
 
-def sync_health_snapshot() -> dict[str, str]:
+def sync_health_snapshot(summary=None) -> dict[str, str]:
+    if summary is not None:
+        from paper_agents.operational_evidence import sync_snapshot
+        receipt = sync_snapshot(summary)
+        if receipt is not None:
+            return receipt
     path = Path(os.environ.get("PAPER_AGENT_ORCHESTRATOR_STATUS_FILE", "data/orchestrator-status.json"))
     unknown = {"time": "unknown", "revision": "unknown", "age": "unknown", "size": "unknown", "failure": "none", "skipped": "unknown", "installed": "unknown", "state": "unknown"}
     try:
@@ -1389,8 +1394,8 @@ def sync_health_snapshot() -> dict[str, str]:
         return {**unknown, "state": "unavailable"}
 
 
-def render_sync_health() -> str:
-    status = sync_health_snapshot()
+def render_sync_health(summary=None) -> str:
+    status = sync_health_snapshot(summary)
     labels = [("State", status["state"]), ("Last successful sync", status["time"] if status["state"] == "completed" else "unknown"), ("Current snapshot revision", status["revision"]), ("Snapshot age", status["age"]), ("Snapshot size", status["size"]), ("Last failure reason", status["failure"]), ("Pipeline run skipped", status["skipped"]), ("Installed input revision", status["installed"])]
     rows = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in labels)
     return f'<section class="health-section"><h2>Mini sync</h2><dl class="health-kv">{rows}</dl></section>'
@@ -1418,7 +1423,7 @@ def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]
             "observed_at": str(warning.get("recorded_at", "unknown")),
             "diagnostic_href": f"/health/scout-diagnostics/{warning['scout_run_id']}" if isinstance(warning.get("scout_run_id"), int) and warning["scout_run_id"] > 0 else "",
         })
-    sync = sync_health_snapshot()
+    sync = sync_health_snapshot(summary)
     if sync["state"] != "completed":
         state = sync["state"] if sync["state"] in {"stale", "unavailable", "malformed", "unknown"} else "observed"
         items.append({
@@ -1503,6 +1508,7 @@ def render_health_jobs(summary: dict[str, Any]) -> str:
         message = str(event.get("message", ""))
         lower_message = message.lower()
         delivery = "accepted" if status in {"completed", "success", "succeeded"} and any(token in lower_message for token in ("receipt applied", "receipt=applied", "delivery accepted", "push applied")) else ("failed" if "push failed" in lower_message else "pending" if "push pending" in lower_message else "not recorded")
+        delivery = event.get("delivery", delivery)
         rows.append({"recorded_at": event.get("recorded_at", "unknown"), "job": event.get("job", "unknown"), "processing": processing, "delivery": delivery, "message": message})
     return '<section class="health-section"><div class="section-heading"><div><h2>Jobs</h2><p>Scheduled operations, with processing and AWS delivery shown separately.</p></div><span class="health-note">Live events · refresh the page to update</span></div>' + render_health_table("Operational job history", rows, ["recorded_at", "job", "processing", "delivery", "message"]) + '</section>'
 
@@ -1683,10 +1689,11 @@ def render_funnel_summary(summary: dict[str, Any]) -> str:
         "eligible": sum(int(row["eligible_count"] or 0) for row in source_rows),
         "recommendations": sum(int(row["recommendation_count"] or 0) for row in source_rows),
     }
+    missing = any(row["candidate_count"] is None or row["eligible_count"] is None for row in source_rows)
     totals["excluded"] = max(0, totals["candidates"] - totals["eligible"])
     eligible_rate = f"{totals['eligible'] / totals['candidates']:.0%}" if totals["candidates"] else "—"
     recommendation_rate = f"{totals['recommendations'] / totals['eligible']:.0%}" if totals["eligible"] else "—"
-    cards = "".join(f'<section class="health-card"><h2>{escape(label)}</h2><strong>{escape(str(value))}</strong><span>{escape(detail)}</span></section>' for label, value, detail in (("Candidates", totals["candidates"], "fetched"), ("Eligible", totals["eligible"], f"{eligible_rate} of candidates"), ("Recommendations", totals["recommendations"], f"{recommendation_rate} of eligible"), ("Excluded", totals["excluded"], "filtered out")))
+    cards = "".join(f'<section class="health-card"><h2>{escape(label)}</h2><strong>{escape("N/A" if missing and label != "Recommendations" else str(value))}</strong><span>{escape(detail)}</span></section>' for label, value, detail in (("Candidates", totals["candidates"], "fetched"), ("Eligible", totals["eligible"], f"{eligible_rate} of candidates"), ("Recommendations", totals["recommendations"], f"{recommendation_rate} of eligible"), ("Excluded", totals["excluded"], "filtered out")))
     compact_sources = [{"source": source_display_name(row["source"]), "candidates": row["candidate_count"], "eligible": row["eligible_count"], "recommendations": row["recommendation_count"], "eligible_rate": f"{row['eligible_count'] / row['candidate_count']:.0%}" if row["candidate_count"] else "—"} for row in source_rows]
     exclusions = sorted(summary["source_breakdown"]["exclusion_reasons"], key=lambda row: int(row["count"] or 0), reverse=True)[:5]
     return f'<section class="funnel-summary"><h3>At a glance</h3><div class="health-cards">{cards}</div>{render_health_table("By source", compact_sources, ["source", "candidates", "eligible", "recommendations", "eligible_rate"])}<details class="funnel-details"><summary>Show full funnel data</summary>{render_health_table("Workflow cycles", summary["daily"]["cycles"], ["day", "state", "cycle_count"])}{render_health_table("Scout", summary["daily"]["scout"], ["day", "source", "run_count", "candidate_count", "eligible_count", "excluded_count"])}{render_health_table("Top exclusion reasons", exclusions, ["source", "reason", "count"])}{render_health_table("Curator", summary["daily"]["curator"], ["day", "source", "evaluation_count", "quality_met_count", "recommendation_count"])}{render_health_table("Reviewer", summary["daily"]["reviewer"], ["day", "source", "recommendation_count", "pdf_count", "triage_summary_count"])}{render_health_table("Feedback/Profile", summary["daily"]["feedback"], ["day", "raw_feedback_count", "structured_feedback_count", "profile_version_count", "apply_failure_count"])}{render_health_table("Recommendations by source", summary["source_breakdown"]["recommendations"], ["source", "recommendation_count"])}</details></section>'
@@ -1742,7 +1749,7 @@ def render_health_page(db_path: Path, *, days: int = 21, source_value: str = SOU
     {tab_content}
     {'<div class="health-cards">' + card_html + '</div>' if tab != 'infrastructure' else ''}
     {render_health_job_charts(summary) if tab == "jobs" else ""}
-    {render_sync_health() if tab == "jobs" else ""}
+    {render_sync_health(summary) if tab == "jobs" else ""}
     <section class="health-section" style="display: {'block' if tab == 'analytics' else 'none'}">
       <h2>Artifact Health</h2>
       {render_key_values(summary["artifact_health"])}
@@ -2479,7 +2486,7 @@ def daily_funnel_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
         bucket["eligible_count"] += int(row["eligible_count"] or 0)
     for row in summary["daily"]["curator"]:
         day = str(row["day"])
-        bucket = by_day.setdefault(day, {"day": day, "candidate_count": 0, "eligible_count": 0, "recommendation_count": 0})
+        bucket = by_day.setdefault(day, {"day": day, "candidate_count": None, "eligible_count": None, "recommendation_count": 0})
         bucket["recommendation_count"] += int(row["recommendation_count"] or 0)
     return [by_day[day] for day in sorted(by_day.keys(), reverse=True)]
 
@@ -2496,9 +2503,9 @@ def source_funnel_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
     }
     for row in summary["source_breakdown"]["recommendations"]:
         source = str(row["source"])
-        bucket = by_source.setdefault(source, {"source": source, "candidate_count": 0, "eligible_count": 0, "recommendation_count": 0})
+        bucket = by_source.setdefault(source, {"source": source, "candidate_count": None, "eligible_count": None, "recommendation_count": 0})
         bucket["recommendation_count"] += int(row["recommendation_count"] or 0)
-    return sorted(by_source.values(), key=lambda item: (item["candidate_count"], item["eligible_count"], item["recommendation_count"]), reverse=True)
+    return sorted(by_source.values(), key=lambda item: (item["candidate_count"] or 0, item["eligible_count"] or 0, item["recommendation_count"]), reverse=True)
 
 
 def feedback_activity_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2527,6 +2534,8 @@ def render_chart_legend(items: list[tuple[str, str]]) -> str:
 
 
 def render_daily_trend_svg(rows: list[dict[str, Any]]) -> str:
+    if any(row.get("candidate_count") is None or row.get("eligible_count") is None for row in rows):
+        return render_health_table('Daily trend — missing counts are N/A', rows, ['day', 'candidate_count', 'eligible_count', 'recommendation_count'])
     if not rows:
         return '<div class="empty graph-empty">No daily funnel data in this range.</div>'
     rows = recent_chart_rows(rows)
@@ -2575,6 +2584,8 @@ def render_daily_trend_svg(rows: list[dict[str, Any]]) -> str:
 
 
 def render_source_breakdown_svg(rows: list[dict[str, Any]]) -> str:
+    if any(row.get("candidate_count") is None or row.get("eligible_count") is None for row in rows):
+        return render_health_table('Source counts — missing counts are N/A', rows, ['source', 'candidate_count', 'eligible_count', 'recommendation_count'])
     if not rows:
         return '<div class="empty graph-empty">No source data in this range.</div>'
     rows = rows[:8]
@@ -2592,6 +2603,8 @@ def render_source_breakdown_svg(rows: list[dict[str, Any]]) -> str:
 
 
 def render_recommendation_gap_svg(rows: list[dict[str, Any]]) -> str:
+    if any(row.get("candidate_count") is None or row.get("eligible_count") is None for row in rows):
+        return render_health_table('Recommendation gap — missing counts are N/A', rows, ['day', 'eligible_count', 'recommendation_count'])
     if not rows:
         return '<div class="empty graph-empty">No daily funnel data in this range.</div>'
     gap_rows = [
@@ -2754,7 +2767,7 @@ def render_health_table(title: str, rows: list[dict[str, Any]], columns: list[st
     headers = "".join(f"<th>{escape(column.replace('_', ' ').title())}</th>" for column in columns)
     if rows:
         body = "".join(
-            "<tr>" + "".join(f"<td>{escape(row.get(column) if row.get(column) is not None else 0)}</td>" for column in columns) + "</tr>"
+            "<tr>" + "".join(f"<td>{escape(row.get(column) if row.get(column) is not None else "N/A")}</td>" for column in columns) + "</tr>"
             for row in rows
         )
     else:
