@@ -1,7 +1,7 @@
 """Versioned, bounded exchange; never execute SQL supplied by a peer."""
 from __future__ import annotations
 import hashlib, hmac, json, math, os, time, sqlite3, tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from email.message import Message
 from pathlib import Path
@@ -311,7 +311,7 @@ def validate_normalized(value):
                 string(r,'cycle_key'); run=string(r,'run_key'); string(r,'rationale',empty=True)
                 from .operational_evidence import stamp
                 for clock in ('cycle_created_at','run_created_at','created_at'):
-                    if r.get(clock) is not None and stamp(r[clock])>datetime.now(timezone.utc)+__import__('datetime').timedelta(minutes=5):
+                    if r.get(clock) is not None and stamp(r[clock])>datetime.now(timezone.utc)+timedelta(minutes=5):
                         raise ValueError('future normalized run timestamp')
                 identity=(section,run,r['canonical_key'])
                 if section=='evaluations':
