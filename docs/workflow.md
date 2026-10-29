@@ -170,6 +170,13 @@ adapter narrows source queries toward software/cloud/operations context,
 requests article-like work types, and filters obvious book/index/reference and
 biomedical noise before storage.
 
+The progressive Semantic Scholar branch remains default-off. The Oct 29
+production retry verified the deployed source revision, two key slots, and the
+effective four-page experiment settings without making a provider request or
+rerunning the source. Treat the next scheduled 03:00 Pacific run as the first
+prospective live provider result after activation; readiness and offline tests
+do not establish provider yield.
+
 CORE reads `CORE_API_KEY` from the local or production environment and uses CORE API v3 Works search first, not Outputs. Works are deduplicated/enriched scholarly records; Outputs are raw source-specific harvested records and are not the first Project Paper discovery path. Register at <https://core.ac.uk/services/api>; for this private single-user Project Paper setup, the Personal profile is usually appropriate unless applying through a real academic or institutional affiliation. Store the key only in the local environment or production env file, never in chat, logs, shell history, docs, or command examples. Preferred auth is `Authorization: Bearer [CORE_API_KEY]`, not a query parameter.
 
 CORE unauthenticated users receive 100 tokens per day and at most 10 requests per minute. Registered Personal users receive 1,000 tokens per day and at most 25 requests per minute. A simple query usually costs 1 token; complex queries can cost 3-5. Respect `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Retry-After`. Project Paper should stay conservative: bounded request budgets, roughly 3-second request spacing, and cooldown on HTTP 429. The first CORE pass stores metadata and links only. Do not bulk-download PDFs from CORE; if selected-paper enrichment later uses full text, prefer the supplied `downloadUrl` and do not bypass CORE API/fileserver or systematically harvest PDFs.

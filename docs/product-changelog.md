@@ -2,6 +2,24 @@
 
 Durable product and process decisions for Project Paper. Keep entries chronological and focused on decisions that should survive across implementation threads.
 
+## 2026-10-29
+
+### Semantic Scholar progressive retrieval release
+
+Status: Deployed to `mini-production` in `68f6584b4b43d0f260a5c3f9f8453fb72248ef7c`.
+The initial rollout failed readiness and restored the prior image; the corrected
+retry passed hosted checks, AMD64 build, deployment, pipeline readiness, and
+database readability.
+
+- The release preserves the existing 1,800-second whole-job timeout and the
+  byte-identical Pacific schedule: Semantic Scholar 03:00, OpenAlex 04:00,
+  arXiv 05:00, and CORE 06:00.
+- The progressive branch remains default-off. Two provider-key slots and the
+  effective four-page experiment settings were verified without making a live
+  provider request or rerunning a source.
+- The next scheduled Semantic Scholar run is the first prospective live proof;
+  deployment/readiness evidence must not be presented as provider yield.
+
 ## 2026-10-27
 
 ### Curator two-worker evidence assessment rollout

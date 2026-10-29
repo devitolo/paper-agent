@@ -6,6 +6,13 @@ Status: deployed to `mini-production` in commit
 and the deployed app image is
 `ghcr.io/devitolo/paper-agent@sha256:be279a8c466c6a9e8b8d84feff4ff6b928358198f316f8fc8bcd826cad87ae85`.
 
+The later Semantic Scholar progressive-retrieval release was corrected and
+deployed in `68f6584b4b43d0f260a5c3f9f8453fb72248ef7c`, with image
+`ghcr.io/devitolo/paper-agent@sha256:f6b8b46e003e26c0e18024bbd40420d1e73bec2686d1f5e8dfc2733cf3b9d6dd`.
+The initial rollout failed readiness and restored the prior image; the retry
+passed tests, AMD64 build, deployment, readiness, pipeline startup, and database
+readability. This is deployment evidence, not a live provider-yield result.
+
 ## Current contract
 
 When Curator evidence review is enabled in production, up to two evidence
@@ -56,3 +63,13 @@ rollback material. The scheduled source order in the versioned template is:
 
 Other managed schedules remain unchanged. Use the deployment evidence and
 rollback receipt rather than reconstructing runtime settings from this page.
+
+## Semantic Scholar progressive retrieval
+
+The deployed code keeps the progressive branch default-off. The production
+release verified the source revision and effective runtime flags, including the
+four-page experiment flag and two distinct provider-key slots, without making a
+provider request or rerunning the source. The whole-job timeout remains 1,800
+seconds. The next scheduled 03:00 Pacific Semantic Scholar run is the first
+prospective live proof after activation; document its actual provider result
+separately from these offline tests and readiness checks.
