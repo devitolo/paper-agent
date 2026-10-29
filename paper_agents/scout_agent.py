@@ -112,7 +112,8 @@ class ScoutAgent:
                 or os.getenv("PAPER_SEMANTIC_SCHOLAR_PROGRESS") == "1"):
             from paper_agents.semantic_scholar_progress import SemanticScholarProgress
             progress = SemanticScholarProgress(
-                connection, source, experiment=config.semantic_scholar_four_page_experiment
+                connection, source, experiment=(config.semantic_scholar_four_page_experiment
+                    or os.getenv("PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT") == "1")
             )
             candidates = progress.fetch(
                 config.topics,

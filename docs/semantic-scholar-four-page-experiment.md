@@ -1,17 +1,23 @@
 # Semantic Scholar four-page experiment
 
-Status: isolated implementation and offline tests only. Not deployed, not enabled
-in production, and no production discovery rerun or provider requests performed.
+Status: release candidate for the explicitly authorized Mini activation. Offline
+validation only so far; no production discovery rerun or live provider requests.
 Base: mini-production release 4ec18b4 (2026-10-27).
 
 ## Contract
 
 This experiment is explicitly selected by Python callers using both
 `ScoutConfig(semantic_scholar_progress_enabled=True,
-semantic_scholar_four_page_experiment=True, ...)`. There is no new production cron,
-environment activation, command-line switch or release-workflow change. Both the
-experiment flag and the original progressive flag default to false. Production's
-existing progressive retrieval retains its three-attempt budget and query pass.
+semantic_scholar_four_page_experiment=True, ...)`. Both flags default to false.
+Alternatively, with existing progressive Semantic Scholar mode active, the explicit
+environment flag `PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT=1` enables the experiment
+only in the Semantic Scholar branch. The new flag defaults to zero in Compose.
+The authorized Mini production workflow sets its updater input
+`PAPER_MINI_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT=1`; the updater persists that value
+in the private production env file, verifies the running container value, and backs
+up/restores the original env on rollback. Input `0` explicitly disables it. No new
+cron or CLI switch is introduced. Other sources are unaffected; default retrieval
+without the flag retains its three-attempt budget and query pass.
 
 The experiment follows provider `next` offsets within the same Scout run:
 
@@ -62,7 +68,8 @@ payload attempt accounting, and unchanged default behavior.
 The compatibility suite includes existing Semantic Scholar progress, key-failover,
 cooldown, environment wiring, Scout diagnostics and Mini release-pipeline tests.
 Passing these offline cases is not proof of live provider yield or quota behavior.
-A live experiment or production activation requires separate authorization.
+Mini activation for the next scheduled Semantic Scholar run is authorized. No
+manual live provider experiment or production rerun is included in this release.
 
 ## History behind the gap
 
@@ -89,5 +96,5 @@ PYTHONPATH=.:tests python3 -m unittest \
   tests.test_mini_release_pipeline -q
 ```
 
-Result: 119 tests passed, including 17 new experiment acceptance cases;
+Result: 121 tests passed, including 19 new experiment acceptance cases;
 `git diff --check` passed. Existing SQLite ResourceWarnings are non-failing.

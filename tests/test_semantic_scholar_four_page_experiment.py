@@ -59,12 +59,12 @@ class SemanticFourPageExperimentTests(unittest.TestCase):
             result = progress.fetch(topics or ['incident'], freshness_months=24, max_candidates=30, errors=[])
         return result
 
-    def run_scout(self, responses):
+    def run_scout(self, responses, *, experiment=True):
         cycle = db.create_workflow_cycle(self.connection, mode='test', max_scout_attempts=1)
         with self.transport(responses), patch('time.sleep'):
             result = ScoutAgent(self.source).run(self.connection, workflow_cycle_id=cycle, attempt_number=1,
                 config=ScoutConfig(topics=['incident'], semantic_scholar_progress_enabled=True,
-                                   semantic_scholar_four_page_experiment=True))
+                                   semantic_scholar_four_page_experiment=experiment))
         return result
 
     @staticmethod
@@ -238,3 +238,29 @@ class SemanticFourPageExperimentTests(unittest.TestCase):
         with patch('urllib.request.urlopen') as fetch, self.assertRaisesRegex(ValueError,'two distinct keys'):
             SemanticScholarProgress(self.connection,source,experiment=True)
         fetch.assert_not_called()
+
+    def test_production_environment_flag_enables_semantic_progress_only(self):
+        import os
+        self.known(1)
+        with patch.dict(os.environ, {'PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT':'1'}):
+            result=self.run_scout([page([paper(1)]),page([paper(2)],offset=10,next_offset=20)],experiment=False)
+        self.assertEqual(result['stored_count'],1)
+        self.assertEqual([offset for _,offset,_ in self.calls],[0,10])
+
+    def test_updater_persists_explicit_activation_and_supports_disable(self):
+        import subprocess
+        import sys
+        root=Path(__file__).resolve().parents[1]
+        script=(root/'scripts/mini_production_update.sh').read_text()
+        code=script.split('python3 - "$ENV_FILE" "$tmp_env"',1)[1].split("<<'PY'\n",1)[1].split('\nPY',1)[0]
+        source=Path(self.tmp.name)/'env'
+        target=Path(self.tmp.name)/'next'
+        source.write_text('PRIVATE_FIXTURE=preserved\n')
+        args=[sys.executable,'-c',code,str(source),str(target),'fixture-image','fixture-model','','','','']
+        subprocess.run(args+['1'],check=True,capture_output=True)
+        self.assertIn('PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT=1',target.read_text())
+        self.assertIn('PRIVATE_FIXTURE=preserved',target.read_text())
+        source.write_bytes(target.read_bytes())
+        subprocess.run(args+['0'],check=True,capture_output=True)
+        self.assertIn('PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT=0',target.read_text())
+        self.assertNotIn('PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT=1',target.read_text())
