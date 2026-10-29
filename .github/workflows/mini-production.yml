@@ -38,12 +38,23 @@ jobs:
       - name: Check Compose configuration tooling
         run: docker compose version
 
+      - name: Checkout deployed AWS receiver for cross-role Health tests
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 8c55a51b8cbb67766a3ed973ff54c7f857ff79af
+          path: qa-aws-receiver
+          persist-credentials: false
+
       - name: Run deployment safety tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: ".:tests"
+          QA_HEALTH_AWS_SOURCE: "${{ github.workspace }}/qa-aws-receiver"
         run: |
           python3 -m unittest \
+            tests.sync_exchange.test_whole_cycle \
+            tests.sync_exchange.test_health_operational_e2e_qa \
+            tests.test_operational_evidence \
             tests.test_curator_v3 \
             tests.test_curator_interest \
             tests.test_mini_release_pipeline \

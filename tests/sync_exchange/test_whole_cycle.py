@@ -111,6 +111,24 @@ sys.exit(subprocess.call(args))
                     c.execute("INSERT INTO artifacts(paper_id,artifact_type,path) VALUES(?,'triage_summary',?)",(pid,path))
                     c.execute("INSERT INTO artifacts(paper_id,artifact_type,path) VALUES(?,'pdf','/mini/private.pdf')",(pid,))
 
+    def test_operational_only_publication_preserves_business_data_and_deduplicates(self):
+        from paper_agents.whole_cycle_exchange import publish_health
+        self.shell('pull'); self.stages(); self.shell('push')
+        def counts():
+            with connect_db(self.db) as c:
+                return tuple(c.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]
+                             for table in ('papers','recommendations','curator_evaluations'))
+        before=counts()
+        receipt=publish_health(self.mdb,self.mini,self.state,self.url)
+        self.assertEqual(receipt['status'],'applied')
+        self.assertEqual(receipt['operational_version'],1)
+        self.assertEqual(before,counts())
+        self.assertFalse((self.state/'health-outbox.json').exists())
+        self.assertTrue(list(self.state.glob('health-published-*.json')))
+        from paper_agents.db import health_summary
+        summary=health_summary(self.db)
+        self.assertEqual(sum(row['candidate_count'] for row in summary['daily']['scout']),12)
+
     def test_https_full_cycle_retry_feedback_and_grouping(self):
         self.shell('pull')
         with connect_db(self.mdb) as c:
@@ -121,7 +139,8 @@ sys.exit(subprocess.call(args))
             c.execute('INSERT INTO raw_feedback(paper_id,content,content_hash) VALUES(?,?,?)',(self.pid,'after pull','after'))
         self.stages()
         payload=export_delta(self.mdb,self.mini,self.state)
-        self.assertEqual(set(payload),{'schema','normalized','results'})
+        self.assertEqual(set(payload),{'schema','normalized','results','operational'})
+        self.assertEqual(payload['operational']['version'],1)
         self.assertEqual(len(payload['normalized']['papers']),12)
         self.assertEqual(len(payload['normalized']['evaluations']),8)
         self.assertTrue(all(r['artifact_type']=='triage_summary' and 'path' not in r for r in payload['normalized']['artifacts']))
