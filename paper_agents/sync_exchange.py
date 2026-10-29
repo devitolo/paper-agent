@@ -1,7 +1,7 @@
 """Versioned, bounded exchange; never execute SQL supplied by a peer."""
 from __future__ import annotations
 import hashlib, hmac, json, math, os, time, sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from email.message import Message
 from pathlib import Path
@@ -200,6 +200,10 @@ def validate_normalized(value):
                 identity=('artifact',r['canonical_key'],digest)
             else:
                 string(r,'cycle_key'); run=string(r,'run_key'); string(r,'rationale',empty=True)
+                from .operational_evidence import stamp
+                for clock in ('cycle_created_at','run_created_at','created_at'):
+                    if r.get(clock) is not None and stamp(r[clock])>datetime.now(timezone.utc)+timedelta(minutes=5):
+                        raise ValueError('future normalized run timestamp')
                 identity=(section,run,r['canonical_key'])
                 if section=='evaluations':
                     if isinstance(r.get('score'),bool) or not isinstance(r.get('score'),(int,float)) or not math.isfinite(r['score']): raise ValueError('invalid score')
@@ -228,12 +232,12 @@ def _apply_normalized(c, normalized, root=Path('.')):
     for r in normalized['evaluations']:
         key=r['cycle_key']; run=r['run_key']
         if key not in cycles:
-            cycles[key]=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','imported',?)",(encoded({'sync_cycle_key':key}).decode(),)).lastrowid
+            cycles[key]=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json,created_at) VALUES('completed','imported',?,COALESCE(?,datetime('now')))",(encoded({'sync_cycle_key':key}).decode(),r.get('cycle_created_at'))).lastrowid
         if run not in runs:
-            runs[run]=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycles[key],encoded({'sync_run_key':run}).decode())).lastrowid
+            runs[run]=c.execute("INSERT INTO curator_runs(workflow_cycle_id,metadata_json,created_at) VALUES(?,?,COALESCE(?,datetime('now')))",(cycles[key],encoded({'sync_run_key':run}).decode(),r.get('run_created_at'))).lastrowid
         c.execute('INSERT INTO curator_evaluations(curator_run_id,paper_id,score,rationale,matched_signals_json,quality_threshold_met) VALUES(?,?,?,?,?,?)',(runs[run],papers[r['canonical_key']],r['score'],r['rationale'],r.get('matched_signals_json','[]'),r.get('quality_threshold_met',0)))
     for r in normalized['recommendations']:
-        c.execute('INSERT INTO recommendations(curator_run_id,paper_id,recommendation_order,rationale) VALUES(?,?,?,?)',(runs[r['run_key']],papers[r['canonical_key']],r['recommendation_order'],r['rationale']))
+        c.execute("INSERT INTO recommendations(curator_run_id,paper_id,recommendation_order,rationale,created_at) VALUES(?,?,?,?,COALESCE(?,datetime('now')))",(runs[r['run_key']],papers[r['canonical_key']],r['recommendation_order'],r['rationale'],r.get('created_at')))
     for r in normalized['artifacts']:
         digest=_digest(encoded(r['content'])); path=Path('data/sync-summaries')/(digest+'.json')
         target=Path(root)/path
@@ -326,13 +330,15 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
     normalized=payload.get('normalized',{'papers':[],'paper_sources':[],'artifacts':[],'evaluations':[],'recommendations':[]})
     if not isinstance(normalized,dict) or set(normalized)!={'papers','paper_sources','artifacts','evaluations','recommendations'} or any(not isinstance(normalized[k],list) for k in normalized):raise ValueError('invalid normalized sections')
     validate_normalized(normalized)
+    from .operational_evidence import validate as validate_operational
+    validate_operational(payload.get("operational"))
     root=Path(root);content_hash=_digest(body)
     with connect_db(db_path) as c:
         _setup(c);c.commit();c.execute('BEGIN IMMEDIATE')
         row=c.execute('SELECT payload_hash,status FROM sync_result_batches WHERE batch_key=?',(key,)).fetchone()
         if row:
             if row[0]!=content_hash:raise ValueError('idempotency key reused for changed payload')
-            return {'status':row[1],'batch_key':key,'replayed':True}
+            return {'status':row[1],'batch_key':key,'replayed':True,**({'operational_version':1} if payload.get('operational') is not None else {})}
         if not c.execute('SELECT 1 FROM sync_snapshot_revisions WHERE revision=?',(payload.get('input_revision'),)).fetchone():raise ValueError('unknown input revision')
         last=c.execute('SELECT sequence FROM sync_producers WHERE producer=? AND environment=?',(producer,environment)).fetchone()
         if last and seq<=last[0]:raise ValueError('stale result sequence')
@@ -376,7 +382,7 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
             c.execute('INSERT INTO artifacts(paper_id,artifact_type,path,model,metadata_json) VALUES(?,?,?,?,?)',(pid,'triage_summary',str(artifact_path),model,encoded(metadata).decode()))
         c.execute('INSERT INTO sync_producers VALUES(?,?,?) ON CONFLICT(producer,environment) DO UPDATE SET sequence=excluded.sequence',(producer,environment,seq))
         c.execute("UPDATE sync_result_batches SET status='applied',applied_at=datetime('now') WHERE batch_key=?",(key,));c.commit()
-    return {'status':'applied','batch_key':key,'replayed':False}
+    return {'status':'applied','batch_key':key,'replayed':False,**({'operational_version':1} if payload.get('operational') is not None else {})}
 
 def receive_profile_proposal(db_path,body,headers):
     p=_payload(body)
