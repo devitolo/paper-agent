@@ -45,6 +45,7 @@ jobs:
         run: |
           python3 -m unittest \
             tests.sync_exchange.test_whole_cycle \
+            tests.sync_exchange.test_health_operational_e2e_qa \
             tests.test_operational_evidence \
             tests.test_curator_v3 \
             tests.test_curator_interest \
