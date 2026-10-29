@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import closing
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -54,7 +55,7 @@ def pull(db_path, root, state, backup):
         raise ValueError('snapshot revision required')
     revision=manifest_revision
     state.mkdir(parents=True,exist_ok=True)
-    cycle={'batch_id':uuid.uuid4().hex,'input_revision':revision,'stage':'restoring'}
+    cycle={'batch_id':uuid.uuid4().hex,'input_revision':revision,'stage':'restoring','started_at':datetime.now(timezone.utc).isoformat()}
     atomic_json(state/'active-cycle.json',cycle)
     with tempfile.TemporaryDirectory(dir=state,prefix='restore-') as directory:
         staged=Path(directory)/'paper_agent.db'
@@ -99,7 +100,7 @@ def pull_routine(db_path, root, state, snapshot):
     if (state/'pipeline-outbox.json').exists() or (state/'active-cycle.json').exists():
         raise ValueError('unfinished cycle blocks pull; recover/publish first')
     revision = snapshot['revision']; state.mkdir(parents=True, exist_ok=True)
-    cycle = {'batch_id': uuid.uuid4().hex, 'input_revision': revision, 'stage': 'restoring'}
+    cycle = {'batch_id': uuid.uuid4().hex, 'input_revision': revision, 'stage': 'restoring', 'started_at': datetime.now(timezone.utc).isoformat()}
     atomic_json(state/'active-cycle.json', cycle)
     file_state = {name: (root / name).read_bytes() for name in ('config/topics.yaml', 'config/industry.json', 'data/profile.json') if (root / name).is_file()}
     saved_path = state / ('mini-before-' + cycle['batch_id'] + '.db')
@@ -125,7 +126,9 @@ def export_delta(db_path, root, state):
         c.row_factory=sqlite3.Row
         ids=[r[0] for r in c.execute('SELECT id FROM workflow_cycles WHERE id>? ORDER BY id',(cycle['baseline']['workflow_cycles'],))]
         normalized={s:[] for s in SECTIONS}
-        if not ids: return {'schema':1,'normalized':normalized,'results':[]}
+        from .operational_evidence import collect
+        operational=collect(c,root,cycle)
+        if not ids: return {'schema':1,'normalized':normalized,'results':[],'operational':operational}
         marks=','.join('?' for _ in ids)
         keys={r[0] for r in c.execute(f'''SELECT p.canonical_key FROM scout_candidates sc
             JOIN scout_runs sr ON sr.id=sc.scout_run_id JOIN papers p ON p.id=sc.paper_id
@@ -149,7 +152,7 @@ def export_delta(db_path, root, state):
             for row in c.execute(f'SELECT r.*,p.canonical_key,cr.workflow_cycle_id FROM {table} r JOIN curator_runs cr ON cr.id=r.curator_run_id JOIN papers p ON p.id=r.paper_id WHERE cr.workflow_cycle_id IN ({marks}) ORDER BY r.id',ids):
                 allowed=('score','rationale','matched_signals_json','quality_threshold_met') if section=='evaluations' else ('recommendation_order','rationale')
                 normalized[section].append({k:row[k] for k in allowed}|{'canonical_key':row['canonical_key'],'cycle_key':f"{cycle['batch_id']}:cycle:{row['workflow_cycle_id']}",'run_key':f"{cycle['batch_id']}:curator:{row['curator_run_id']}"})
-    return {'schema':1,'normalized':normalized,'results':[]}
+    return {'schema':1,'normalized':normalized,'results':[],'operational':operational}
 
 
 def push(db_path, root, state, url, *, transport=request):
@@ -164,6 +167,8 @@ def push(db_path, root, state, url, *, transport=request):
     payload=json.loads(outbox.read_text()); key=payload['batch_id']
     receipt=transport(url,'POST',encoded(payload),os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'],'/sync/pipeline-results',key)
     if receipt.get('status')!='applied' or receipt.get('batch_key')!=key: raise ValueError('invalid pipeline receipt')
+    if payload.get('operational') is not None and receipt.get('operational_version')!=1:
+        raise ValueError('AWS did not acknowledge operational evidence; outbox retained')
     atomic_json(state/('receipt-'+key+'.json'),receipt)
     atomic_json(state/'sequence.json',{'sequence':payload['run_sequence']})
     # Clear active first: an interruption retains outbox and allows identical retry.
