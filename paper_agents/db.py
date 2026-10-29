@@ -1635,7 +1635,8 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
     from paper_agents.operational_evidence import batches, project
     with connect_db(db_path) as evidence_connection:
         evidence_connection.row_factory = sqlite3.Row
-        project(summary, batches(evidence_connection, days=days))
+        project(summary, batches(evidence_connection, days=days), native_scout=evidence_connection.execute(
+            "SELECT id,source,started_at FROM scout_runs WHERE started_at>=datetime('now',?)",(window,)))
     summary["warnings"] = _health_warnings(summary)
     summary["profile_maintenance"] = _health_profile_maintenance(summary)
     return summary
@@ -1733,6 +1734,12 @@ def _health_warnings(summary: dict[str, Any]) -> list[dict[str, Any]]:
         warnings.append({"level": "critical", "message": f"DB integrity check failed: {integrity}"})
 
     days_since_last_cycle = summary["days_since_last_cycle"]
+    observation = summary.get("latest_processing_observation")
+    if observation:
+        from paper_agents.operational_evidence import stamp
+        days_since_last_cycle = max(0,(datetime.now(timezone.utc)-stamp(observation['recorded_at'])).total_seconds()/86400)
+        if observation['status']=='failed':
+            warnings.append({'level':'critical','message':observation['job']+' processing failed; AWS delivery is reported separately.'})
     if days_since_last_cycle is None:
         warnings.append({"level": "warning", "message": "No workflow cycle has been recorded."})
     elif days_since_last_cycle * 24 > 72:

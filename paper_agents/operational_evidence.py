@@ -97,13 +97,17 @@ def batches(connection, *, days=21):
         ORDER BY id DESC LIMIT 200''',(f'-{int(days)} days',))]
 
 
-def project(summary, rows):
+def project(summary, rows, *, native_scout=()):
     """Separate processing observations from the AWS-controlled delivery receipt."""
     source=summary['range']['source']
     source=None if source=='all' else source
     cutoff=datetime.now(timezone.utc)-timedelta(days=summary['range']['days'])
     events=[]; scout=[]; receipts=[]
     seen_events=set(); seen_runs=set()
+    native_keys=set()
+    for row in native_scout:
+        try: native_keys.add((row['id'],row['source'],stamp(row['started_at'])))
+        except (ValueError,TypeError): pass
     for batch in rows:
         try:
             facts=json.loads(batch['operational']) if batch['operational'] else None
@@ -125,12 +129,17 @@ def project(summary, rows):
                                'message':'Processing event supplied by Mini; batch accepted by AWS.'})
         for run in facts['scout_runs']:
             identity=(batch['producer_id'],batch['environment'],run['source'],run['run_id'],run['started_at'])
-            if (not source or run['source']==source) and stamp(run['started_at'])>=cutoff and identity not in seen_runs:
+            if (not source or run['source']==source) and stamp(run['started_at'])>=cutoff and identity not in seen_runs and (run['run_id'],run['source'],stamp(run['started_at'])) not in native_keys:
                 seen_runs.add(identity)
                 scout.append(run)
     summary['sync_receipts']=receipts
     summary['operational_evidence_available']=any(r['operational'] for r in receipts)
     if events:
+        latest=max(events,key=lambda r:stamp(r['recorded_at']))
+        summary['latest_processing_observation']=latest
+        summary['top']['latest_run_time']=latest['recorded_at']
+        summary['top']['latest_run_age_hours']=round((datetime.now(timezone.utc)-stamp(latest['recorded_at'])).total_seconds()/3600,1)
+        summary['top']['latest_workflow_state']=latest['job']+' '+latest['status']
         summary['job_events']=sorted(events,key=lambda r:stamp(r['recorded_at']),reverse=True)[:MAX_ROWS]
     # Existing native Scout rows and new imported operational rows are distinct:
     # normalized imports never create Scout rows, and baseline excludes old cycles.
