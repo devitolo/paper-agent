@@ -138,13 +138,27 @@ def project(summary, rows, *, native_scout=()):
                 scout.append(run)
     summary['sync_receipts']=receipts
     summary['operational_evidence_available']=any(r['operational'] for r in receipts)
-    if events:
-        latest=max(events,key=lambda r:stamp(r['recorded_at']))
+    observations=events+[{'recorded_at':r['completed_at'] or r['started_at'],
+        'job':r['source']+' Scout','status':'completed' if r['completed_at'] else 'started'} for r in scout]
+    if observations:
+        latest=max(observations,key=lambda r:stamp(r['recorded_at']))
+        native_time=summary['top'].get('latest_run_time')
+        if native_time and stamp(native_time)>stamp(latest['recorded_at']):
+            latest=None
+    else:
+        latest=None
+    if latest:
         summary['latest_processing_observation']=latest
         summary['top']['latest_run_time']=latest['recorded_at']
         summary['top']['latest_run_age_hours']=round((datetime.now(timezone.utc)-stamp(latest['recorded_at'])).total_seconds()/3600,1)
         summary['top']['latest_workflow_state']=latest['job']+' '+latest['status']
+    if events:
         summary['job_events']=sorted(events,key=lambda r:stamp(r['recorded_at']),reverse=True)[:MAX_ROWS]
+    if scout:
+        latest_scout=max(scout,key=lambda r:stamp(r['started_at']))
+        native=summary.get('latest_scout_run')
+        if not native or stamp(latest_scout['started_at'])>=stamp(native['started_at']):
+            summary['top']['latest_zero_eligible_source']=latest_scout['source'] if latest_scout['eligible_count']==0 else None
     # Existing native Scout rows and new imported operational rows are distinct:
     # normalized imports never create Scout rows, and baseline excludes old cycles.
     grouped=defaultdict(lambda:{'run_count':0,'candidate_count':0,'eligible_count':0,'excluded_count':0})
