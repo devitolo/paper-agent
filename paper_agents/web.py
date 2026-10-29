@@ -36,7 +36,7 @@ from paper_agents.topic_agent import (
 )
 from paper_agents.scout import SCOUT_SOURCES
 from paper_agents.runtime_config import default_sources, gemini_enabled, packaged, serving_only
-from paper_agents.sync_exchange import MAX_BODY_BYTES, build_input_snapshot, receive_result_batch, verify_request
+from paper_agents.sync_exchange import MAX_BODY_BYTES, build_input_snapshot, encoded, receive_result_batch, verify_request
 from paper_agents.topics import (
     CADENCES,
     DEFAULT_TOPIC_CONFIG_PATH,

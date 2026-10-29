@@ -190,7 +190,10 @@ def publish_health(db_path,root,state,url,*,transport=request):
         raise ValueError('active pipeline blocks operational publication')
     outbox=state/'health-outbox.json'
     if not outbox.exists():
-        snapshot=transport(url,'GET',b'',os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'],'/sync/input')
+        # Obtain a registered revision through the bounded compressed routine
+        # endpoint; production business history can exceed the legacy 8 MiB input.
+        # Downloading does not apply the snapshot or modify local business data.
+        snapshot=download_routine_snapshot(url)
         since=(datetime.now(timezone.utc)-timedelta(days=7)).isoformat()
         with connect_db(db_path) as c:
             c.row_factory=sqlite3.Row
