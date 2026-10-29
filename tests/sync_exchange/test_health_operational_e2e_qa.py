@@ -422,6 +422,43 @@ class OperationalHealthE2EQA(unittest.TestCase):
         self.assertEqual(row['Delivery'], 'accepted')
         self.assert_protected()
 
+    def test_publish_health_uses_registered_routine_revision_when_full_input_exceeds_eight_mib(self):
+        self.seed('arxiv', nonzero=True)
+        self.t.shell('push')
+        # Real production boundary: large paper data exceeds legacy JSON's cap,
+        # while the authenticated compressed routine endpoint remains usable.
+        with exchange.connect_db(self.t.db) as conn:
+            conn.execute('UPDATE papers SET abstract=? WHERE id=?',
+                         ('QA large retained abstract ' * 370000, self.t.pid))
+        mini_before = self.mini_database_dump()
+        business_before = self.business_rows()
+        with self.assertRaises(urllib.error.HTTPError) as rejected:
+            request(self.t.url, 'GET', b'', os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'], '/sync/input')
+        self.assertEqual(rejected.exception.code, 413)
+        rejected.exception.close()
+        self.t.shell('publish-health')
+        payload = json.loads(next(self.t.state.glob('health-published-*.json')).read_text())
+        self.assertEqual(payload['results'], [])
+        self.assertTrue(all(not rows for rows in payload['normalized'].values()))
+        self.assertTrue(payload['operational']['scout_runs'])
+        with exchange.connect_db(self.t.db) as conn:
+            body, state = conn.execute('SELECT payload_json,status FROM sync_result_batches '
+                                       'ORDER BY id DESC LIMIT 1').fetchone()
+            self.assertEqual(state, 'applied')
+            self.assertEqual(json.loads(body)['input_revision'], payload['input_revision'])
+            self.assertEqual(json.loads(body)['operational'], payload['operational'])
+            self.assertIsNotNone(conn.execute('SELECT 1 FROM sync_snapshot_revisions WHERE revision=?',
+                                             (payload['input_revision'],)).fetchone())
+        self.assertEqual(self.mini_database_dump(), mini_before)
+        self.assertEqual(self.business_rows(), business_before)
+        self.assertFalse((self.t.state/'active-cycle.json').exists())
+        self.assertFalse((self.t.state/'health-outbox.json').exists())
+        calls = [json.loads(line) for line in (self.t.root/'docker-args.jsonl').read_text().splitlines()]
+        self.assertFalse(any('paper_agents.migration_job' in call for call in calls))
+        row = next(row for row in self.rows('arxiv') if row.get('Job')=='arxiv')
+        self.assertEqual(row['Delivery'], 'accepted')
+        self.assert_protected()
+
     def test_job_table_calls_the_ack_evidence_delivery_without_claiming_processing_success(self):
         self.seed(status='failed')
         self.t.shell('push')
