@@ -41,6 +41,7 @@ class ScoutConfig:
     arxiv_progress_enabled: bool = False
     openalex_cursor_enabled: bool = False
     semantic_scholar_progress_enabled: bool = False
+    semantic_scholar_four_page_experiment: bool = False
     core_progress_enabled: bool = False
 
 
@@ -110,7 +111,9 @@ class ScoutAgent:
                 config.semantic_scholar_progress_enabled
                 or os.getenv("PAPER_SEMANTIC_SCHOLAR_PROGRESS") == "1"):
             from paper_agents.semantic_scholar_progress import SemanticScholarProgress
-            progress = SemanticScholarProgress(connection, source)
+            progress = SemanticScholarProgress(
+                connection, source, experiment=config.semantic_scholar_four_page_experiment
+            )
             candidates = progress.fetch(
                 config.topics,
                 freshness_months=config.freshness_months,

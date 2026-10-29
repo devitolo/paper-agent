@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from collections import deque
 from email.utils import parsedate_to_datetime
 import errno
 import hashlib
@@ -40,7 +41,14 @@ SAFE_PROVIDER_ERROR_FIELDS = {"code", "detail", "error", "message", "status", "t
 
 
 class SemanticScholarProgress:
-    def __init__(self, connection, source, *, now=None):
+    def __init__(self, connection, source, *, now=None, experiment=False):
+        if experiment and len(source.api_keys) != 2:
+            raise ValueError("Pagination experiment requires two distinct keys")
+        self.experiment = experiment
+        self.attempt_budget = 4 if experiment else ATTEMPT_BUDGET
+        # An explicit experiment-only wall limit also bounds Retry-After sleeps.
+        self.time_budget = min(240, 4 * source.timeout) if experiment else None
+        self.deadline = None
         self.connection = connection
         self.source = source
         self.source.begin_run()
@@ -53,12 +61,15 @@ class SemanticScholarProgress:
         self.diagnostics = {
             "mode": "offset_v1",
             "endpoint": source.api_url,
-            "attempt_budget": ATTEMPT_BUDGET,
+            "attempt_budget": self.attempt_budget,
             "budget_scope": "metadata_search_http_attempts",
             "attempts": 0,
             "pages": [],
             "stop_reason": "request_budget_reached",
         }
+        if experiment:
+            self.diagnostics.update(experiment="four_page_key_pair_v1", page_budget=4,
+                                    time_budget_seconds=self.time_budget, pagination_key_switches=0)
         self.diagnostics.update(source.diagnostics())
 
     def _new_traversal(self, months):
@@ -72,6 +83,8 @@ class SemanticScholarProgress:
     def fetch(self, topics, *, freshness_months, max_candidates, errors):
         if self.connection.in_transaction:
             raise RuntimeError("Semantic Scholar HTTP must start outside a write transaction")
+        if self.experiment:
+            self.deadline = time.monotonic() + self.time_budget
         clock = self.now.timestamp()
         control = self.states.setdefault("@source", {"not_before": 0, "sequence": 0})
         if control["not_before"] > clock:
@@ -103,8 +116,14 @@ class SemanticScholarProgress:
         seen_keys = set(known_keys)
         candidates = []
         attempted = []
-        for key, topic in queries:
-            if self.diagnostics["attempts"] >= ATTEMPT_BUDGET:
+        queue = deque(queries)
+        page_fingerprints = {}
+        while queue:
+            key, topic = queue.popleft()
+            if self.experiment and time.monotonic() >= self.deadline:
+                self.diagnostics["stop_reason"] = "time_budget_reached"
+                break
+            if self.diagnostics["attempts"] >= self.attempt_budget:
                 break
             remaining = max_candidates - len(candidates)
             if remaining <= 0:
@@ -123,12 +142,26 @@ class SemanticScholarProgress:
             control["sequence"] += 1
             state["last_served"] = control["sequence"]
             try:
+                if self.experiment and len(self.pages) >= 2 and self.source.key_slot == 1:
+                    self.source.key_slot = 2
+                    self.source.api_key = self.source.api_keys[1]
+                    self.diagnostics["pagination_key_switches"] += 1
+                    self.source._record("pagination_key_switch", to_key_slot="key2")
                 payload = self._fetch_page(
                     topic,
                     offset=traversal["offset"],
                     cutoff=traversal["cutoff"],
                     page_size=min(PAGE_SIZE, remaining),
                 )
+                if self.experiment and payload["next"] is not None and (
+                        not isinstance(payload["next"], int) or payload["next"] <= traversal["offset"]):
+                    raise ValueError("Semantic Scholar returned an invalid next offset")
+                repeated = False
+                if self.experiment:
+                    fingerprint = tuple(sorted(str(paper.get("paperId") or json.dumps(paper, sort_keys=True))
+                                               for paper in payload["data"]))
+                    repeated = fingerprint in page_fingerprints.setdefault(key, set())
+                    page_fingerprints[key].add(fingerprint)
                 dispositions = []
                 accepted = []
                 for paper in payload["data"]:
@@ -152,6 +185,8 @@ class SemanticScholarProgress:
                     "kind": "freshness" if refresh else "continuation",
                     "dispositions": dispositions,
                 }
+                if self.experiment:
+                    page["key_slot"] = f"key{self.source.key_slot}"
                 self.pages.append((key, topic, page))
                 self.diagnostics.update(self.source.diagnostics())
                 candidates = dedupe_candidates([*candidates, *accepted])
@@ -164,12 +199,27 @@ class SemanticScholarProgress:
                     "rejected_count": len(dispositions) - len(accepted),
                     "provider_end": payload["next"] is None,
                 })
+                if repeated:
+                    self.diagnostics["stop_reason"] = "repeated_provider_page"
+                    break
                 if refresh:
                     # A freshness sample must not erase or starve the deeper checkpoint.
                     state["last_refresh"] = clock
                 else:
                     deep["offset"] = payload["next"]
                     deep["exhausted"] = payload["next"] is None
+                if self.experiment:
+                    if accepted:
+                        self.diagnostics["stop_reason"] = "new_paper_found"
+                        break
+                    if payload["next"] is None:
+                        self.diagnostics["stop_reason"] = "provider_exhausted"
+                        break
+                    if len(self.pages) >= 4:
+                        self.diagnostics["stop_reason"] = "page_budget_reached"
+                        break
+                    # Revisit only after the remaining queries get their fair turn.
+                    queue.append((key, topic))
             except urllib.error.HTTPError as error:
                 provider_error = sanitized_provider_error(error, api_keys=self.source.api_keys)
                 if error.code == 429:
@@ -193,8 +243,14 @@ class SemanticScholarProgress:
                 break
             except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
                 errors.append(f"Semantic Scholar page failed ({type(error).__name__}): {topic}")
+                stop_reason = "source_error"
+                if self.experiment and isinstance(error, TimeoutError) and (
+                        time.monotonic() >= self.deadline or "time budget exhausted" in str(error)):
+                    stop_reason = "time_budget_reached"
+                elif self.experiment and "invalid next offset" in str(error):
+                    stop_reason = "non_advancing_cursor"
                 self.diagnostics.update(
-                    stop_reason="source_error",
+                    stop_reason=stop_reason,
                     transport_error={
                         "error_type": type(error).__name__,
                         "reason_type": type(error.reason).__name__
@@ -204,9 +260,14 @@ class SemanticScholarProgress:
                 self.diagnostics.update(self.source.diagnostics())
                 break
 
+        if (self.experiment and not queue and attempted
+                and self.diagnostics["stop_reason"] == "request_budget_reached"
+                and self.diagnostics["attempts"] < self.attempt_budget):
+            self.diagnostics["stop_reason"] = "traversals_exhausted_until_refresh"
         if not attempted:
             self.diagnostics["stop_reason"] = "traversals_exhausted_until_refresh"
-        elif len(attempted) == len(queries) and self.diagnostics["stop_reason"] == "request_budget_reached":
+        elif (not self.experiment and len(attempted) == len(queries)
+              and self.diagnostics["stop_reason"] == "request_budget_reached"):
             self.diagnostics["stop_reason"] = "query_round_complete"
         self.diagnostics.update(
             deferred_queries=[topic for _, topic in queries if topic not in attempted],
@@ -218,12 +279,18 @@ class SemanticScholarProgress:
         """Use at most one budgeted retry for a transient provider failure."""
         retried = False
         delay = self.source.request_delay
-        while self.diagnostics["attempts"] < ATTEMPT_BUDGET:
+        while self.diagnostics["attempts"] < self.attempt_budget:
             if self.diagnostics["attempts"]:
-                time.sleep(delay if retried else self.source.request_delay)
+                pause = delay if retried else self.source.request_delay
+                if self.experiment and time.monotonic() + pause >= self.deadline:
+                    raise TimeoutError("Semantic Scholar experiment time budget exhausted")
+                time.sleep(pause)
             try:
-                remaining = ATTEMPT_BUDGET - self.diagnostics["attempts"]
-                result = self.source.fetch_page(topic, max_attempts=remaining, **kwargs)
+                remaining = self.attempt_budget - self.diagnostics["attempts"]
+                if self.experiment:
+                    self.source.last_request_attempts = 0
+                extra = {"deadline": self.deadline} if self.experiment else {}
+                result = self.source.fetch_page(topic, max_attempts=remaining, **extra, **kwargs)
                 self.diagnostics["attempts"] += max(1, self.source.last_request_attempts)
                 return result
             except urllib.error.HTTPError as error:
@@ -231,7 +298,7 @@ class SemanticScholarProgress:
                 if (
                     error.code not in TRANSIENT_HTTP_STATUSES
                     or retried
-                    or self.diagnostics["attempts"] >= ATTEMPT_BUDGET
+                    or self.diagnostics["attempts"] >= self.attempt_budget
                 ):
                     raise
                 delay = transient_retry_seconds(
@@ -250,7 +317,7 @@ class SemanticScholarProgress:
                 if (
                     not transient_url_error(error)
                     or retried
-                    or self.diagnostics["attempts"] >= ATTEMPT_BUDGET
+                    or self.diagnostics["attempts"] >= self.attempt_budget
                 ):
                     raise
                 retried = True
@@ -262,6 +329,10 @@ class SemanticScholarProgress:
                 })
             except RuntimeError:
                 self.diagnostics["attempts"] += max(1, self.source.last_request_attempts)
+                raise
+            except (OSError, ValueError, KeyError, TypeError):
+                if self.experiment:
+                    self.diagnostics["attempts"] += self.source.last_request_attempts
                 raise
         raise RuntimeError("Semantic Scholar request budget exhausted")
 

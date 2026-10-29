@@ -631,7 +631,7 @@ class SemanticScholarSource:
         return headers
 
     def fetch_page(self, topic: str, *, offset: int, cutoff: str, page_size: int,
-                   max_attempts: int | None = None) -> dict[str, Any]:
+                   max_attempts: int | None = None, deadline: float | None = None) -> dict[str, Any]:
         """Fetch one normal-search page; progressive orchestration owns retries and state."""
         if self.cooldown_active:
             raise RuntimeError("Semantic Scholar source cooldown: requests stopped after terminal HTTP 429")
@@ -656,12 +656,15 @@ class SemanticScholarSource:
         completed = False
         last_429_error = None
         while attempts < request_budget:
+            remaining_time = None if deadline is None else deadline - time.monotonic()
+            if remaining_time is not None and remaining_time <= 0:
+                raise TimeoutError("Semantic Scholar experiment time budget exhausted")
             request = urllib.request.Request(f"{self.api_url}?{params}", headers=self._headers())
             self.last_request_attempts += 1
             self._record("request", topic=topic, offset=offset, key_slot=f"key{self.key_slot}")
             try:
                 with telemetry.span("source.http", "TOOL", source=self.name), urllib.request.urlopen(
-                    request, timeout=self.timeout
+                    request, timeout=self.timeout if remaining_time is None else min(self.timeout, remaining_time)
                 ) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 self._record_success()
@@ -676,7 +679,8 @@ class SemanticScholarSource:
                 retry_after = error.headers.get("Retry-After") if error.headers else None
                 if action == "stop":
                     raise
-                if attempts >= request_budget:
+                if attempts >= request_budget or (
+                        deadline is not None and self.last_request_attempts >= request_budget):
                     self.cooldown_active = True
                     self.last_diagnostics.update(
                         self.diagnostics(), stop_reason="provider_rate_limited_budget"
@@ -685,6 +689,8 @@ class SemanticScholarSource:
                 delay = self._retry_delay(attempts, retry_after=retry_after)
                 self._record("retry", topic=topic, offset=offset,
                              key_slot=f"key{self.key_slot}", delay_seconds=delay)
+                if deadline is not None and time.monotonic() + delay >= deadline:
+                    raise TimeoutError("Semantic Scholar experiment time budget exhausted")
                 time.sleep(delay)
                 attempts += 1
         if not completed:
