@@ -126,7 +126,7 @@ class OperationalEvidenceTests(unittest.TestCase):
         summary=self.summary(source='core')
         self.assertIn('core',summary['available_sources'])
         self.assertEqual(summary['job_events'][0]['status'],'failed')
-        html=render_health_page(self.path,source='core',tab='jobs')
+        html=render_health_page(self.path,source_value='core',tab='jobs')
         self.assertIn('value="core" selected',html)
         self.assertIn('failed',html)
         self.assertIn('accepted',html)
