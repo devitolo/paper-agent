@@ -97,6 +97,19 @@ compose=(
   -f "$OVERLAY"
 )
 
+# Probe the current container's role on every attempt, including rollback images.
+# Pipeline containers deliberately have no web readiness listener.
+runtime_readiness() {
+  local role check
+  role=$("$@" exec -T app printenv PAPER_AGENT_RUNTIME_ROLE 2>/dev/null) || return 1
+  case "$role" in
+    pipeline) check=check-pipeline ;;
+    ui|"") check=check-app ;;
+    *) return 1 ;;
+  esac
+  "$@" exec -T app python -m paper_agents.package_runtime "$check"
+}
+
 mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
 exec 9>"$DEPLOY_LOCK_FILE"
 if ! flock -n -x 9; then
@@ -170,7 +183,12 @@ fi
 compose+=(-f "$OVERLAY")
 "\${compose[@]}" up -d --no-deps --pull never --wait --wait-timeout 120 ollama
 "\${compose[@]}" up -d --no-deps --pull never --force-recreate app
-"\${compose[@]}" exec -T app python -m paper_agents.package_runtime check-app
+$(declare -f runtime_readiness)
+deadline=\$((SECONDS + 300))
+until runtime_readiness "\${compose[@]}"; do
+  [[ "\$SECONDS" -lt "\$deadline" ]] || exit 1
+  sleep 3
+done
 EOF
 chmod 700 "$RELEASE_DIR/rollback.sh"
 
@@ -218,8 +236,8 @@ restore_previous_production() {
     if "${restore_compose[@]}" up -d --no-deps --pull never --force-recreate app \
       > "$RELEASE_DIR/auto-restore-app.log" 2>&1; then
       local deadline
-      deadline=$((SECONDS + 120))
-      until "${restore_compose[@]}" exec -T app python -m paper_agents.package_runtime check-app \
+      deadline=$((SECONDS + 300))
+      until runtime_readiness "${restore_compose[@]}" \
         >> "$RELEASE_DIR/auto-restore-app.log" 2>&1; do
         if [[ "$SECONDS" -ge "$deadline" ]]; then
           "${restore_compose[@]}" logs --no-color --tail=200 app \
@@ -591,11 +609,9 @@ phase_start "recreate app"
 phase_end
 
 phase_start "readiness"
-deadline=$((SECONDS + 120))
+deadline=$((SECONDS + 300))
 runtime_role=$("${compose[@]}" exec -T app printenv PAPER_AGENT_RUNTIME_ROLE 2>/dev/null || true)
-readiness_check=check-app
-[[ "$runtime_role" == pipeline ]] && readiness_check=check-pipeline
-until "${compose[@]}" exec -T app python -m paper_agents.package_runtime "$readiness_check" >/dev/null 2>&1; do
+until runtime_readiness "${compose[@]}" >/dev/null 2>&1; do
   [[ "$SECONDS" -lt "$deadline" ]] || {
     "${compose[@]}" logs --no-color --tail=200 app > "$RELEASE_DIR/app-readiness-failure.log" 2>&1 || true
     echo "App readiness failed. Evidence: $RELEASE_DIR" >&2
@@ -603,6 +619,7 @@ until "${compose[@]}" exec -T app python -m paper_agents.package_runtime "$readi
   }
   sleep 3
 done
+runtime_role=$("${compose[@]}" exec -T app printenv PAPER_AGENT_RUNTIME_ROLE)
 phase_end
 
 phase_start "post deploy checks"

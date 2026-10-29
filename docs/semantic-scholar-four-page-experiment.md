@@ -98,3 +98,11 @@ PYTHONPATH=.:tests python3 -m unittest \
 
 Result: 121 tests passed, including 19 new experiment acceptance cases;
 `git diff --check` passed. Existing SQLite ResourceWarnings are non-failing.
+
+Deployment readiness follow-up: the first release attempt did not become ready in
+its 120-second window and restored the prior app. Independent pipeline readiness
+confirmed the prior app healthy, despite the old rollback probe incorrectly using
+a web-only check. The updater now re-reads the current runtime role on every probe,
+uses pipeline readiness for pipeline containers and web readiness for UI containers,
+and allows a bounded 300-second startup/recovery window. The generated manual
+rollback script uses the same probe, which also works with the prior image.

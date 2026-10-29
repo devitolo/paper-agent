@@ -215,8 +215,25 @@ class MiniReleasePipelineTests(unittest.TestCase):
         self.assertIn('crontab "$RELEASE_DIR/crontab.before" || true', script)
         self.assertIn('APP_REPLACEMENT_STARTED=1', script)
         self.assertIn('auto-restore-app.log', script)
-        self.assertIn('python -m paper_agents.package_runtime check-app', script)
+        self.assertIn('until runtime_readiness "${restore_compose[@]}"', script)
+        self.assertIn('$(declare -f runtime_readiness)',script)
         self.assertIn('restore_result=pass', script)
+
+    def test_readiness_probe_uses_pipeline_or_ui_check_without_new_image_support(self):
+        script=(ROOT / "scripts/mini_production_update.sh").read_text()
+        helper='runtime_readiness() {'+script.split('runtime_readiness() {',1)[1].split('\n}\n',1)[0]+'\n}\n'
+        for role,check in (("pipeline","check-pipeline"),("ui","check-app")):
+            with self.subTest(role=role):
+                fixture='''
+fixture() {
+  if [[ "$*" == *printenv* ]]; then printf '%s' "$ROLE"; return 0; fi
+  [[ "${!#}" == "$EXPECTED" ]]
+}
+runtime_readiness fixture
+'''
+                result=subprocess.run(['bash','-c',helper+fixture],
+                    env={**__import__('os').environ,'ROLE':role,'EXPECTED':check},capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stderr)
 
     def test_production_update_canonicalizes_ollama_image_digest(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
