@@ -48,6 +48,8 @@ class OperationalEvidenceTests(unittest.TestCase):
         self.assertEqual(receipt['operational_version'],1)
         s=self.summary();self.assertEqual(s['daily']['scout'][0]['candidate_count'],7)
         self.assertEqual(s['job_events'][0]['delivery'],'accepted')
+        self.assertEqual(s['top']['latest_run_time'],self.now)
+        self.assertFalse(any('No workflow cycle has been recorded' in w['message'] for w in s['warnings']))
         html=render_health_page(self.path,tab='jobs')
         self.assertIn('arxiv',html);self.assertIn('accepted',html)
         self.assertNotIn('AWS sync status is unavailable',html)
