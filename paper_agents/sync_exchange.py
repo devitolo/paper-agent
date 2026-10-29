@@ -309,6 +309,10 @@ def validate_normalized(value):
                 identity=('artifact',r['canonical_key'],digest)
             else:
                 string(r,'cycle_key'); run=string(r,'run_key'); string(r,'rationale',empty=True)
+                from .operational_evidence import stamp
+                for clock in ('cycle_created_at','run_created_at','created_at'):
+                    if r.get(clock) is not None and stamp(r[clock])>datetime.now(timezone.utc)+__import__('datetime').timedelta(minutes=5):
+                        raise ValueError('future normalized run timestamp')
                 identity=(section,run,r['canonical_key'])
                 if section=='evaluations':
                     if isinstance(r.get('score'),bool) or not isinstance(r.get('score'),(int,float)) or not math.isfinite(r['score']): raise ValueError('invalid score')
@@ -337,12 +341,12 @@ def _apply_normalized(c, normalized, root=Path('.')):
     for r in normalized['evaluations']:
         key=r['cycle_key']; run=r['run_key']
         if key not in cycles:
-            cycles[key]=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json) VALUES('completed','imported',?)",(encoded({'sync_cycle_key':key}).decode(),)).lastrowid
+            cycles[key]=c.execute("INSERT INTO workflow_cycles(state,mode,metadata_json,created_at) VALUES('completed','imported',?,COALESCE(?,datetime('now')))",(encoded({'sync_cycle_key':key}).decode(),r.get('cycle_created_at'))).lastrowid
         if run not in runs:
-            runs[run]=c.execute('INSERT INTO curator_runs(workflow_cycle_id,metadata_json) VALUES(?,?)',(cycles[key],encoded({'sync_run_key':run}).decode())).lastrowid
+            runs[run]=c.execute("INSERT INTO curator_runs(workflow_cycle_id,metadata_json,created_at) VALUES(?,?,COALESCE(?,datetime('now')))",(cycles[key],encoded({'sync_run_key':run}).decode(),r.get('run_created_at'))).lastrowid
         c.execute('INSERT INTO curator_evaluations(curator_run_id,paper_id,score,rationale,matched_signals_json,quality_threshold_met) VALUES(?,?,?,?,?,?)',(runs[run],papers[r['canonical_key']],r['score'],r['rationale'],r.get('matched_signals_json','[]'),r.get('quality_threshold_met',0)))
     for r in normalized['recommendations']:
-        c.execute('INSERT INTO recommendations(curator_run_id,paper_id,recommendation_order,rationale) VALUES(?,?,?,?)',(runs[r['run_key']],papers[r['canonical_key']],r['recommendation_order'],r['rationale']))
+        c.execute("INSERT INTO recommendations(curator_run_id,paper_id,recommendation_order,rationale,created_at) VALUES(?,?,?,?,COALESCE(?,datetime('now')))",(runs[r['run_key']],papers[r['canonical_key']],r['recommendation_order'],r['rationale'],r.get('created_at')))
     for r in normalized['artifacts']:
         digest=_digest(encoded(r['content'])); path=Path('data/sync-summaries')/(digest+'.json')
         target=Path(root)/path
