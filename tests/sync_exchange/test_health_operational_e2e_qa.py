@@ -363,7 +363,9 @@ class OperationalHealthE2EQA(unittest.TestCase):
                         'A source with a measured zero must retain its numeric zero')
 
     def test_delayed_import_keeps_curator_yield_on_original_mini_run_day(self):
-        old = datetime.now(timezone.utc)-timedelta(days=2)
+        # UTC midnight boundary: this is the preceding Pacific calendar day.
+        old = (datetime.now(timezone.utc)-timedelta(days=2)).replace(
+            hour=0, minute=30, second=0, microsecond=0)
         when = old.isoformat()
         cycle_path = self.t.state/'active-cycle.json'
         cycle = json.loads(cycle_path.read_text())
@@ -435,6 +437,30 @@ class OperationalHealthE2EQA(unittest.TestCase):
         rows = self.rows('semantic_scholar')
         self.assertTrue(any(row.get('Job')=='semantic' for row in rows))
         self.assertFalse(any(row.get('Job')=='openalex' for row in rows))
+
+    def test_empty_legacy_batch_does_not_turn_unknown_funnel_totals_into_zero(self):
+        self.publish_legacy_export()
+        html = self.html('analytics')
+        for title in ('Candidates', 'Eligible', 'Excluded'):
+            with self.subTest(title=title):
+                value = re.search(r'<h2>'+title+r'</h2><strong>(.*?)</strong>', html).group(1)
+                self.assertEqual(value, 'N/A', 'No operational facts cannot establish a measured '+title+' zero')
+
+    def test_imported_zero_eligible_scout_updates_zero_eligible_source_card(self):
+        self.seed('arxiv')
+        self.t.shell('push')
+        html = self.html()
+        value = re.search(r'<h2>Zero Eligible</h2><strong>(.*?)</strong>', html).group(1)
+        self.assertIn('arxiv', value.lower(), 'Imported zero-eligible evidence must not be labeled none')
+
+    def test_observed_scout_without_job_log_still_establishes_latest_run_time(self):
+        self.seed()
+        (self.t.mini/'data/job-events.jsonl').unlink()
+        self.t.shell('push')
+        self.assertEqual(self.published()['operational']['events'], [])
+        self.assertTrue(self.published()['operational']['scout_runs'])
+        value = re.search(r'<h2>Latest Run</h2><strong>(.*?)</strong>', self.html()).group(1)
+        self.assertNotEqual(value, 'none', 'A real timestamped Scout record is run evidence even without a job log')
 
     def mini_database_dump(self):
         with exchange.connect_db(self.t.mdb) as conn:
