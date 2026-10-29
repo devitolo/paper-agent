@@ -1,6 +1,6 @@
 """Independent Mini CLI/export -> exact AWS HTTPS receiver -> Health checks.
 
-Set QA_HEALTH_AWS_SOURCE to a separately frozen AWS checkout for mixed-role
+QA_HEALTH_AWS_SOURCE must name a separately frozen AWS checkout for mixed-role
 acceptance. Providers/Docker are fixture boundaries; auth, export, import,
 SQLite, receipt handling and served Health HTML are real. No production access.
 """
@@ -42,13 +42,22 @@ server.serve_forever()
 
 
 class OperationalHealthE2EQA(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        source = os.environ.get('QA_HEALTH_AWS_SOURCE')
+        if not source:
+            raise RuntimeError('Set QA_HEALTH_AWS_SOURCE to the exact AWS receiver checkout; '
+                               'the Mini checkout is not an AWS receiver substitute')
+        cls.aws_source = Path(source).resolve()
+        if not (cls.aws_source/'paper_agents/operational_evidence.py').is_file():
+            raise RuntimeError('QA_HEALTH_AWS_SOURCE is not a receiver source checkout: '+str(cls.aws_source))
+
     def setUp(self):
         self.t = fixture.WholeCycleTests()
         self.t.setUp()
         self.addCleanup(self.t.doCleanups)
         self.t.cli_env['PAPER_AGENT_ROUTINE_SYNC'] = '1'
-        aws_source = Path(os.environ.get('QA_HEALTH_AWS_SOURCE', fixture.REPO)).resolve()
-        self.assertTrue((aws_source/'paper_agents/operational_evidence.py').is_file())
+        aws_source = self.aws_source
         # Match the deployed app root: schema is present beside private data.
         # Imports use the frozen source, while runtime artifacts stay in fixture.
         (self.t.aws/'sql').symlink_to(aws_source/'sql', target_is_directory=True)
@@ -71,7 +80,13 @@ class OperationalHealthE2EQA(unittest.TestCase):
         self.t.url = 'https://localhost:'+port
         self.t.cli_env['PAPER_AGENT_SYNC_AWS_URL'] = self.t.url
         self.context = ssl.create_default_context(cafile=str(self.t.root/'cert.pem'))
-        self.t.shell('pull')
+        try:
+            self.t.shell('pull')
+        except AssertionError as error:
+            log.flush()
+            log.seek(0)
+            self.fail(str(error)+'\nSelected receiver source: '+str(aws_source)
+                      +'\nAWS fixture stderr:\n'+log.read()[-6000:])
         self.raw_profile = (self.t.aws/'data/profile.json').read_bytes()
 
     @staticmethod
