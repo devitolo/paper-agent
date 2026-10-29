@@ -1623,6 +1623,10 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
         "feedback_profile": feedback_profile,
         "job_events": recent(db_path.resolve().parent / "job-events.jsonl"),
     }
+    from paper_agents.operational_evidence import batches, project
+    with connect_db(db_path) as evidence_connection:
+        evidence_connection.row_factory = sqlite3.Row
+        project(summary, batches(evidence_connection, days=days))
     summary["warnings"] = _health_warnings(summary)
     summary["profile_maintenance"] = _health_profile_maintenance(summary)
     return summary

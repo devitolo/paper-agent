@@ -435,13 +435,15 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
     normalized=payload.get('normalized',{'papers':[],'paper_sources':[],'artifacts':[],'evaluations':[],'recommendations':[]})
     if not isinstance(normalized,dict) or set(normalized)!={'papers','paper_sources','artifacts','evaluations','recommendations'} or any(not isinstance(normalized[k],list) for k in normalized):raise ValueError('invalid normalized sections')
     validate_normalized(normalized)
+    from .operational_evidence import validate as validate_operational
+    validate_operational(payload.get("operational"))
     root=Path(root);content_hash=_digest(body)
     with connect_db(db_path) as c:
         _setup(c);c.commit();c.execute('BEGIN IMMEDIATE')
         row=c.execute('SELECT payload_hash,status FROM sync_result_batches WHERE batch_key=?',(key,)).fetchone()
         if row:
             if row[0]!=content_hash:raise ValueError('idempotency key reused for changed payload')
-            return {'status':row[1],'batch_key':key,'replayed':True}
+            return {'status':row[1],'batch_key':key,'replayed':True,**({'operational_version':1} if payload.get('operational') is not None else {})}
         if not c.execute('SELECT 1 FROM sync_snapshot_revisions WHERE revision=?',(payload.get('input_revision'),)).fetchone():raise ValueError('unknown input revision')
         last=c.execute('SELECT sequence FROM sync_producers WHERE producer=? AND environment=?',(producer,environment)).fetchone()
         if last and seq<=last[0]:raise ValueError('stale result sequence')
@@ -485,7 +487,7 @@ def receive_result_batch(db_path,body,headers,root=Path('.')):
             c.execute('INSERT INTO artifacts(paper_id,artifact_type,path,model,metadata_json) VALUES(?,?,?,?,?)',(pid,'triage_summary',str(artifact_path),model,encoded(metadata).decode()))
         c.execute('INSERT INTO sync_producers VALUES(?,?,?) ON CONFLICT(producer,environment) DO UPDATE SET sequence=excluded.sequence',(producer,environment,seq))
         c.execute("UPDATE sync_result_batches SET status='applied',applied_at=datetime('now') WHERE batch_key=?",(key,));c.commit()
-    return {'status':'applied','batch_key':key,'replayed':False}
+    return {'status':'applied','batch_key':key,'replayed':False,**({'operational_version':1} if payload.get('operational') is not None else {})}
 
 def receive_profile_proposal(db_path,body,headers):
     p=_payload(body)
