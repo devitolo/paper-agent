@@ -28,7 +28,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests/aws_build -v
           python3 -m unittest discover -s tests/aws_deploy -v
-          python3 -m unittest tests.sync_exchange.test_http_serving tests.test_operational_evidence -v
+          python3 -m unittest tests.sync_exchange.test_http_serving tests.sync_exchange.test_normalized_receive tests.test_operational_evidence -v
           python3 -m unittest tests.test_aws_container_status tests.test_aws_container_health tests.test_mini_container_health tests.test_observability_transport tests.test_health_mini_telemetry tests.test_health_aws_telemetry tests.test_aws_resource_mount tests.test_disk_provenance -v
 
       - name: Validate AWS resource mount transaction and rollback
