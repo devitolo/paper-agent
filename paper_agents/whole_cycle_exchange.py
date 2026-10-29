@@ -149,9 +149,9 @@ def export_delta(db_path, root, state):
             summary_seen.add(identity)
             normalized['artifacts'].append({'canonical_key':row['canonical_key'],'artifact_type':'triage_summary','content':content,'model':row['model'],'metadata_json':row['metadata_json'],'summary_hash':hashlib.sha256(encoded(content)).hexdigest()})
         for section,table in (('evaluations','curator_evaluations'),('recommendations','recommendations')):
-            for row in c.execute(f'SELECT r.*,p.canonical_key,cr.workflow_cycle_id FROM {table} r JOIN curator_runs cr ON cr.id=r.curator_run_id JOIN papers p ON p.id=r.paper_id WHERE cr.workflow_cycle_id IN ({marks}) ORDER BY r.id',ids):
+            for row in c.execute(f'SELECT r.*,p.canonical_key,cr.workflow_cycle_id,cr.created_at AS run_created_at,wc.created_at AS cycle_created_at FROM {table} r JOIN curator_runs cr ON cr.id=r.curator_run_id JOIN workflow_cycles wc ON wc.id=cr.workflow_cycle_id JOIN papers p ON p.id=r.paper_id WHERE cr.workflow_cycle_id IN ({marks}) ORDER BY r.id',ids):
                 allowed=('score','rationale','matched_signals_json','quality_threshold_met') if section=='evaluations' else ('recommendation_order','rationale')
-                normalized[section].append({k:row[k] for k in allowed}|{'canonical_key':row['canonical_key'],'cycle_key':f"{cycle['batch_id']}:cycle:{row['workflow_cycle_id']}",'run_key':f"{cycle['batch_id']}:curator:{row['curator_run_id']}"})
+                normalized[section].append({k:row[k] for k in allowed}|{'run_created_at':row['run_created_at'],'cycle_created_at':row['cycle_created_at']}|({'created_at':row['created_at']} if section=='recommendations' else {})|{'canonical_key':row['canonical_key'],'cycle_key':f"{cycle['batch_id']}:cycle:{row['workflow_cycle_id']}",'run_key':f"{cycle['batch_id']}:curator:{row['curator_run_id']}"})
     return {'schema':1,'normalized':normalized,'results':[],'operational':operational}
 
 
