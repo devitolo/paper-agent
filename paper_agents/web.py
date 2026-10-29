@@ -1695,7 +1695,7 @@ def render_funnel_summary(summary: dict[str, Any]) -> str:
         "eligible": sum(int(row["eligible_count"] or 0) for row in source_rows),
         "recommendations": sum(int(row["recommendation_count"] or 0) for row in source_rows),
     }
-    missing = any(row["candidate_count"] is None or row["eligible_count"] is None for row in source_rows)
+    missing = not source_rows or any(row["candidate_count"] is None or row["eligible_count"] is None for row in source_rows)
     totals["excluded"] = max(0, totals["candidates"] - totals["eligible"])
     eligible_rate = f"{totals['eligible'] / totals['candidates']:.0%}" if totals["candidates"] else "—"
     recommendation_rate = f"{totals['recommendations'] / totals['eligible']:.0%}" if totals["eligible"] else "—"
