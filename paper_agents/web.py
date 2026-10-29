@@ -1345,7 +1345,13 @@ def render_sync_health(summary=None) -> str:
     status = sync_health_snapshot(summary)
     labels = [("State", status["state"]), ("Last successful sync", status["time"] if status["state"] == "completed" else "unknown"), ("Current snapshot revision", status["revision"]), ("Snapshot age", status["age"]), ("Snapshot size", status["size"]), ("Last failure reason", status["failure"]), ("Pipeline run skipped", status["skipped"]), ("Installed input revision", status["installed"])]
     rows = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in labels)
-    return f'<section class="health-section"><h2>Mini sync</h2><dl class="health-kv">{rows}</dl></section>'
+    receipts = []
+    for receipt in (summary or {}).get('sync_receipts',[])[:12]:
+        receipts.append({'accepted_at':receipt['applied_at'] or receipt['created_at'],
+                         'batch':receipt['batch_key'],'status':receipt['status'],
+                         'operational_facts':'available' if receipt['operational'] else 'N/A'})
+    history = render_health_table('AWS batch receipts',receipts,['accepted_at','batch','status','operational_facts']) if receipts else ''
+    return f'<section class="health-section"><h2>Mini sync</h2><dl class="health-kv">{rows}</dl>{history}</section>'
 
 
 def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]]:
@@ -1456,8 +1462,8 @@ def render_health_jobs(summary: dict[str, Any]) -> str:
         lower_message = message.lower()
         delivery = "accepted" if status in {"completed", "success", "succeeded"} and any(token in lower_message for token in ("receipt applied", "receipt=applied", "delivery accepted", "push applied")) else ("failed" if "push failed" in lower_message else "pending" if "push pending" in lower_message else "not recorded")
         delivery = event.get("delivery", delivery)
-        rows.append({"recorded_at": event.get("recorded_at", "unknown"), "job": event.get("job", "unknown"), "processing": processing, "delivery": delivery, "message": message})
-    return '<section class="health-section"><div class="section-heading"><div><h2>Jobs</h2><p>Scheduled operations, with processing and AWS delivery shown separately.</p></div><span class="health-note">Live events · refresh the page to update</span></div>' + render_health_table("Operational job history", rows, ["recorded_at", "job", "processing", "delivery", "message"]) + '</section>'
+        rows.append({"recorded_at": event.get("recorded_at", "unknown"), "job": event.get("job", "unknown"), "processing": processing, "evidence_delivery": delivery, "message": message})
+    return '<section class="health-section"><div class="section-heading"><div><h2>Jobs</h2><p>Processing observations and their AWS evidence receipts; acceptance does not imply successful processing.</p></div><span class="health-note">Live events · refresh the page to update</span></div>' + render_health_table("Operational job history", rows, ["recorded_at", "job", "processing", "evidence_delivery", "message"]) + '</section>'
 
 
 def render_health_infrastructure(summary: dict[str, Any]) -> str:

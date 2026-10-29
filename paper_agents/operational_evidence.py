@@ -80,11 +80,12 @@ def collect(connection, root, cycle):
         raise ValueError('too many operational Scout runs')
     lower=cycle.get('started_at') or (min((r['started_at'] for r in runs),default=None))
     events=[]
-    if lower:
-        start=stamp(lower)
-        for row in reversed(recent(Path(root)/'data/job-events.jsonl',limit=MAX_ROWS)):
-            if row['job'] in JOBS and stamp(row['recorded_at'])>=start:
-                events.append({k:row[k] for k in ('recorded_at','job','status')})
+    # Retain failed/skipped jobs too: a later successful publication can carry
+    # their processing observations without pretending their paper push succeeded.
+    start=datetime.now(timezone.utc)-timedelta(days=7)
+    for row in reversed(recent(Path(root)/'data/job-events.jsonl',limit=MAX_ROWS)):
+        if row['job'] in JOBS and stamp(row['recorded_at'])>=start:
+            events.append({k:row[k] for k in ('recorded_at','job','status')})
     return validate({'version':1,'events':events,'scout_runs':runs})
 
 
