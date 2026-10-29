@@ -117,6 +117,7 @@ def project(summary, rows, *, native_scout=()):
         except (ValueError,TypeError,KeyError):
             facts=None
         fact_sources=({r['source'] for r in facts['scout_runs']} | {'semantic_scholar' if r['job']=='semantic' else r['job'] for r in facts['events']}) if facts else set()
+        summary['available_sources']=sorted(set(summary['available_sources']) | (fact_sources & SOURCES))
         receipts.append(batch)  # Sync acceptance is global, independent of chart filtering.
         if source and source not in fact_sources:
             continue
