@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 import json
 import os
@@ -164,6 +164,10 @@ def push(db_path, root, state, url, *, transport=request):
         payload.update(input_revision=cycle['input_revision'],producer_id=os.environ.get('PAPER_AGENT_SYNC_PRODUCER','mini-production'),environment=os.environ.get('PAPER_AGENT_SYNC_ENVIRONMENT','production'),run_sequence=seq,batch_id=cycle['batch_id'])
         # Persist identity and exact payload before any network request.
         atomic_json(outbox,payload)
+    return deliver_outbox(state,url,outbox,clear_active=True,transport=transport)
+
+
+def deliver_outbox(state,url,outbox,*,clear_active=False,transport=request):
     payload=json.loads(outbox.read_text()); key=payload['batch_id']
     receipt=transport(url,'POST',encoded(payload),os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'],'/sync/pipeline-results',key)
     if receipt.get('status')!='applied' or receipt.get('batch_key')!=key: raise ValueError('invalid pipeline receipt')
@@ -171,10 +175,34 @@ def push(db_path, root, state, url, *, transport=request):
         raise ValueError('AWS did not acknowledge operational evidence; outbox retained')
     atomic_json(state/('receipt-'+key+'.json'),receipt)
     atomic_json(state/'sequence.json',{'sequence':payload['run_sequence']})
-    # Clear active first: an interruption retains outbox and allows identical retry.
-    (state/'active-cycle.json').unlink(missing_ok=True)
-    outbox.rename(state/f'published-{key}.json')
+    if clear_active:
+        (state/'active-cycle.json').unlink(missing_ok=True)
+    prefix='published-' if clear_active else 'health-published-'
+    outbox.rename(state/(prefix+key+'.json'))
     return receipt
+
+
+def publish_health(db_path,root,state,url,*,transport=request):
+    """Publish actual retained seven-day facts only; never run or restore discovery."""
+    from .operational_evidence import collect
+    state=Path(state);state.mkdir(parents=True,exist_ok=True)
+    if (state/'pipeline-outbox.json').exists() or (state/'active-cycle.json').exists():
+        raise ValueError('active pipeline blocks operational publication')
+    outbox=state/'health-outbox.json'
+    if not outbox.exists():
+        snapshot=transport(url,'GET',b'',os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'],'/sync/input')
+        since=(datetime.now(timezone.utc)-timedelta(days=7)).isoformat()
+        with connect_db(db_path) as c:
+            c.row_factory=sqlite3.Row
+            facts=collect(c,root,{'baseline':{'workflow_cycles':0},'started_at':since})
+        sequence=json.loads((state/'sequence.json').read_text())['sequence'] if (state/'sequence.json').exists() else 0
+        payload={'schema':1,'results':[],'normalized':{section:[] for section in SECTIONS},
+                 'operational':facts,'input_revision':snapshot['revision'],
+                 'producer_id':os.environ.get('PAPER_AGENT_SYNC_PRODUCER','mini-production'),
+                 'environment':os.environ.get('PAPER_AGENT_SYNC_ENVIRONMENT','production'),
+                 'run_sequence':sequence+1,'batch_id':'health-'+uuid.uuid4().hex}
+        atomic_json(outbox,payload)
+    return deliver_outbox(state,url,outbox,transport=transport)
 
 
 def recover(state, reason='source failure'):
@@ -230,7 +258,7 @@ def quarantine_stale_outbox(state, error):
 
 def main(argv=None):
     p=argparse.ArgumentParser()
-    p.add_argument('command',choices=('pull','push','retry','recover'))
+    p.add_argument('command',choices=('pull','push','retry','recover','publish-health'))
     p.add_argument('--db-path',required=True,type=Path); p.add_argument('--root',required=True,type=Path)
     p.add_argument('--state-dir',required=True,type=Path); p.add_argument('--aws-url',required=True)
     a=p.parse_args(argv)
@@ -241,9 +269,13 @@ def main(argv=None):
     from .migration_lifecycle import lease
     lifecycle=Path(os.environ.get('PAPER_AGENT_LIFECYCLE_DIR','/runtime-control'))
     with lock(a.state_dir), lease(lifecycle), lease(lifecycle,exclusive=True,name='.scheduled-job.lock'):
-        if a.command=='recover':
+        if a.command=='publish-health':
+            result=publish_health(a.db_path,a.root,a.state_dir,a.aws_url)
+        elif a.command=='recover':
             result=recover(a.state_dir, 'scheduled source failure')
         elif a.command=='retry':
+            if (a.state_dir/'health-outbox.json').exists():
+                publish_health(a.db_path,a.root,a.state_dir,a.aws_url)
             if not (a.state_dir/'pipeline-outbox.json').exists():
                 result={'status':'no-pending-outbox'}
             else:
@@ -254,7 +286,7 @@ def main(argv=None):
                     if result is None:
                         raise
         elif a.command=='pull':
-            if (a.state_dir/'pipeline-outbox.json').exists() or (a.state_dir/'active-cycle.json').exists():
+            if any((a.state_dir/name).exists() for name in ('pipeline-outbox.json','active-cycle.json','health-outbox.json')):
                 raise ValueError('unfinished cycle blocks pull; recover/publish first')
             if os.environ.get('PAPER_AGENT_ROUTINE_SYNC') == '1':
                 result=pull_routine(a.db_path, a.root, a.state_dir, download_routine_snapshot(a.aws_url))

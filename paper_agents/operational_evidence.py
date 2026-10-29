@@ -68,12 +68,14 @@ def collect(connection, root, cycle):
     """Called inside export's read transaction; select only the current cycle delta."""
     from paper_agents.job_events import recent
     baseline=cycle['baseline']['workflow_cycles']
+    lower_sql=stamp(cycle['started_at']).replace(microsecond=0).isoformat() if cycle.get('started_at') else None
     runs=[dict(row) for row in connection.execute('''SELECT sr.id AS run_id,sr.source,sr.started_at,sr.completed_at,
         COUNT(sc.id) AS candidate_count,
         COALESCE(SUM(CASE WHEN sc.id IS NOT NULL AND sc.excluded=0 THEN 1 ELSE 0 END),0) AS eligible_count,
         COALESCE(SUM(CASE WHEN sc.excluded=1 THEN 1 ELSE 0 END),0) AS excluded_count
         FROM scout_runs sr LEFT JOIN scout_candidates sc ON sc.scout_run_id=sr.id
-        WHERE sr.workflow_cycle_id>? GROUP BY sr.id ORDER BY sr.id LIMIT ?''',(baseline,MAX_ROWS+1))]
+        WHERE sr.workflow_cycle_id>? AND (? IS NULL OR julianday(sr.started_at)>=julianday(?))
+        GROUP BY sr.id ORDER BY sr.id LIMIT ?''',(baseline,lower_sql,lower_sql,MAX_ROWS+1))]
     if len(runs)>MAX_ROWS:
         raise ValueError('too many operational Scout runs')
     lower=cycle.get('started_at') or (min((r['started_at'] for r in runs),default=None))
