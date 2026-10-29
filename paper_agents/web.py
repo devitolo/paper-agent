@@ -1430,7 +1430,7 @@ def render_needs_attention_items(summary: dict[str, Any]) -> list[dict[str, str]
             "state": state,
             "domain": "delivery",
             "severity": "warning" if state in {"stale", "unknown", "unavailable", "malformed"} else "critical",
-            "what_happened": f"AWS sync status is {state}.",
+            "what_happened": f"AWS sync status is {sync['state']}.",
             "why_it_matters": "New Mini results may not be visible in the AWS serving UI.",
             "likely_cause": "The sync receipt is stale, unavailable, or malformed; the exact delivery cause is unknown.",
             "evidence": f"state={sync['state']}, updated_at={sync['time']}, revision={sync['revision']}",

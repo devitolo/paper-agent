@@ -119,3 +119,14 @@ class OperationalEvidenceTests(unittest.TestCase):
         self.assertEqual(facts['scout_runs'][0]['candidate_count'],0)
         self.assertNotIn('secret',json.dumps(facts))
         self.assertEqual(len(facts['events']),1)
+
+    def test_job_without_scout_is_selectable_and_not_claimed_as_processing_success(self):
+        facts={'version':1,'events':[{'recorded_at':self.now,'job':'core','status':'failed'}],'scout_runs':[]}
+        self.receive(facts)
+        summary=self.summary(source='core')
+        self.assertIn('core',summary['available_sources'])
+        self.assertEqual(summary['job_events'][0]['status'],'failed')
+        html=render_health_page(self.path,source='core',tab='jobs')
+        self.assertIn('value="core" selected',html)
+        self.assertIn('failed',html)
+        self.assertIn('accepted',html)
