@@ -1181,6 +1181,11 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
     source_filter = None if source in (None, "", "all") else source
     window = f"-{days} days"
     with connect_db(db_path) as connection:
+        from paper_agents.operational_evidence import stamp, PACIFIC
+        def health_day(value):
+            try: return stamp(value).astimezone(PACIFIC).date().isoformat()
+            except (ValueError,TypeError): return None
+        connection.create_function("health_day",1,health_day)
         integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
         available_sources = [
             row[0]
@@ -1211,7 +1216,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
         latest_recommendation_day = _scalar(
             connection,
             """
-            SELECT MAX(date(recommendations.created_at))
+            SELECT MAX(health_day(recommendations.created_at))
             FROM recommendations
             LEFT JOIN paper_sources ON paper_sources.paper_id = recommendations.paper_id
             WHERE (? IS NULL OR paper_sources.source = ?)
@@ -1286,7 +1291,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
             "cycles": _rows(
                 connection,
                 """
-                SELECT date(workflow_cycles.created_at) AS day, workflow_cycles.state, COUNT(*) AS cycle_count
+                SELECT health_day(workflow_cycles.created_at) AS day, workflow_cycles.state, COUNT(*) AS cycle_count
                 FROM workflow_cycles
                 WHERE workflow_cycles.created_at >= datetime('now', ?)
                   AND (
@@ -1306,7 +1311,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                 connection,
                 """
                 SELECT
-                    date(scout_runs.started_at) AS day,
+                    health_day(scout_runs.started_at) AS day,
                     scout_runs.source,
                     COUNT(DISTINCT scout_runs.id) AS run_count,
                     COUNT(scout_candidates.id) AS candidate_count,
@@ -1326,8 +1331,8 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                 connection,
                 """
                 SELECT
-                    date(curator_runs.created_at) AS day,
-                    COALESCE(scout_runs.source, 'unknown') AS source,
+                    health_day(curator_runs.created_at) AS day,
+                    COALESCE(scout_runs.source, (SELECT ps.source FROM paper_sources ps WHERE ps.paper_id=curator_evaluations.paper_id ORDER BY ps.id LIMIT 1), 'unknown') AS source,
                     COUNT(DISTINCT curator_evaluations.id) AS evaluation_count,
                     SUM(CASE WHEN curator_evaluations.quality_threshold_met = 1 THEN 1 ELSE 0 END) AS quality_met_count,
                     COUNT(DISTINCT recommendations.id) AS recommendation_count
@@ -1339,7 +1344,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                   ON recommendations.curator_run_id = curator_runs.id
                  AND recommendations.paper_id = curator_evaluations.paper_id
                 WHERE curator_runs.created_at >= datetime('now', ?)
-                  AND (? IS NULL OR COALESCE(scout_runs.source, 'unknown') = ?)
+                  AND (? IS NULL OR COALESCE(scout_runs.source, (SELECT ps.source FROM paper_sources ps WHERE ps.paper_id=curator_evaluations.paper_id ORDER BY ps.id LIMIT 1), 'unknown') = ?)
                 GROUP BY day, source
                 ORDER BY day DESC, source
                 """,
@@ -1355,7 +1360,7 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                     WHERE id IN (SELECT MIN(id) FROM paper_sources GROUP BY paper_id)
                 )
                 SELECT
-                    date(recommendations.created_at) AS day,
+                    health_day(recommendations.created_at) AS day,
                     COALESCE(primary_source.source, 'unknown') AS source,
                     COUNT(DISTINCT recommendations.id) AS recommendation_count,
                     COUNT(DISTINCT pdf.paper_id) AS pdf_count,
@@ -1381,22 +1386,22 @@ def health_summary(db_path: Path = DEFAULT_DB_PATH, *, days: int = 21, source: s
                 """
                 SELECT day, SUM(raw_feedback_count), SUM(structured_feedback_count), SUM(profile_version_count), SUM(apply_failure_count)
                 FROM (
-                    SELECT date(received_at) AS day, COUNT(*) AS raw_feedback_count, 0 AS structured_feedback_count, 0 AS profile_version_count, 0 AS apply_failure_count
+                    SELECT health_day(received_at) AS day, COUNT(*) AS raw_feedback_count, 0 AS structured_feedback_count, 0 AS profile_version_count, 0 AS apply_failure_count
                     FROM raw_feedback
                     WHERE received_at >= datetime('now', ?)
                     GROUP BY day
                     UNION ALL
-                    SELECT date(created_at) AS day, 0, COUNT(*), 0, 0
+                    SELECT health_day(created_at) AS day, 0, COUNT(*), 0, 0
                     FROM structured_feedback
                     WHERE created_at >= datetime('now', ?)
                     GROUP BY day
                     UNION ALL
-                    SELECT date(created_at) AS day, 0, 0, COUNT(*), 0
+                    SELECT health_day(created_at) AS day, 0, 0, COUNT(*), 0
                     FROM profile_versions
                     WHERE created_at >= datetime('now', ?)
                     GROUP BY day
                     UNION ALL
-                    SELECT date(created_at) AS day, 0, 0, 0, COUNT(*)
+                    SELECT health_day(created_at) AS day, 0, 0, 0, COUNT(*)
                     FROM feedback_profile_apply_attempts
                     WHERE created_at >= datetime('now', ?)
                       AND status = 'failed'
