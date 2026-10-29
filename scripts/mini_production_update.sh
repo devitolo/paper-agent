@@ -41,6 +41,7 @@ DEPLOY_BRANCH=${PAPER_MINI_DEPLOY_BRANCH:-mini-production}
 ARXIV_PROGRESS=${PAPER_MINI_ARXIV_PROGRESS:-}
 OPENALEX_CURSOR=${PAPER_MINI_OPENALEX_CURSOR:-}
 SEMANTIC_SCHOLAR_PROGRESS=${PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS:-}
+SEMANTIC_FOUR_PAGE=${PAPER_MINI_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT:-}
 CORE_SOURCE=${PAPER_MINI_CORE_SOURCE:-}
 DEPLOY_CHECK=${PAPER_DEPLOY_CHECK:-light}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
@@ -79,12 +80,13 @@ grep -Eq "^PAPER_AGENT_SYNC_SHARED_SECRET=.{32,}$" "$ENV_FILE" || { echo "Missin
 [[ -z "$ARXIV_PROGRESS" || "$ARXIV_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_ARXIV_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$OPENALEX_CURSOR" || "$OPENALEX_CURSOR" =~ ^[01]$ ]] || { echo "PAPER_MINI_OPENALEX_CURSOR must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$SEMANTIC_SCHOLAR_PROGRESS" || "$SEMANTIC_SCHOLAR_PROGRESS" =~ ^[01]$ ]] || { echo "PAPER_MINI_SEMANTIC_SCHOLAR_PROGRESS must be 0 or 1 when set" >&2; exit 64; }
+[[ -z "$SEMANTIC_FOUR_PAGE" || "$SEMANTIC_FOUR_PAGE" =~ ^[01]$ ]] || { echo "PAPER_MINI_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT must be 0 or 1 when set" >&2; exit 64; }
 [[ -z "$CORE_SOURCE" || "$CORE_SOURCE" =~ ^[01]$ ]] || { echo "PAPER_MINI_CORE_SOURCE must be 0 or 1 when set" >&2; exit 64; }
 [[ "$DEPLOY_CHECK" == light || "$DEPLOY_CHECK" == full ]] || { echo "PAPER_DEPLOY_CHECK must be light or full" >&2; exit 64; }
 
 # Credentials in the private production env file are authoritative. Docker Compose
 # otherwise gives an ambient shell variable precedence over --env-file.
-unset SEMANTIC_SCHOLAR_API_KEY SEMANTIC_SCHOLAR_API_KEY1 SEMANTIC_SCHOLAR_API_KEY2
+unset SEMANTIC_SCHOLAR_API_KEY SEMANTIC_SCHOLAR_API_KEY1 SEMANTIC_SCHOLAR_API_KEY2 PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT
 
 cd "$CANDIDATE_DIR"
 
@@ -157,7 +159,7 @@ cat > "$RELEASE_DIR/rollback.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$CANDIDATE_DIR"
-unset SEMANTIC_SCHOLAR_API_KEY SEMANTIC_SCHOLAR_API_KEY1 SEMANTIC_SCHOLAR_API_KEY2
+unset SEMANTIC_SCHOLAR_API_KEY SEMANTIC_SCHOLAR_API_KEY1 SEMANTIC_SCHOLAR_API_KEY2 PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT
 cp "$RELEASE_DIR/production.env.before" "$ENV_FILE"
 cp "$RELEASE_DIR/compose.before.yml" "$CANDIDATE_DIR/docker-compose.mini-migration.yml"
 crontab "$RELEASE_DIR/crontab.before"
@@ -335,7 +337,7 @@ fi
 printf 'next_ollama_image=%s\n' "$ollama_image" >> "$RELEASE_DIR/update.env"
 
 tmp_env=$RELEASE_DIR/production.env.next
-python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" "$ARXIV_PROGRESS" "$OPENALEX_CURSOR" "$SEMANTIC_SCHOLAR_PROGRESS" "$CORE_SOURCE" <<'PY'
+python3 - "$ENV_FILE" "$tmp_env" "$APP_IMAGE" "$ollama_image" "$ARXIV_PROGRESS" "$OPENALEX_CURSOR" "$SEMANTIC_SCHOLAR_PROGRESS" "$CORE_SOURCE" "$SEMANTIC_FOUR_PAGE" <<'PY'
 from __future__ import annotations
 
 import sys
@@ -349,6 +351,7 @@ arxiv_progress = sys.argv[5]
 openalex_cursor = sys.argv[6]
 semantic_scholar_progress = sys.argv[7]
 core_source = sys.argv[8]
+semantic_four_page = sys.argv[9]
 lines = source.read_text(encoding="utf-8").splitlines()
 found = False
 found_ollama = False
@@ -356,6 +359,7 @@ found_arxiv_progress = False
 found_openalex_cursor = False
 found_semantic_scholar_progress = False
 found_core_source = False
+found_semantic_four_page = False
 out: list[str] = []
 drop_prefixes = ("PAPER_REHEARSAL_SOURCE_SHA256=", "PAPER_REHEARSAL_IDENTITY_FILE=")
 for line in lines:
@@ -376,6 +380,9 @@ for line in lines:
     elif line.startswith("PAPER_SEMANTIC_SCHOLAR_PROGRESS=") and semantic_scholar_progress:
         out.append(f"PAPER_SEMANTIC_SCHOLAR_PROGRESS={semantic_scholar_progress}")
         found_semantic_scholar_progress = True
+    elif line.startswith("PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT=") and semantic_four_page:
+        out.append(f"PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT={semantic_four_page}")
+        found_semantic_four_page = True
     elif line.startswith("PAPER_CORE_SOURCE=") and core_source:
         out.append(f"PAPER_CORE_SOURCE={core_source}")
         found_core_source = True
@@ -391,6 +398,8 @@ if openalex_cursor and not found_openalex_cursor:
     out.append(f"PAPER_OPENALEX_CURSOR={openalex_cursor}")
 if semantic_scholar_progress and not found_semantic_scholar_progress:
     out.append(f"PAPER_SEMANTIC_SCHOLAR_PROGRESS={semantic_scholar_progress}")
+if semantic_four_page and not found_semantic_four_page:
+    out.append(f"PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT={semantic_four_page}")
 if core_source and not found_core_source:
     out.append(f"PAPER_CORE_SOURCE={core_source}")
 destination.write_text("\n".join(out) + "\n", encoding="utf-8")
@@ -670,6 +679,7 @@ verification_status=$(docker inspect --format '{{.State.Status}} {{if .State.Hea
 verification_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1)
 verification_arxiv_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_ARXIV_PROGRESS:-unset}"')
 verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_OPENALEX_CURSOR:-unset}"')
+verification_semantic_four_page=$("${compose[@]}" exec -T app printenv PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT)
 verification_semantic_scholar_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_SEMANTIC_SCHOLAR_PROGRESS:-unset}"')
 verification_minilm_enabled=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_AGENT_MINILM_ENABLED:-unset}"')
 verification_curator_model=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_AGENT_CURATOR_MODEL:-unset}"')
@@ -691,6 +701,7 @@ removed_image_layer_count=$(sed -n 's/^removed_image_layer_count=//p' "$RELEASE_
   printf 'status=%s\n' "$verification_status"
   printf 'PAPER_ARXIV_PROGRESS=%s\n' "$verification_arxiv_progress"
   printf 'PAPER_OPENALEX_CURSOR=%s\n' "$verification_openalex_cursor"
+  printf 'PAPER_SEMANTIC_SCHOLAR_FOUR_PAGE_EXPERIMENT=%s\n' "$verification_semantic_four_page"
   printf 'PAPER_SEMANTIC_SCHOLAR_PROGRESS=%s\n' "$verification_semantic_scholar_progress"
   printf 'PAPER_AGENT_MINILM_ENABLED=%s\n' "$verification_minilm_enabled"
   printf 'PAPER_AGENT_CURATOR_MODEL=%s\n' "$verification_curator_model"
@@ -720,6 +731,10 @@ if [[ -n "$OPENALEX_CURSOR" && "$verification_openalex_cursor" != "$OPENALEX_CUR
 fi
 if [[ -n "$SEMANTIC_SCHOLAR_PROGRESS" && "$verification_semantic_scholar_progress" != "$SEMANTIC_SCHOLAR_PROGRESS" ]]; then
   echo "Post-deploy verification failed: PAPER_SEMANTIC_SCHOLAR_PROGRESS=$verification_semantic_scholar_progress, expected $SEMANTIC_SCHOLAR_PROGRESS" >&2
+  exit 1
+fi
+if [[ -n "$SEMANTIC_FOUR_PAGE" && "$verification_semantic_four_page" != "$SEMANTIC_FOUR_PAGE" ]]; then
+  echo "Post-deploy verification failed: four-page flag mismatch" >&2
   exit 1
 fi
 if [[ "$verification_minilm_enabled" != 1 ]]; then
