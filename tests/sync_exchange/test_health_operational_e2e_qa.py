@@ -459,6 +459,36 @@ class OperationalHealthE2EQA(unittest.TestCase):
         self.assertEqual(row['Delivery'], 'accepted')
         self.assert_protected()
 
+    def test_observed_zero_scout_counts_render_as_zero_in_visible_analytics_tables(self):
+        # Mix a real legacy delivery (no Scout evidence) on an earlier day with
+        # today's measured zero. This also activates the chart fallback tables.
+        old = (datetime.now(timezone.utc)-timedelta(days=2)).isoformat()
+        self.seed('core', nonzero=True, when=old)
+        with exchange.connect_db(self.t.mdb) as conn:
+            for table in ('workflow_cycles', 'curator_runs', 'recommendations'):
+                conn.execute('UPDATE '+table+' SET created_at=?', (old,))
+        self.publish_legacy_export()
+        self.t.shell('pull')
+        self.seed('core')
+        self.t.shell('push')
+        dom = html_fixture.HealthDOM(self.html('analytics', 'core'))
+        row = next(row for row in dom.rows('Scout') if row.get('Source')=='core')
+        for column in ('Candidate Count', 'Eligible Count', 'Excluded Count'):
+            with self.subTest(column=column):
+                self.assertEqual(row[column], '0',
+                                 'A measured zero must remain visible, distinct from unavailable data')
+        day = datetime.now(timezone.utc).astimezone(ZoneInfo('America/Los_Angeles')).date().isoformat()
+        for title in ('Daily trend — missing counts are N/A',
+                      'Recommendation gap — missing counts are N/A'):
+            rows = dom.rows(title)
+            today = next(row for row in rows if row['Day']==day)
+            for column in ('Candidate Count', 'Eligible Count'):
+                if column in today:
+                    with self.subTest(table=title, column=column):
+                        self.assertEqual(today[column], '0')
+            self.assertTrue(any(row.get('Eligible Count')=='N/A' for row in rows),
+                            'Unknown legacy observations must stay N/A alongside measured zero')
+
     def test_job_table_calls_the_ack_evidence_delivery_without_claiming_processing_success(self):
         self.seed(status='failed')
         self.t.shell('push')

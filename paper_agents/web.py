@@ -2599,7 +2599,7 @@ def render_health_table(title: str, rows: list[dict[str, Any]], columns: list[st
     headers = "".join(f"<th>{escape(column.replace('_', ' ').title())}</th>" for column in columns)
     if rows:
         body = "".join(
-            "<tr>" + "".join(f"<td>{escape(row.get(column) if row.get(column) is not None else "N/A")}</td>" for column in columns) + "</tr>"
+            "<tr>" + "".join(f"<td>{escape(str(row.get(column)) if row.get(column) is not None else "N/A")}</td>" for column in columns) + "</tr>"
             for row in rows
         )
     else:
