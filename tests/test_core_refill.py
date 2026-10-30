@@ -91,6 +91,27 @@ class CoreRefillTests(unittest.TestCase):
                 self.assertEqual(fetch.call_count, 1)
                 if expected: self.assertEqual(progress.diagnostics['stop_reason'], expected)
 
+    def test_freshness_refill_can_continue_when_deep_traversal_is_exhausted(self):
+        self.known(); progress = self.progress()
+        self.fetch(progress, [fixtures.page([fixtures.work(2)], next_offset=None)])
+        self.save(progress)
+        refreshed = self.progress(self.now + timedelta(days=8))
+        result, fetch = self.fetch(refreshed, [fixtures.page([fixtures.work(1)], next_offset=1),
+            fixtures.page([fixtures.work(3)], offset=1, next_offset=2)])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(len(result), 1)
+        state = next(value for key,value in refreshed.states.items() if key != '@source')
+        self.assertTrue(state['deep']['exhausted'])
+
+    def test_reordered_duplicate_page_is_still_detected_as_repeated(self):
+        self.known()
+        db.upsert_paper(self.connection, core_work_to_candidate(fixtures.work(2)).as_dict())
+        self.connection.commit(); progress = self.progress()
+        _, fetch = self.fetch(progress, [fixtures.page([fixtures.work(1),fixtures.work(2)], next_offset=2),
+            fixtures.page([fixtures.work(2),fixtures.work(1)], offset=2, next_offset=4)])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(progress.diagnostics['stop_reason'], 'repeated_page')
+
     def test_repeated_provider_page_stops_without_skipping_checkpoint(self):
         self.known(); progress = self.progress()
         _, fetch = self.fetch(progress, [fixtures.page([fixtures.work(1)], next_offset=1),
