@@ -63,6 +63,8 @@ jobs:
             tests.test_migration_scheduler \
             tests.test_mini_container_job \
             tests.test_core_progress \
+            tests.test_core_refill \
+            tests.test_reviewer_pdf_urls \
             tests.test_rehearsal_images \
             tests.test_import_legacy_schema \
             tests.test_semantic_scholar_key_failover \

@@ -20,7 +20,10 @@ def looks_like_direct_pdf_url(source: str | None, url: str | None) -> bool:
     if normalized_source == "arxiv" and "arxiv.org/" in lower_url:
         return True
 
-    parsed = urlparse(normalized_url)
+    try:
+        parsed = urlparse(normalized_url)
+    except ValueError:
+        return False
     path = parsed.path.lower()
     query = parsed.query.lower()
     if path.endswith(".pdf") or ".pdf/" in path:
@@ -56,7 +59,10 @@ def candidate_pdf_urls(source: str | None, source_id: str | None, pdf_url: str |
 def extract_pdf_links_from_html(base_url: str, html_text: str) -> list[str]:
     links: list[str] = []
     for match in re.finditer(r"""href=["']([^"']+)["']""", html_text, re.IGNORECASE):
-        url = urljoin(base_url, html.unescape(match.group(1)))
+        try:
+            url = urljoin(base_url, html.unescape(match.group(1)))
+        except ValueError:
+            continue
         if looks_like_direct_pdf_url(None, url) and url not in links:
             links.append(url)
     return links
