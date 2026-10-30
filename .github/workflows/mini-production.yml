@@ -41,7 +41,7 @@ jobs:
       - name: Checkout deployed AWS receiver for cross-role Health tests
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 8c55a51b8cbb67766a3ed973ff54c7f857ff79af
+          ref: 57936ea29ed98d44c2c4bfb269165d777e880114
           path: qa-aws-receiver
           persist-credentials: false
 
