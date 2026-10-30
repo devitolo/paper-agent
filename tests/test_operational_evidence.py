@@ -67,6 +67,9 @@ class OperationalEvidenceTests(unittest.TestCase):
         self.receive(facts)
         self.assertEqual(self.summary()['daily']['scout'][0]['candidate_count'],0)
         self.assertIn('>0<',render_health_page(self.path,tab='analytics'))
+        from paper_agents.web import render_health_table
+        table=render_health_table('Counts',[{'observed':0,'unknown':None}],['observed','unknown'])
+        self.assertIn('<td>0</td><td>N/A</td>',table)
 
     def test_older_batch_without_facts_still_has_accepted_receipt(self):
         self.receive(None)
