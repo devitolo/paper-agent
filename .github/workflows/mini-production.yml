@@ -65,6 +65,7 @@ jobs:
             tests.test_core_progress \
             tests.test_core_refill \
             tests.test_reviewer_pdf_urls \
+            tests.test_pdf_core_refill_adversarial_qa \
             tests.test_rehearsal_images \
             tests.test_import_legacy_schema \
             tests.test_semantic_scholar_key_failover \
