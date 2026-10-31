@@ -40,6 +40,10 @@ PROVIDER_ERROR_HEADERS = {
 SAFE_PROVIDER_ERROR_FIELDS = {"code", "detail", "error", "message", "status", "type"}
 
 
+class CoreTimeBudgetReached(Exception):
+    """A request/retry cannot fit within the existing bounded fetch window."""
+
+
 class CoreProgress:
     def __init__(self, connection, source, *, now=None):
         self.connection = connection
@@ -72,6 +76,10 @@ class CoreProgress:
         if self.connection.in_transaction:
             raise RuntimeError("CORE HTTP must start outside a write transaction")
         clock = self.now.timestamp()
+        self.deadline = time.monotonic() + (
+            ATTEMPT_BUDGET * self.source.timeout
+            + (ATTEMPT_BUDGET - 1) * self.source.request_delay
+        )
         control = self.states.setdefault("@source", {"not_before": 0, "sequence": 0})
         if control["not_before"] > clock:
             self.diagnostics.update(
@@ -102,7 +110,12 @@ class CoreProgress:
         seen_keys = set(known_keys)
         candidates = []
         attempted = []
-        for key, topic in queries:
+        pending = list(queries)
+        query_pages = {}
+        traversals = {}
+        page_fingerprints = {}
+        while pending:
+            key, topic = pending.pop(0)
             if self.diagnostics["attempts"] >= ATTEMPT_BUDGET:
                 break
             remaining = max_candidates - len(candidates)
@@ -115,9 +128,11 @@ class CoreProgress:
                 state["deep"] = deep = self._new_traversal(freshness_months)
                 state["last_refresh"] = clock
             refresh = clock - state["last_refresh"] >= REFRESH_SECONDS
-            if deep["exhausted"] and not refresh:
+            if key not in traversals and deep["exhausted"] and not refresh:
                 continue
-            traversal = self._new_traversal(freshness_months) if refresh else deep
+            if key not in traversals:
+                traversals[key] = (self._new_traversal(freshness_months) if refresh else deep, refresh)
+            traversal, refresh = traversals[key]
             attempted.append(topic)
             control["sequence"] += 1
             state["last_served"] = control["sequence"]
@@ -128,6 +143,18 @@ class CoreProgress:
                     cutoff=traversal["cutoff"],
                     page_size=min(PAGE_SIZE, remaining),
                 )
+                next_offset = payload["next"]
+                if next_offset is not None and (type(next_offset) is not int or next_offset <= traversal["offset"]):
+                    self.diagnostics["stop_reason"] = "pagination_not_advancing"
+                    break
+                fingerprint = tuple(sorted(str(work.get("id")) for work in payload["results"]))
+                seen_pages = page_fingerprints.setdefault(key, set())
+                if fingerprint and fingerprint in seen_pages:
+                    self.diagnostics["stop_reason"] = "repeated_page"
+                    break
+                seen_pages.add(fingerprint)
+                if not payload["results"]:
+                    next_offset = None
                 dispositions = []
                 accepted = []
                 for work in payload["results"]:
@@ -146,7 +173,7 @@ class CoreProgress:
                         accepted.append(candidate)
                 page = {
                     "offset": traversal["offset"],
-                    "next_offset": payload["next"],
+                    "next_offset": next_offset,
                     "cutoff": traversal["cutoff"],
                     "kind": "freshness" if refresh else "continuation",
                     "dispositions": dispositions,
@@ -160,14 +187,29 @@ class CoreProgress:
                     "raw_count": len(dispositions),
                     "accepted_count": len(accepted),
                     "rejected_count": len(dispositions) - len(accepted),
-                    "provider_end": payload["next"] is None,
+                    "provider_end": next_offset is None,
                 })
                 if refresh:
                     # A freshness sample must not erase or starve the deeper checkpoint.
                     state["last_refresh"] = clock
-                else:
-                    deep["offset"] = payload["next"]
-                    deep["exhausted"] = payload["next"] is None
+                traversal["offset"] = next_offset
+                traversal["exhausted"] = next_offset is None
+                query_pages[key] = query_pages.get(key, 0) + 1
+                rejected_only = bool(dispositions) and all(
+                    row["reason"] in {"duplicate", "too_old"} for row in dispositions
+                )
+                # Three attempts still cover the whole source. A duplicate-only
+                # page can use a second slot; deferred queries rotate first next
+                # run via last_served. Never monopolize a multi-query fetch.
+                if (rejected_only and next_offset is not None
+                        and query_pages[key] < (2 if len(queries) > 1 else ATTEMPT_BUDGET)):
+                    pending.insert(0, (key, topic))
+                if len(candidates) >= max_candidates:
+                    self.diagnostics["stop_reason"] = "candidate_budget_reached"
+                    break
+            except CoreTimeBudgetReached:
+                self.diagnostics["stop_reason"] = "time_budget_reached"
+                break
             except urllib.error.HTTPError as error:
                 provider_error = sanitized_provider_error(error, api_key=self.source.api_key)
                 if error.code == 429:
@@ -194,7 +236,8 @@ class CoreProgress:
 
         if not attempted:
             self.diagnostics["stop_reason"] = "traversals_exhausted_until_refresh"
-        elif len(attempted) == len(queries) and self.diagnostics["stop_reason"] == "request_budget_reached":
+        elif (not pending and self.diagnostics["attempts"] < ATTEMPT_BUDGET
+              and self.diagnostics["stop_reason"] == "request_budget_reached"):
             self.diagnostics["stop_reason"] = "query_round_complete"
         self.diagnostics.update(
             deferred_queries=[topic for _, topic in queries if topic not in attempted],
@@ -207,8 +250,11 @@ class CoreProgress:
         retried = False
         delay = self.source.request_delay
         while self.diagnostics["attempts"] < ATTEMPT_BUDGET:
+            wait = (delay if retried else self.source.request_delay) if self.diagnostics["attempts"] else 0
+            if time.monotonic() + wait + self.source.timeout > self.deadline:
+                raise CoreTimeBudgetReached
             if self.diagnostics["attempts"]:
-                time.sleep(delay if retried else self.source.request_delay)
+                time.sleep(wait)
             self.diagnostics["attempts"] += 1
             try:
                 return self.source.fetch_page(topic, **kwargs)

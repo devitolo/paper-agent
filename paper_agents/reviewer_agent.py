@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from http.client import HTTPException
 import tempfile
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -340,14 +342,23 @@ def download_pdf_for_recommendation(recommendation: dict[str, Any], pdf_dir: Pat
 
 
 @telemetry.traced("reviewer.http", "TOOL")
-def fetch_pdf_bytes(url: str, *, timeout: int = 60) -> bytes | None:
+def fetch_pdf_bytes(url: str, *, timeout: int = 60, _visited: set[str] | None = None) -> bytes | None:
+    try:
+        url = normalize_pdf_url(url)
+    except ValueError:
+        telemetry.failure("invalid_url")
+        return None
+    visited = _visited if _visited is not None else set()
+    if url in visited or len(visited) >= 4:
+        return None
+    visited.add(url)
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; paper-agent/0.1)"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = response.read()
             final_url = response.geturl()
             content_type = response.headers.get("content-type", "")
-    except OSError:
+    except (OSError, HTTPException):
         telemetry.failure("network")
         return None
     if data.startswith(b"%PDF") or "application/pdf" in content_type.lower():
@@ -356,10 +367,33 @@ def fetch_pdf_bytes(url: str, *, timeout: int = 60) -> bytes | None:
         return None
     text = data.decode("utf-8", "ignore")
     for pdf_url in extract_pdf_links_from_html(final_url, text):
-        pdf_data = fetch_pdf_bytes(pdf_url, timeout=timeout)
+        pdf_data = fetch_pdf_bytes(pdf_url, timeout=timeout, _visited=visited)
         if pdf_data:
             return pdf_data
     return None
+
+
+def normalize_pdf_url(url: str) -> str:
+    """Encode raw path/query text without decoding or re-signing existing URLs."""
+    # Reject controls before urlsplit can silently discard tabs/newlines. Spaces
+    # are valid publisher data to encode; credentials and non-HTTP schemes aren't.
+    if not isinstance(url, str) or any(ord(c) < 32 or ord(c) == 127 for c in url):
+        raise ValueError("Invalid PDF URL")
+    parts = urllib.parse.urlsplit(url)
+    if (parts.scheme.lower() not in {"http", "https"} or not parts.hostname
+            or parts.username is not None or parts.password is not None
+            or any(c.isspace() for c in parts.netloc)):
+        raise ValueError("Invalid PDF URL")
+    parts.port  # Validate malformed ports before opening a request.
+    # Preserve escapes, '+' and all reserved delimiters, including query order.
+    path = urllib.parse.quote(parts.path, safe="/%:@!$&'()*+,;=-._~")
+    query = urllib.parse.quote(parts.query, safe="%/?@:!$&'()*+,;=-._~")
+    host = parts.netloc.encode("idna").decode("ascii")
+    normalized = urllib.parse.urlunsplit((parts.scheme, host, path, query, parts.fragment))
+    if not query and '?' in url.split('#', 1)[0]:
+        before, separator, fragment = normalized.partition('#')
+        normalized = before + '?' + separator + fragment
+    return normalized
 
 
 def card_from_recommendation(
