@@ -351,8 +351,9 @@ def resolve_existing_paper(connection: sqlite3.Connection, candidate: dict[str, 
     alias = connection.execute('''SELECT p.id,p.canonical_key,p.doi,p.arxiv_id FROM papers p
         JOIN paper_sources s ON s.paper_id=p.id WHERE s.source=? AND s.source_id=?''', (source,sid)).fetchone()
     matches = {r[0]:dict(zip(columns,r)) for r in connection.execute('''SELECT id,canonical_key,doi,arxiv_id
-        FROM papers WHERE canonical_key IN (?,?,?) OR trim(lower(doi)) IN (?,?,?) OR arxiv_id=?''',
+        FROM papers WHERE canonical_key IN (?,?,?,?) OR trim(lower(doi)) IN (?,?,?) OR arxiv_id=?''',
         (key, 'doi:'+doi if doi else None, 'arxiv:'+arxiv if arxiv else None,
+         'core:'+sid if source == 'core' else None,
          doi, 'https://doi.org/'+doi if doi else None, 'doi:'+doi if doi else None, arxiv))}
     if alias: matches[alias[0]] = dict(zip(columns,alias))
     if len(matches) > 1:

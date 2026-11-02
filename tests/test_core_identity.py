@@ -128,6 +128,17 @@ class CoreIdentityTests(unittest.TestCase):
             db.upsert_paper(self.connection,core_work_to_candidate(fixture.work(1,doi='10.999/second')).as_dict())
         self.assertEqual(self.connection.execute('SELECT doi FROM papers').fetchone()[0],'10.999/first')
 
+    def test_preexisting_retargeted_alias_is_not_silently_chosen_over_legacy_identity(self):
+        old=self.known()
+        other,_=db.upsert_paper(self.connection,{'source':'openalex','source_id':'conflict','title':'Second row','doi':'10.999/duplicate'})
+        # Simulate a legacy inconsistency in this disposable DB, not a repair.
+        self.connection.execute("UPDATE paper_sources SET paper_id=? WHERE source='core' AND source_id='1'",(other,))
+        self.connection.commit();before='\n'.join(self.connection.iterdump())
+        with self.assertRaises(db.PaperIdentityConflict):
+            db.upsert_paper(self.connection,core_work_to_candidate(fixture.work(1,doi='10.999/duplicate')).as_dict())
+        self.assertEqual('\n'.join(self.connection.iterdump()),before)
+        self.assertEqual(self.connection.execute('SELECT canonical_key FROM papers WHERE id=?',(old,)).fetchone()[0],'core:1')
+
     def test_duplicate_refresh_is_outside_http_writes_and_rolls_back_with_checkpoint(self):
         self.known()
         def response(*args, **kwargs):
