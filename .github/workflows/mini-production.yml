@@ -63,6 +63,7 @@ jobs:
             tests.test_migration_scheduler \
             tests.test_mini_container_job \
             tests.test_core_progress \
+            tests.test_core_identity \
             tests.test_core_refill \
             tests.test_reviewer_pdf_urls \
             tests.test_pdf_core_refill_adversarial_qa \

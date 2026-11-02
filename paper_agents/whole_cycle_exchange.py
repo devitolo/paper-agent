@@ -135,8 +135,16 @@ def export_delta(db_path, root, state):
             WHERE sr.workflow_cycle_id IN ({marks}) UNION SELECT p.canonical_key FROM curator_evaluations e
             JOIN curator_runs cr ON cr.id=e.curator_run_id JOIN papers p ON p.id=e.paper_id
             WHERE cr.workflow_cycle_id IN ({marks})''',ids+ids)}
-        normalized['papers']=[{k:r[k] for k in r.keys() if k!='id'} for r in c.execute('SELECT * FROM papers') if r['canonical_key'] in keys]
-        normalized['paper_sources']=[{k:r[k] for k in r.keys() if k not in ('id','paper_id')} for r in c.execute('SELECT ps.*,p.canonical_key FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id') if r['canonical_key'] in keys]
+        # Known CORE records may gain an identifier without becoming candidates.
+        # Publish their stable-key metadata so the next AWS-authoritative pull
+        # preserves enrichment. Do not re-export their historical artifacts/runs.
+        identity_keys={r[0] for r in c.execute(f'''SELECT DISTINCT p.canonical_key FROM scout_runs sr
+            JOIN json_each(sr.diagnostics_json,'$.source_diagnostics.identity_refresh_paper_ids') refreshed
+            JOIN papers p ON p.id=refreshed.value WHERE sr.source='core'
+            AND sr.workflow_cycle_id IN ({marks})''',ids)}
+        paper_keys=keys|identity_keys
+        normalized['papers']=[{k:r[k] for k in r.keys() if k!='id'} for r in c.execute('SELECT * FROM papers') if r['canonical_key'] in paper_keys]
+        normalized['paper_sources']=[{k:r[k] for k in r.keys() if k not in ('id','paper_id')} for r in c.execute('SELECT ps.*,p.canonical_key FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id') if r['canonical_key'] in paper_keys]
         summary_seen=set()
         for row in c.execute("SELECT a.*,p.canonical_key FROM artifacts a JOIN papers p ON p.id=a.paper_id WHERE a.artifact_type='triage_summary'"):
             if row['canonical_key'] not in keys: continue

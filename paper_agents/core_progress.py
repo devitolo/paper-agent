@@ -54,6 +54,7 @@ class CoreProgress:
         ))
         self.states = {key: json.loads(value) for key, value in self.original.items()}
         self.pages = []
+        self.identity_refreshes = {}
         self.diagnostics = {
             "mode": "offset_v1",
             "endpoint": source.api_url,
@@ -108,6 +109,8 @@ class CoreProgress:
 
         known_keys = {row[0] for row in self.connection.execute("SELECT canonical_key FROM papers")}
         seen_keys = set(known_keys)
+        seen_source_ids = set()
+        identity_claims = {}
         candidates = []
         attempted = []
         pending = list(queries)
@@ -159,8 +162,22 @@ class CoreProgress:
                 accepted = []
                 for work in payload["results"]:
                     reason, candidate = core_disposition(
-                        work, cutoff=traversal["cutoff"], seen_keys=seen_keys
+                        work, cutoff=traversal["cutoff"], seen_keys=seen_keys,
+                        connection=self.connection, seen_source_ids=seen_source_ids,
                     )
+                    if candidate is not None:
+                        previous = identity_claims.get(candidate.source_id)
+                        claims = ((name, normalizer(getattr(previous, name)) if previous else None,
+                                   normalizer(getattr(candidate, name)))
+                                  for name, normalizer in (('doi',db.normalize_doi),('arxiv_id',db.normalized_arxiv_id)))
+                        claims = list(claims)
+                        if any(old and new and old != new for _,old,new in claims):
+                            raise RuntimeError('CORE returned contradictory identifiers for one source ID; checkpoint withheld')
+                        else:
+                            for name,old,new in claims:
+                                setattr(candidate, name, old or new)
+                                if previous is not None: setattr(previous, name, old or new)
+                            identity_claims.setdefault(candidate.source_id, candidate)
                     dispositions.append({
                         "id": work.get("id"),
                         "reason": reason,
@@ -170,7 +187,16 @@ class CoreProgress:
                         candidate.metadata["query_topic"] = topic
                         canonical_key = db.canonical_key_for_candidate(candidate.as_dict())
                         seen_keys.add(canonical_key)
+                        seen_source_ids.add(candidate.source_id)
                         accepted.append(candidate)
+                    elif reason == 'duplicate' and candidate is not None:
+                        owner = db.resolve_existing_paper(self.connection, candidate.as_dict())
+                        seen_keys.add(db.canonical_key_for_candidate(candidate.as_dict()))
+                        seen_source_ids.add(candidate.source_id)
+                        if owner is not None:
+                            self.identity_refreshes[candidate.source_id] = (owner['id'], candidate.as_dict())
+                    elif reason == 'identity_conflict':
+                        errors.append('CORE source identity conflicts with stored identifiers; record skipped')
                 page = {
                     "offset": traversal["offset"],
                     "next_offset": next_offset,
@@ -242,6 +268,7 @@ class CoreProgress:
         self.diagnostics.update(
             deferred_queries=[topic for _, topic in queries if topic not in attempted],
             unique_count=len(candidates),
+            identity_refresh_paper_ids=sorted({owner for owner, _ in self.identity_refreshes.values()}),
         )
         return candidates
 
@@ -316,6 +343,8 @@ class CoreProgress:
         ))
         if actual != self.original:
             raise RuntimeError("Concurrent CORE retrieval changed state; retry later")
+        for expected_id, candidate in self.identity_refreshes.values():
+            db.enrich_existing_paper_identity(self.connection, candidate, expected_id)
         for key, value in self.states.items():
             self.connection.execute(
                 "INSERT OR REPLACE INTO core_search_state VALUES (?, ?)",
@@ -329,7 +358,7 @@ class CoreProgress:
             )
 
 
-def core_disposition(work, *, cutoff, seen_keys):
+def core_disposition(work, *, cutoff, seen_keys, connection=None, seen_source_ids=()):
     candidate = core_work_to_candidate(work)
     if not candidate.title or not candidate.source_id:
         return "missing_title_or_source_id", None
@@ -344,8 +373,12 @@ def core_disposition(work, *, cutoff, seen_keys):
             except ValueError:
                 return "invalid_payload", None
     canonical_key = db.canonical_key_for_candidate(candidate.as_dict())
-    if canonical_key in seen_keys:
-        return "duplicate", None
+    try:
+        owner = db.resolve_existing_paper(connection, candidate.as_dict()) if connection is not None else None
+    except db.PaperIdentityConflict:
+        return 'identity_conflict', None
+    if owner is not None or canonical_key in seen_keys or candidate.source_id in seen_source_ids:
+        return "duplicate", candidate
     return "accepted", candidate
 
 
