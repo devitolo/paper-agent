@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from paper_agents import whole_cycle_exchange as exchange
 from tests.sync_exchange import test_identity_hold as fixture
+from tests.sync_exchange import test_health_operational_e2e_qa as health_fixture
 
 
 class IdentityHoldAdversarialQA(unittest.TestCase):
@@ -80,6 +81,19 @@ class IdentityHoldAdversarialQA(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'invalid sequence'):
                     exchange.next_sequence(self.state)
         self.assertFalse((self.state/'reserved-sequence.json').exists())
+
+
+class IdentityHoldCrossRoleRuntimeQA(unittest.TestCase):
+    def test_exact_aws_rejection_hold_fresh_restore_and_next_source_shell_continues(self):
+        source=os.environ.get('QA_HEALTH_AWS_SOURCE')
+        if not source:raise RuntimeError('QA_HEALTH_AWS_SOURCE must name the separately frozen AWS receiver')
+        helper=health_fixture.OperationalHealthE2EQA()
+        helper.aws_source=Path(source).resolve()
+        helper.setUp();self.addCleanup(helper.doCleanups)
+        helper.t.shell('recover')
+        # Reuse the established full shell scenario with a separately imported
+        # AWS subprocess rather than the Mini checkout's in-process receiver.
+        fixture.IdentityHoldHttpsTests.test_real_rejection_restore_next_source_receipt(helper.t)
 
 
 if __name__=='__main__':unittest.main()
