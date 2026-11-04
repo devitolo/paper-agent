@@ -68,3 +68,20 @@ tests passed, including the real TLS receiver and actual cron shell wrapper with
 only Docker/inference substituted by the established isolated fixture. This is not
 a live host, production Docker, or production deployment test. Existing resource
 cleanup warnings were emitted by the test suite. `git diff --check` passed with no output.
+
+## Independent QA correction — November 3, 2026
+
+Tester reproduced a crash after the durable hold marker was committed but before
+recovery removed the pending slot. The original `push()` guard covered only new
+outbox creation, so a direct push could retransmit the held pending batch.
+The restore-required guard now runs unconditionally at entry to both `push()` and
+`deliver_outbox()`, before transport or receipt/sequence updates. The independent
+six-case adversarial QA module is included unchanged, plus a direct lower-level
+delivery regression. Both assert zero transport calls and unchanged acknowledged
+sequence/evidence at this crash boundary.
+
+Final local command adds `tests.sync_exchange.test_identity_hold_adversarial_qa` to
+the validation command above: **86 tests run, 85 passed, 1 existing Linux-only skip**,
+no failures/errors (17.327 seconds). `git diff --check` passes. Independent Linux and
+frozen-AWS continuation verification of this correction is requested; no rollout,
+replay, push or production mutation has occurred.

@@ -92,6 +92,17 @@ class IdentityHoldTests(unittest.TestCase):
         exchange.resume_identity_hold(self.state)
         self.assertFalse((self.state/'pipeline-outbox.json').exists())
 
+    def test_direct_delivery_cannot_send_durably_held_pending_payload(self):
+        with patch.object(exchange,'resume_identity_hold',side_effect=OSError('crash')):
+            with self.assertRaises(OSError): self.hold()
+        with patch.object(exchange,'request') as transport:
+            with self.assertRaisesRegex(ValueError,'fresh authoritative input'):
+                exchange.deliver_outbox(self.state,'https://aws',self.state/'pipeline-outbox.json',
+                                        clear_active=True,transport=transport)
+            transport.assert_not_called()
+        self.assertEqual((self.state/'pipeline-outbox.json').read_bytes(),self.raw)
+        self.assertEqual(json.loads((self.state/'sequence.json').read_text())['sequence'],32)
+
     def test_evidence_corruption_blocks_slot_clear(self):
         with patch.object(exchange,'resume_identity_hold',side_effect=OSError('crash')):
             with self.assertRaises(OSError): self.hold()

@@ -302,11 +302,11 @@ def pull_after_identity_hold(db_path, root, state, url):
 
 def push(db_path, root, state, url, *, transport=request):
     state=Path(state); outbox=state/'pipeline-outbox.json'
+    if (state/'identity-restore-required.json').exists():
+        raise ValueError('held identity requires fresh authoritative input')
     if not outbox.exists():
         cycle=json.loads((state/'active-cycle.json').read_text())
         payload=export_delta(db_path,root,state)
-        if (state/'identity-restore-required.json').exists():
-            raise ValueError('held identity requires fresh authoritative input')
         seq=next_sequence(state)
         payload.update(input_revision=cycle['input_revision'],producer_id=os.environ.get('PAPER_AGENT_SYNC_PRODUCER','mini-production'),environment=os.environ.get('PAPER_AGENT_SYNC_ENVIRONMENT','production'),run_sequence=seq,batch_id=cycle['batch_id'])
         # Persist identity and exact payload before any network request.
@@ -315,6 +315,9 @@ def push(db_path, root, state, url, *, transport=request):
 
 
 def deliver_outbox(state,url,outbox,*,clear_active=False,transport=request):
+    state=Path(state)
+    if (state/'identity-restore-required.json').exists():
+        raise ValueError('held identity requires fresh authoritative input')
     payload=json.loads(outbox.read_text()); key=payload['batch_id']
     receipt=transport(url,'POST',encoded(payload),os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'],'/sync/pipeline-results',key)
     if receipt.get('status')!='applied' or receipt.get('batch_key')!=key: raise ValueError('invalid pipeline receipt')
