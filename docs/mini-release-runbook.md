@@ -174,3 +174,11 @@ Expected native service result is `inactive` for both services.
 Then verify the changed release behavior within scope. For an OpenAlex release,
 use the bounded OpenAlex acceptance documented in that release package before
 declaring production success.
+
+The automated updater requires both role-specific readiness and Docker health.
+After readiness succeeds, it waits up to five minutes for the app container's
+periodic Docker check to report `running healthy`; temporary `starting` or
+`unhealthy` states can converge during this window. Missing checks or stopped
+containers fail the release. A timeout captures health/log evidence and exits
+through the existing automatic rollback path. Final verification rechecks health
+before recording deployment success.
