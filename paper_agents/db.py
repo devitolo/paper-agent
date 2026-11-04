@@ -335,8 +335,60 @@ def canonical_key_for_candidate(candidate: dict[str, Any]) -> str:
     return f"{source}:{source_id}"
 
 
+class PaperIdentityConflict(ValueError):
+    """Provider source identity and bibliographic identifiers disagree."""
+
+
+def resolve_existing_paper(connection: sqlite3.Connection, candidate: dict[str, Any]) -> dict[str, Any] | None:
+    """Read-only identity resolution. Never merge rows or reassign an alias."""
+    source = str(candidate.get('source') or 'unknown')
+    sid = str(candidate.get('source_id') or candidate.get('url') or candidate.get('title') or 'unknown')
+    key = canonical_key_for_candidate(candidate)
+    doi = normalize_doi(candidate.get('doi'))
+    arxiv = normalized_arxiv_id(candidate.get('arxiv_id'))
+    if not arxiv and source == 'arxiv': arxiv = normalized_arxiv_id(candidate.get('source_id'))
+    columns = ('id','canonical_key','doi','arxiv_id')
+    alias = connection.execute('''SELECT p.id,p.canonical_key,p.doi,p.arxiv_id FROM papers p
+        JOIN paper_sources s ON s.paper_id=p.id WHERE s.source=? AND s.source_id=?''', (source,sid)).fetchone()
+    matches = {r[0]:dict(zip(columns,r)) for r in connection.execute('''SELECT id,canonical_key,doi,arxiv_id
+        FROM papers WHERE canonical_key IN (?,?,?,?) OR trim(lower(doi)) IN (?,?,?) OR arxiv_id=?''',
+        (key, 'doi:'+doi if doi else None, 'arxiv:'+arxiv if arxiv else None,
+         'core:'+sid if source == 'core' else None,
+         doi, 'https://doi.org/'+doi if doi else None, 'doi:'+doi if doi else None, arxiv))}
+    if alias: matches[alias[0]] = dict(zip(columns,alias))
+    if len(matches) > 1:
+        raise PaperIdentityConflict('Source alias and identifiers resolve to different papers')
+    row = next(iter(matches.values()), None)
+    if row:
+        existing_doi = normalize_doi(row['doi']) or (normalize_doi(row['canonical_key'][4:]) if row['canonical_key'].startswith('doi:') else None)
+        existing_arxiv = normalized_arxiv_id(row['arxiv_id']) or (row['canonical_key'][6:] if row['canonical_key'].startswith('arxiv:') else None)
+        if (doi and existing_doi and doi != existing_doi) or (arxiv and existing_arxiv and arxiv != existing_arxiv):
+            raise PaperIdentityConflict('Incoming identifiers conflict with the existing paper')
+    return row
+
+
+def enrich_existing_paper_identity(connection, candidate, expected_id):
+    """Refresh a known duplicate inside Scout's checkpoint transaction only."""
+    row = resolve_existing_paper(connection, candidate)
+    if row is None or row['id'] != expected_id:
+        raise PaperIdentityConflict('Paper identity changed before CORE checkpoint')
+    connection.execute('''UPDATE papers SET
+        doi=CASE WHEN doi IS NULL OR trim(doi)='' THEN ? ELSE doi END,
+        arxiv_id=CASE WHEN arxiv_id IS NULL OR trim(arxiv_id)='' THEN ? ELSE arxiv_id END
+        WHERE id=?''', (normalize_doi(candidate.get('doi')), normalized_arxiv_id(candidate.get('arxiv_id')), expected_id))
+    # Add a newly observed cross-source alias, but do not overwrite stored rich
+    # metadata on an existing duplicate just to add an identifier.
+    source = str(candidate.get('source') or 'unknown')
+    sid = str(candidate.get('source_id') or candidate.get('url') or candidate.get('title') or 'unknown')
+    if not connection.execute('SELECT 1 FROM paper_sources WHERE source=? AND source_id=?', (source,sid)).fetchone():
+        upsert_paper_source(connection, expected_id, candidate)
+
+
 def upsert_paper(connection: sqlite3.Connection, candidate: dict[str, Any]) -> tuple[int, bool]:
     canonical_key = canonical_key_for_candidate(candidate)
+    existing = resolve_existing_paper(connection, candidate)
+    if existing:
+        canonical_key = existing['canonical_key']  # Keep the identity AWS already knows.
     arxiv_id = normalized_arxiv_id(candidate.get("arxiv_id"))
     if not arxiv_id and candidate.get("source") == "arxiv":
         arxiv_id = normalized_arxiv_id(candidate.get("source_id"))
@@ -384,6 +436,9 @@ def upsert_paper(connection: sqlite3.Connection, candidate: dict[str, Any]) -> t
 def upsert_paper_source(connection: sqlite3.Connection, paper_id: int, candidate: dict[str, Any]) -> None:
     source = str(candidate.get("source") or "unknown")
     source_id = str(candidate.get("source_id") or candidate.get("url") or candidate.get("title") or "unknown")
+    owner = connection.execute('SELECT paper_id FROM paper_sources WHERE source=? AND source_id=?', (source,source_id)).fetchone()
+    if owner and owner[0] != paper_id:
+        raise PaperIdentityConflict('Source alias belongs to a different paper')
     metadata = dict(candidate.get("metadata") or {})
     # A provider refresh may omit an original title added after discovery.
     if not metadata.get("original_title"):
@@ -398,15 +453,15 @@ def upsert_paper_source(connection: sqlite3.Connection, paper_id: int, candidate
                 previous = {}
             if isinstance(previous, dict) and previous.get("original_title"):
                 metadata["original_title"] = previous["original_title"]
-    connection.execute(
+    cursor = connection.execute(
         """
         INSERT INTO paper_sources (paper_id, source, source_id, url, pdf_url, metadata_json)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(source, source_id) DO UPDATE SET
-            paper_id = excluded.paper_id,
             url = excluded.url,
             pdf_url = excluded.pdf_url,
             metadata_json = excluded.metadata_json
+        WHERE paper_sources.paper_id = excluded.paper_id
         """,
         (
             paper_id,
@@ -417,6 +472,8 @@ def upsert_paper_source(connection: sqlite3.Connection, paper_id: int, candidate
             json_dumps(metadata),
         ),
     )
+    if cursor.rowcount != 1:
+        raise PaperIdentityConflict('Source alias belongs to a different paper')
 
 
 def discovered_canonical_keys(db_path: Path = DEFAULT_DB_PATH) -> set[str]:

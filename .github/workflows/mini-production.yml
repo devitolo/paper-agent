@@ -53,6 +53,8 @@ jobs:
         run: |
           python3 -m unittest \
             tests.sync_exchange.test_whole_cycle \
+            tests.sync_exchange.test_identity_hold \
+            tests.sync_exchange.test_identity_hold_adversarial_qa \
             tests.sync_exchange.test_health_operational_e2e_qa \
             tests.test_operational_evidence \
             tests.test_curator_v3 \
@@ -63,6 +65,9 @@ jobs:
             tests.test_migration_scheduler \
             tests.test_mini_container_job \
             tests.test_core_progress \
+            tests.test_core_identity \
+            tests.test_core_identity_adversarial_qa \
+            tests.sync_exchange.test_core_identity_e2e_qa \
             tests.test_core_refill \
             tests.test_reviewer_pdf_urls \
             tests.test_pdf_core_refill_adversarial_qa \

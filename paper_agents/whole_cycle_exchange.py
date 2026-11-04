@@ -9,6 +9,8 @@ import argparse
 from contextlib import closing
 from datetime import datetime, timezone, timedelta
 import hashlib
+import html
+import io
 import json
 import os
 from pathlib import Path
@@ -135,8 +137,16 @@ def export_delta(db_path, root, state):
             WHERE sr.workflow_cycle_id IN ({marks}) UNION SELECT p.canonical_key FROM curator_evaluations e
             JOIN curator_runs cr ON cr.id=e.curator_run_id JOIN papers p ON p.id=e.paper_id
             WHERE cr.workflow_cycle_id IN ({marks})''',ids+ids)}
-        normalized['papers']=[{k:r[k] for k in r.keys() if k!='id'} for r in c.execute('SELECT * FROM papers') if r['canonical_key'] in keys]
-        normalized['paper_sources']=[{k:r[k] for k in r.keys() if k not in ('id','paper_id')} for r in c.execute('SELECT ps.*,p.canonical_key FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id') if r['canonical_key'] in keys]
+        # Known CORE records may gain an identifier without becoming candidates.
+        # Publish their stable-key metadata so the next AWS-authoritative pull
+        # preserves enrichment. Do not re-export their historical artifacts/runs.
+        identity_keys={r[0] for r in c.execute(f'''SELECT DISTINCT p.canonical_key FROM scout_runs sr
+            JOIN json_each(sr.diagnostics_json,'$.source_diagnostics.identity_refresh_paper_ids') refreshed
+            JOIN papers p ON p.id=refreshed.value WHERE sr.source='core'
+            AND sr.workflow_cycle_id IN ({marks})''',ids)}
+        paper_keys=keys|identity_keys
+        normalized['papers']=[{k:r[k] for k in r.keys() if k!='id'} for r in c.execute('SELECT * FROM papers') if r['canonical_key'] in paper_keys]
+        normalized['paper_sources']=[{k:r[k] for k in r.keys() if k not in ('id','paper_id')} for r in c.execute('SELECT ps.*,p.canonical_key FROM paper_sources ps JOIN papers p ON p.id=ps.paper_id') if r['canonical_key'] in paper_keys]
         summary_seen=set()
         for row in c.execute("SELECT a.*,p.canonical_key FROM artifacts a JOIN papers p ON p.id=a.paper_id WHERE a.artifact_type='triage_summary'"):
             if row['canonical_key'] not in keys: continue
@@ -155,12 +165,149 @@ def export_delta(db_path, root, state):
     return {'schema':1,'normalized':normalized,'results':[],'operational':operational}
 
 
+def _file_hash(path):
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def _sync_directory(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def next_sequence(state):
+    """Reserve identity independently of the last acknowledged publication."""
+    state = Path(state)
+    values = [0]
+    for name in ('sequence.json', 'reserved-sequence.json'):
+        if (state/name).exists():
+            value = json.loads((state/name).read_text())['sequence']
+            if type(value) is not int or value < 0:
+                raise ValueError('invalid sequence state')
+            values.append(value)
+    value = max(values) + 1
+    atomic_json(state/'reserved-sequence.json', {'sequence': value})
+    _sync_directory(state)
+    return value
+
+
+def resume_identity_hold(state):
+    """Finish a committed hold after interruption, without sending its payload."""
+    state = Path(state)
+    marker = state/'identity-restore-required.json'
+    if not marker.exists():
+        return None
+    record = json.loads(marker.read_text())
+    name = record['capsule']
+    if not isinstance(name, str) or len(name) != 64 or any(ch not in '0123456789abcdef' for ch in name):
+        raise ValueError('invalid held capsule')
+    capsule = state/'held'/name
+    manifest = json.loads((capsule/'manifest.json').read_text())
+    for name, digest in manifest['files'].items():
+        if Path(name).name != name or (capsule/name).is_symlink() or _file_hash(capsule/name) != digest:
+            raise ValueError('held evidence integrity failed')
+    outbox = state/'pipeline-outbox.json'
+    if outbox.exists():
+        if hashlib.sha256(outbox.read_bytes()).hexdigest() != manifest['files']['pipeline-outbox.json']:
+            raise ValueError('pending outbox differs from held evidence')
+    active = state/'active-cycle.json'
+    if active.exists():
+        if json.loads(active.read_text())['batch_id'] != manifest['batch_id']:
+            raise ValueError('another cycle blocks held recovery')
+    outbox.unlink(missing_ok=True)
+    active.unlink(missing_ok=True)
+    _sync_directory(state)
+    result = {'status': 'held-needs-review', 'batch_id': manifest['batch_id'],
+              'capsule': str(capsule.relative_to(state)), 'restore_required': True}
+    atomic_json(state/'recovery-status.json', result)
+    return result
+
+
+def hold_identity_outbox(db_path, root, state, error):
+    """Hold only the receiver's explicit identity rejection; never acknowledge it."""
+    if getattr(error, 'code', None) != 422:
+        return None
+    message = 'source alias belongs to a different paper'
+    detail = error.read(65537).decode('utf-8', 'replace')
+    exact = str(getattr(error, 'reason', '')) == message
+    try:
+        exact = exact or json.loads(detail) == {'error': message}
+    except (ValueError, TypeError):
+        exact = exact or ('<p>Message: '+message+'.</p>') in html.unescape(detail)
+    if not exact:
+        return None
+    state, root = Path(state), Path(root)
+    outbox = state/'pipeline-outbox.json'
+    raw = outbox.read_bytes(); payload = json.loads(raw)
+    sequence = payload['run_sequence']
+    if type(sequence) is not int or sequence < 1:
+        raise ValueError('invalid held sequence')
+    # Content-derived directory names cannot escape the state directory.
+    capsule_name = hashlib.sha256(raw).hexdigest()
+    held = state/'held'; held.mkdir(exist_ok=True)
+    capsule = held/capsule_name
+    if not capsule.exists():
+        with tempfile.TemporaryDirectory(dir=held, prefix='.staging-') as directory:
+            stage = Path(directory)
+            (stage/'pipeline-outbox.json').write_bytes(raw)
+            with closing(sqlite3.connect(db_path)) as current, closing(sqlite3.connect(stage/'paper_agent.db')) as saved:
+                current.backup(saved)
+                if saved.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                    raise ValueError('held database integrity failed')
+                paths = saved.execute('SELECT DISTINCT path FROM artifacts').fetchall()
+            artifacts = []
+            for index, (name,) in enumerate(paths):
+                source = Path(name); source = source if source.is_absolute() else root/source
+                if not source.resolve().is_relative_to(root.resolve()) or source.is_symlink():
+                    raise ValueError('held artifact outside application root')
+                target = 'artifact-'+str(index)
+                shutil.copyfile(source, stage/target)
+                artifacts.append({'original_path': name, 'file': target})
+            for name in ('active-cycle.json',):
+                if (state/name).exists():
+                    shutil.copyfile(state/name, stage/name)
+            files = {f.name: _file_hash(f) for f in stage.iterdir()}
+            atomic_json(stage/'manifest.json', {'status': 'Held / Needs review',
+                'reason': message, 'batch_id': payload['batch_id'],
+                'input_revision': payload['input_revision'], 'run_sequence': sequence,
+                'files': files, 'artifacts': artifacts, 'automatic_replay': False})
+            for file in stage.iterdir():
+                with file.open('rb') as stream:
+                    os.fsync(stream.fileno())
+            _sync_directory(stage)
+            stage.rename(capsule)
+            _sync_directory(held)
+            # TemporaryDirectory tolerates its path having been renamed.
+    reserved = state/'reserved-sequence.json'
+    previous = json.loads(reserved.read_text())['sequence'] if reserved.exists() else 0
+    atomic_json(reserved, {'sequence': max(previous, sequence)})
+    atomic_json(state/'identity-restore-required.json', {'capsule': capsule_name})
+    _sync_directory(state)
+    return resume_identity_hold(state)
+
+
+def pull_after_identity_hold(db_path, root, state, url):
+    """Use the existing authoritative replacement once, never a contaminated merge."""
+    state = Path(state)
+    resume_identity_hold(state)
+    backup = download_backup(url, state/'snapshots', endpoint='/sync/backup')
+    result = pull(db_path, root, state, backup)
+    (state/'identity-restore-required.json').unlink()
+    _sync_directory(state)
+    return result
+
+
 def push(db_path, root, state, url, *, transport=request):
     state=Path(state); outbox=state/'pipeline-outbox.json'
+    if (state/'identity-restore-required.json').exists():
+        raise ValueError('held identity requires fresh authoritative input')
     if not outbox.exists():
         cycle=json.loads((state/'active-cycle.json').read_text())
         payload=export_delta(db_path,root,state)
-        seq=json.loads((state/'sequence.json').read_text())['sequence']+1 if (state/'sequence.json').exists() else 1
+        seq=next_sequence(state)
         payload.update(input_revision=cycle['input_revision'],producer_id=os.environ.get('PAPER_AGENT_SYNC_PRODUCER','mini-production'),environment=os.environ.get('PAPER_AGENT_SYNC_ENVIRONMENT','production'),run_sequence=seq,batch_id=cycle['batch_id'])
         # Persist identity and exact payload before any network request.
         atomic_json(outbox,payload)
@@ -168,6 +315,9 @@ def push(db_path, root, state, url, *, transport=request):
 
 
 def deliver_outbox(state,url,outbox,*,clear_active=False,transport=request):
+    state=Path(state)
+    if (state/'identity-restore-required.json').exists():
+        raise ValueError('held identity requires fresh authoritative input')
     payload=json.loads(outbox.read_text()); key=payload['batch_id']
     receipt=transport(url,'POST',encoded(payload),os.environ['PAPER_AGENT_SYNC_SHARED_SECRET'],'/sync/pipeline-results',key)
     if receipt.get('status')!='applied' or receipt.get('batch_key')!=key: raise ValueError('invalid pipeline receipt')
@@ -186,7 +336,7 @@ def publish_health(db_path,root,state,url,*,transport=request):
     """Publish actual retained seven-day facts only; never run or restore discovery."""
     from .operational_evidence import collect
     state=Path(state);state.mkdir(parents=True,exist_ok=True)
-    if (state/'pipeline-outbox.json').exists() or (state/'active-cycle.json').exists():
+    if any((state/name).exists() for name in ('pipeline-outbox.json','active-cycle.json','identity-restore-required.json')):
         raise ValueError('active pipeline blocks operational publication')
     outbox=state/'health-outbox.json'
     if not outbox.exists():
@@ -198,12 +348,12 @@ def publish_health(db_path,root,state,url,*,transport=request):
         with connect_db(db_path) as c:
             c.row_factory=sqlite3.Row
             facts=collect(c,root,{'baseline':{'workflow_cycles':0},'started_at':since})
-        sequence=json.loads((state/'sequence.json').read_text())['sequence'] if (state/'sequence.json').exists() else 0
+        sequence=next_sequence(state)
         payload={'schema':1,'results':[],'normalized':{section:[] for section in SECTIONS},
                  'operational':facts,'input_revision':snapshot['revision'],
                  'producer_id':os.environ.get('PAPER_AGENT_SYNC_PRODUCER','mini-production'),
                  'environment':os.environ.get('PAPER_AGENT_SYNC_ENVIRONMENT','production'),
-                 'run_sequence':sequence+1,'batch_id':'health-'+uuid.uuid4().hex}
+                 'run_sequence':sequence,'batch_id':'health-'+uuid.uuid4().hex}
         atomic_json(outbox,payload)
     return deliver_outbox(state,url,outbox,transport=transport)
 
@@ -277,6 +427,7 @@ def main(argv=None):
         elif a.command=='recover':
             result=recover(a.state_dir, 'scheduled source failure')
         elif a.command=='retry':
+            resume_identity_hold(a.state_dir)
             if (a.state_dir/'health-outbox.json').exists():
                 publish_health(a.db_path,a.root,a.state_dir,a.aws_url)
             if not (a.state_dir/'pipeline-outbox.json').exists():
@@ -285,13 +436,22 @@ def main(argv=None):
                 try:
                     result=push(a.db_path,a.root,a.state_dir,a.aws_url)
                 except HTTPError as error:
-                    result=quarantine_stale_outbox(a.state_dir,error)
+                    # Each classifier receives the same bounded response bytes.
+                    body=error.read(65537)
+                    original=error
+                    error=HTTPError(original.url,original.code,original.reason,original.headers,io.BytesIO(body))
+                    result=hold_identity_outbox(a.db_path,a.root,a.state_dir,error)
+                    if result is None:
+                        error=HTTPError(original.url,original.code,original.reason,original.headers,io.BytesIO(body))
+                        result=quarantine_stale_outbox(a.state_dir,error)
                     if result is None:
                         raise
         elif a.command=='pull':
             if any((a.state_dir/name).exists() for name in ('pipeline-outbox.json','active-cycle.json','health-outbox.json')):
                 raise ValueError('unfinished cycle blocks pull; recover/publish first')
-            if os.environ.get('PAPER_AGENT_ROUTINE_SYNC') == '1':
+            if (a.state_dir/'identity-restore-required.json').exists():
+                result=pull_after_identity_hold(a.db_path,a.root,a.state_dir,a.aws_url)
+            elif os.environ.get('PAPER_AGENT_ROUTINE_SYNC') == '1':
                 result=pull_routine(a.db_path, a.root, a.state_dir, download_routine_snapshot(a.aws_url))
             else:
                 backup=download_backup(a.aws_url,a.state_dir/'snapshots',endpoint='/sync/backup')
