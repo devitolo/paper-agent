@@ -235,6 +235,64 @@ runtime_readiness fixture
                     env={**__import__('os').environ,'ROLE':role,'EXPECTED':check},capture_output=True,text=True)
                 self.assertEqual(result.returncode,0,result.stderr)
 
+    def test_docker_health_wait_accepts_only_healthy_and_allows_convergence(self):
+        script=(ROOT / "scripts/mini_production_update.sh").read_text()
+        helper='wait_app_health() {'+script.split('wait_app_health() {',1)[1].split('\n}\n',1)[0]+'\n}\n'
+        cases=((['running healthy'],0,0),
+               (['running starting','running unhealthy','running healthy'],30,0),
+               (['running unhealthy'],0,1),
+               (['running starting'],0,1),
+               (['running missing'],0,1),
+               (['exited unhealthy'],0,1),
+               (['unavailable'],0,1))
+        for states,timeout,expected in cases:
+            with self.subTest(states=states), tempfile.TemporaryDirectory() as directory:
+                state=Path(directory)/'states';state.write_text('\n'.join(states)+'\n')
+                fixture='''
+docker() {
+  local status
+  IFS= read -r status < "$STATUS_FILE"
+  tail -n +2 "$STATUS_FILE" > "$STATUS_FILE.next"
+  mv "$STATUS_FILE.next" "$STATUS_FILE"
+  [[ "$status" != unavailable ]] || return 1
+  printf '%s\n' "$status"
+}
+sleep() { :; }
+wait_app_health "$TIMEOUT"
+'''
+                result=subprocess.run(['bash','-eu','-c',helper+fixture],
+                    env={**os.environ,'STATUS_FILE':str(state),'TIMEOUT':str(timeout)},
+                    capture_output=True,text=True,timeout=5)
+                self.assertEqual(result.returncode,expected,result.stdout+result.stderr)
+
+    def test_health_gate_failure_exits_before_success_and_uses_rollback_trap(self):
+        script=(ROOT / "scripts/mini_production_update.sh").read_text()
+        block=script.split('phase_start "docker health"',1)[1].split('phase_start "post deploy checks"',1)[0]
+        fixture='''
+set -e
+trap 'code=$?; if [[ "$code" != 0 ]]; then echo rollback-invoked; fi' EXIT
+wait_app_health() { return 1; }
+docker() { return 0; }
+phase_end() { :; }
+compose=(true)
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            result=subprocess.run(['bash','-c',fixture+block+'echo success-marker'],
+                env={**os.environ,'RELEASE_DIR':directory},capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('rollback-invoked',result.stdout)
+            self.assertNotIn('success-marker',result.stdout)
+            self.assertTrue((Path(directory)/'app-health-failure.json').exists())
+        self.assertLess(script.index('phase_start "docker health"'),script.index('DEPLOYMENT_SUCCESS=1'))
+
+    def test_final_health_regression_refuses_success(self):
+        script=(ROOT / "scripts/mini_production_update.sh").read_text()
+        check='if [[ "$verification_status" != "running healthy" ]]; then'+script.split(
+            'if [[ "$verification_status" != "running healthy" ]]; then',1)[1].split('\nfi',1)[0]+'\nfi\n'
+        for status,expected in (('running healthy',0),('running unhealthy',1),('exited healthy',1)):
+            result=subprocess.run(['bash','-c',check],env={**os.environ,'verification_status':status},capture_output=True,text=True)
+            self.assertEqual(result.returncode,expected,result.stderr)
+
     def test_production_update_canonicalizes_ollama_image_digest(self):
         script = (ROOT / "scripts/mini_production_update.sh").read_text(encoding="utf-8")
         self.assertIn('old_ollama_image=$(sed -n', script)

@@ -110,6 +110,26 @@ runtime_readiness() {
   "$@" exec -T app python -m paper_agents.package_runtime "$check"
 }
 
+# Docker's periodic probe may converge after the direct readiness check succeeds.
+wait_app_health() {
+  local timeout=${1:-300} deadline status
+  deadline=$((SECONDS + timeout))
+  while :; do
+    status=$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' paper-mini-production-app-1 2>/dev/null) || status=unavailable
+    case "$status" in
+      "running healthy") return 0 ;;
+      "running starting"|"running unhealthy"|unavailable) ;;
+      *) echo "App Docker health cannot pass: $status" >&2; return 1 ;;
+    esac
+    if [[ "$SECONDS" -ge "$deadline" ]]; then
+      echo "App Docker health timed out: $status" >&2
+      return 1
+    fi
+    echo "Waiting for app Docker health: $status"
+    sleep 3
+  done
+}
+
 mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
 exec 9>"$DEPLOY_LOCK_FILE"
 if ! flock -n -x 9; then
@@ -622,6 +642,16 @@ done
 runtime_role=$("${compose[@]}" exec -T app printenv PAPER_AGENT_RUNTIME_ROLE)
 phase_end
 
+phase_start "docker health"
+if ! wait_app_health 300; then
+  docker inspect --format '{{json .State.Health}}' paper-mini-production-app-1 \
+    > "$RELEASE_DIR/app-health-failure.json" 2>&1 || true
+  "${compose[@]}" logs --no-color --tail=200 app > "$RELEASE_DIR/app-health-failure.log" 2>&1 || true
+  echo "App Docker health failed. Evidence: $RELEASE_DIR" >&2
+  exit 1
+fi
+phase_end
+
 phase_start "post deploy checks"
 if [[ "$runtime_role" == pipeline ]]; then
   "${compose[@]}" exec -T app python -m paper_agents.package_runtime check-pipeline \
@@ -693,6 +723,10 @@ docker inspect paper-mini-production-app-1 > "$RELEASE_DIR/after-app-inspect.jso
 
 verification_revision=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' paper-mini-production-app-1)
 verification_status=$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' paper-mini-production-app-1)
+if [[ "$verification_status" != "running healthy" ]]; then
+  echo "App Docker health regressed before release verification: $verification_status" >&2
+  exit 1
+fi
 verification_image=$(docker inspect --format '{{.Config.Image}}' paper-mini-production-app-1)
 verification_arxiv_progress=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_ARXIV_PROGRESS:-unset}"')
 verification_openalex_cursor=$("${compose[@]}" exec -T app sh -lc 'printf %s "${PAPER_OPENALEX_CURSOR:-unset}"')
