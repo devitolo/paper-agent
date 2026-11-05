@@ -66,6 +66,7 @@ jobs:
             tests.test_mini_container_job \
             tests.test_core_progress \
             tests.test_core_identity \
+            tests.test_core_identity_repair \
             tests.test_core_identity_adversarial_qa \
             tests.sync_exchange.test_core_identity_e2e_qa \
             tests.test_core_refill \

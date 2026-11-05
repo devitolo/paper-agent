@@ -112,7 +112,7 @@ class IdentityHoldTests(unittest.TestCase):
 
     def test_failed_restore_stays_required(self):
         self.hold()
-        with patch.object(exchange,'download_backup',side_effect=OSError('offline')):
+        with patch.object(exchange,'download_routine_snapshot',side_effect=OSError('offline')):
             with self.assertRaises(OSError): exchange.pull_after_identity_hold(self.db,self.root,self.state,'https://aws')
         self.assertTrue((self.state/'identity-restore-required.json').exists())
 
@@ -172,8 +172,8 @@ class IdentityHoldTests(unittest.TestCase):
 
     def test_restore_failure_after_download_keeps_required_marker(self):
         self.hold()
-        with patch.object(exchange,'download_backup',return_value=self.root/'backup'), \
-             patch.object(exchange,'pull',side_effect=ValueError('invalid snapshot')):
+        with patch.object(exchange,'download_routine_snapshot',return_value={}), \
+             patch.object(exchange,'pull_routine',side_effect=ValueError('invalid snapshot')):
             with self.assertRaises(ValueError):
                 exchange.pull_after_identity_hold(self.db,self.root,self.state,'https://aws')
         self.assertTrue((self.state/'identity-restore-required.json').exists())
@@ -188,18 +188,20 @@ class IdentityHoldHttpsTests(unittest.TestCase):
     stages=Fixture.stages
 
     def test_real_rejection_restore_next_source_receipt(self):
+        with connect_db(self.db) as c:
+            c.execute("UPDATE papers SET canonical_key='core:same' WHERE id=?",(self.pid,))
         self.shell('pull')
         with connect_db(self.db) as c:
             c.execute("INSERT INTO paper_sources(paper_id,source,source_id) VALUES(?,'core','same')",(self.pid,))
         with connect_db(self.mdb) as c:
-            pid=c.execute("INSERT INTO papers(canonical_key,title) VALUES('doi:new','Duplicate')").lastrowid
+            pid=c.execute("INSERT INTO papers(canonical_key,title,doi) VALUES('doi:10.1234/held-paper','Old','10.1234/held-paper')").lastrowid
             c.execute("INSERT INTO paper_sources(paper_id,source,source_id) VALUES(?,'core','same')",(pid,))
         cycle=json.loads((self.state/'active-cycle.json').read_text())
         payload={'schema':1,'batch_id':cycle['batch_id'],'run_sequence':33,
                  'input_revision':cycle['input_revision'],'producer_id':'mini-production','environment':'production',
                  'results':[], 'normalized':{key:[] for key in exchange.SECTIONS}}
-        payload['normalized']['papers']=[{'canonical_key':'doi:new','title':'Duplicate'}]
-        payload['normalized']['paper_sources']=[{'canonical_key':'doi:new','source':'core','source_id':'same'}]
+        payload['normalized']['papers']=[{'canonical_key':'doi:10.1234/held-paper','title':'Old','doi':'10.1234/held-paper'}]
+        payload['normalized']['paper_sources']=[{'canonical_key':'doi:10.1234/held-paper','source':'core','source_id':'same'}]
         exchange.atomic_json(self.state/'pipeline-outbox.json',payload)
         exchange.atomic_json(self.state/'sequence.json',{'sequence':32})
         original=(self.state/'pipeline-outbox.json').read_bytes()
@@ -209,6 +211,11 @@ class IdentityHoldHttpsTests(unittest.TestCase):
         self.assertEqual((capsule/'pipeline-outbox.json').read_bytes(),original)
         preserved=self.mini/'data/local.pdf'; preserved.write_bytes(b'local PDF')
         secret=self.mini/'private.env'; secret.write_bytes(b'private identity')
+        from paper_agents.core_identity_repair import merge_identity
+        with connect_db(self.mdb) as c:
+            local_keep=c.execute("SELECT id FROM papers WHERE canonical_key='core:same'").fetchone()[0]
+            merge_identity(c,payload,local_keep,pid)
+            c.execute("INSERT INTO papers(canonical_key,title) VALUES('mini-history-kept','Keep local history')")
         self.cli_env['PAPER_AGENT_ROUTINE_SYNC']='1'
         helper=self.root/'stage.py'
         helper.write_text("""import os,sys
@@ -230,9 +237,10 @@ WholeCycleTests.stages(SimpleNamespace(mini=mini,mdb=mini/'data/paper_agent.db')
         self.assertEqual(preserved.read_bytes(),b'local PDF')
         self.assertEqual(secret.read_bytes(),b'private identity')
         with sqlite3.connect(capsule/'paper_agent.db') as held_db:
-            self.assertIsNotNone(held_db.execute("SELECT 1 FROM papers WHERE canonical_key='doi:new'").fetchone())
+            self.assertIsNotNone(held_db.execute("SELECT 1 FROM papers WHERE canonical_key='doi:10.1234/held-paper'").fetchone())
         with connect_db(self.mdb) as c:
-            self.assertIsNone(c.execute("SELECT 1 FROM papers WHERE canonical_key='doi:new'").fetchone())
+            self.assertIsNone(c.execute("SELECT 1 FROM papers WHERE canonical_key='doi:10.1234/held-paper'").fetchone())
+            self.assertIsNotNone(c.execute("SELECT 1 FROM papers WHERE canonical_key='mini-history-kept'").fetchone())
             self.assertEqual(c.execute("SELECT value_json FROM openalex_search_state WHERE key='cursor'").fetchone()[0],'{"next":42}')
         self.assertEqual(json.loads((self.state/'sequence.json').read_text())['sequence'],34)
         self.assertEqual((capsule/'pipeline-outbox.json').read_bytes(),original)

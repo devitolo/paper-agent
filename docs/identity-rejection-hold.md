@@ -1,87 +1,58 @@
-# Held identity-conflict deliveries
+# Held identity-conflict deliveries and routine recovery
 
-This change is prepared locally and has not been deployed. It extends the existing
-Mini whole-cycle exchange; AWS identity validation remains unchanged.
+Identity-conflict results are preserved as Held / Needs review. They are never
+acknowledged as applied or automatically replayed. Source publication and the
+lower-level delivery function reject sends while recovery is required.
 
-Only HTTP 422 with the explicit receiver error `source alias belongs to a different paper`
-enters this path. Other failures retain their existing retry/error behavior, including
-uncertain delivery after a lost response. The existing unknown-revision handler is unchanged.
+## Routine sync only
 
-At the following source job's retry step, Mini preserves the exact rejected payload,
-a consistent post-run SQLite database, the active cycle marker when present, and
-all database-referenced artifact files in a content-addressed `sync-state/held/` directory.
-A manifest records hashes, original artifact paths, batch ID, input revision, sequence,
-`Held / Needs review`, and `automatic_replay: false`. Missing or unsafe artifact paths,
-backup failures, or integrity failures stop recovery without discarding the pending payload.
-This deliberately favors preservation over continuing when evidence cannot be saved.
+Following the operator's November 4 direction, identity recovery uses the existing
+`/sync/routine` download and `pull_routine()` merge. It does not call `/sync/backup`,
+replace the working database, import full history from AWS, or raise backup limits.
+The legacy `identity-restore-required.json` filename is retained for compatibility
+with already-held batches; it now requires a routine refresh after explicit local
+identity reconciliation. A genuine unresolved identity conflict remains an error;
+the source-alias validation guard is unchanged.
 
-The capsule is flushed and committed before a durable restore-required marker is
-published and the active retry slot is released. Recovery revalidates file hashes and
-can finish after an interruption. The held payload is never sent automatically and is
-never recorded as applied. `recovery-status.json` reports `held-needs-review`; this is
-local exchange status, not a new AWS Health reporting channel.
+The held capsule retains exact payload bytes/hash, post-run database, cycle marker
+when present, referenced artifact bytes, and a manifest. Failure to preserve evidence
+stops recovery. The acknowledged sequence remains separate from the reservation:
+held sequence 33 is not success; later publications allocate at least 34. Future
+publication of corrected held results requires explicit reconciliation and a fresh
+reviewed identity/sequence, never automatic replay of the original payload.
 
-Before subsequent discovery, the existing validated `/sync/backup` restore replaces
-the contaminated working database once, even when normal routine JSON sync is enabled.
-Existing restore checks, SQLite backup, and Mini cursor preservation apply. PDFs,
-credentials, runtime identity and logs remain on Mini. Serving configuration/profile
-are refreshed from AWS. The failed run remains in the held database. Failed restore
-leaves the restore-required marker intact and discovery cannot proceed.
+## Explicit repair of the existing CORE duplicate
 
-`reserved-sequence.json` tracks assigned publication numbers separately from
-`sequence.json`, which still records acknowledged delivery. Both source and Health
-publication allocate above the greater counter. Holding sequence 33 reserves it without
-claiming success; the next result uses at least 34. Crashes may leave harmless gaps.
+`paper_agents.core_identity_repair` is a one-batch operator command, never invoked
+by cron or automatic sync. It is restricted to held batch
+`176efddd00774894a8f36e9ba30141be`, capsule
+`0cd8aa34a1522279d7b6bb3010d16abe2b1a0ca1d0be9ecab8d2d9b088f44f76`,
+accepted sequence 32 and reserved sequence 33, with no active/pending work.
 
-A held batch needs explicit later reconciliation against the canonical AWS identity
-graph. Once a later sequence is accepted, the original held batch must not be replayed
-unchanged; any approved corrected publication needs a new batch identity/sequence and
-a supersession record. No reconciliation, automatic expiry, deletion, or repair is
-implemented here. Existing held evidence may consume disk; insufficient storage fails
-closed. Normal scheduling and existing leases remain unchanged.
+The reviewed rows share title and CORE source `313009506`. Established paper 991
+has canonical key `core:313009506`; duplicate 1783 has DOI
+`10.5281/zenodo.18302941`. The repair validates titles, DOI/arXiv and source ownership,
+then plans against a disposable consistent SQLite copy. In apply mode it saves a
+separate consistent pre-repair backup, verifies held artifact hashes/live bytes,
+and updates the existing database transactionally under existing job/sync leases.
 
-Tests cover the real HTTPS rejection/restore/next-source receipt, exact evidence
-preservation, strict classification, cursor preservation, sequence allocation, crash
-recovery, corrupted evidence, failed backup/artifact copy/restore, uncertain ACK, and
-prevention of operational publication from the rejected working state.
+All declared foreign-key references move from 1783 to 991; evaluations,
+recommendations, Scout history, feedback and artifact IDs are retained. If two
+artifact registrations share the same path, the duplicate registration points to
+its verified identical copy already in the held capsule. Neither artifact record
+nor file is discarded. The redundant paper row is removed only after remapping;
+its original complete row remains in the held database, pre-repair backup and
+repair audit. Any unexpected identity, constraint conflict, row loss or FK/integrity
+failure rolls back the transaction. The database inode is not replaced.
 
-## Local validation — November 3, 2026
-
-Command (run from the isolated worktree):
+Dry run is the default:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 /tmp/paper-qa-tools/bin/python -B -m unittest \
-  tests.sync_exchange.test_identity_hold \
-  tests.sync_exchange.test_whole_cycle \
-  tests.sync_exchange.test_routine_sync \
-  tests.sync_exchange.test_http_serving \
-  tests.sync_exchange.test_exchange \
-  tests.test_operational_evidence \
-  tests.test_core_identity \
-  tests.test_mini_container_job -v
+python -m paper_agents.core_identity_repair \
+  --db-path /app/data/paper_agent.db --state-dir /app/data/sync-state
 ```
 
-Result: **79 tests run, 78 passed, 1 skipped**, no failures/errors (16.725 seconds).
-The skip is the pre-existing Linux watchdog parent-loss regression, which requires
-Linux rehearsal; it is not verified by this macOS run. The new hold module's 17
-tests passed, including the real TLS receiver and actual cron shell wrapper with
-only Docker/inference substituted by the established isolated fixture. This is not
-a live host, production Docker, or production deployment test. Existing resource
-cleanup warnings were emitted by the test suite. `git diff --check` passed with no output.
-
-## Independent QA correction — November 3, 2026
-
-Tester reproduced a crash after the durable hold marker was committed but before
-recovery removed the pending slot. The original `push()` guard covered only new
-outbox creation, so a direct push could retransmit the held pending batch.
-The restore-required guard now runs unconditionally at entry to both `push()` and
-`deliver_outbox()`, before transport or receipt/sequence updates. The independent
-six-case adversarial QA module is included unchanged, plus a direct lower-level
-delivery regression. Both assert zero transport calls and unchanged acknowledged
-sequence/evidence at this crash boundary.
-
-Final local command adds `tests.sync_exchange.test_identity_hold_adversarial_qa` to
-the validation command above: **86 tests run, 85 passed, 1 existing Linux-only skip**,
-no failures/errors (17.327 seconds). `git diff --check` passes. Independent Linux and
-frozen-AWS continuation verification of this correction is requested; no rollout,
-replay, push or production mutation has occurred.
+Use `--apply` only for the explicitly authorized repair. It retains the recovery
+marker; the subsequent normal routine merge clears it only on success. The repair
+never publishes results, starts discovery, changes cursors/configuration/secrets,
+or advances acknowledged/reserved producer sequences.

@@ -1,3 +1,8 @@
+> Historical proposal. The November 4 operator-approved correction uses the
+> existing routine merge and an explicit two-row CORE identity repair, without
+> database replacement or automatic held-batch replay. See
+> [identity-rejection-hold.md](identity-rejection-hold.md) for the current procedure.
+
 # Existing CORE conflict recovery — proposal, not executed
 
 Known Nov 1 case: AWS paper 991 already owns the CORE source alias with a core-based

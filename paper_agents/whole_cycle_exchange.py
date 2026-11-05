@@ -290,11 +290,11 @@ def hold_identity_outbox(db_path, root, state, error):
 
 
 def pull_after_identity_hold(db_path, root, state, url):
-    """Use the existing authoritative replacement once, never a contaminated merge."""
+    """Resume the existing routine merge after explicit identity reconciliation."""
     state = Path(state)
     resume_identity_hold(state)
-    backup = download_backup(url, state/'snapshots', endpoint='/sync/backup')
-    result = pull(db_path, root, state, backup)
+    snapshot = download_routine_snapshot(url)
+    result = pull_routine(db_path, root, state, snapshot)
     (state/'identity-restore-required.json').unlink()
     _sync_directory(state)
     return result
